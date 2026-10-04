@@ -214,9 +214,33 @@
     ;; internal boolean representation is simply i1.
     (is (search "declare zeroext i1 @verona_bool_invert(i1 zeroext)" ir))
     (is (= 42
-           (compile-and-run-native-with-link-arguments
-            source
-            (list (namestring (native-c-fixture "tests/native/c/bool.c"))))))))
+	   (compile-and-run-native-with-link-arguments
+	    source
+	    (list (namestring (native-c-fixture "tests/native/c/bool.c"))))))))
+
+(test annotates-all-narrow-c-abi-integers
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(external-function narrow \"verona_narrow\" (i8 i16 u8 u16 char) i8)"))
+         (backend (verona.backend.llvm:generate-llvm
+                   (compilation-unit-semantic-program unit)))
+         (ir (verona.backend.llvm:print-llvm-module backend)))
+    (is (search "declare signext i8 @verona_narrow(i8 signext, i16 signext, i8 zeroext, i16 zeroext, i8 zeroext)" ir))))
+
+(test crosses-c-aggregate-values-and-callbacks
+  (is (= 42
+         (compile-and-run-native-with-link-arguments
+          "(type pair-value (product (left i32) (right i32)))
+           (type choice-value (sum (none) (integer i32) (floating f64)))
+           (external-function pair-sum \"verona_pair_value_sum\" (pair-value) i32)
+           (external-function pair-make \"verona_pair_value_make\" (i32 i32) pair-value)
+           (external-function array-sum \"verona_i32x2_sum\" ((array i32 2)) i32)
+           (external-function choice-read \"verona_choice_value_read\" (choice-value) i32)
+           (external-function apply \"verona_apply_i32\" ((pointer (function (i32) i32)) i32) i32)
+           (function increment ((value i32)) i32 (+ value 1))
+           (function main () exit-code
+             (apply increment 41))"
+          (list (namestring (native-c-fixture "tests/native/c/abi_values.c")))))))
 
 (test calls-a-private-c-struct-through-an-opaque-handle
   ;; The fixture's struct definition is private to C.  Verona observes only

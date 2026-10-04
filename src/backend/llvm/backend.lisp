@@ -21,6 +21,11 @@
              :reader llvm-backend-bindings)
    (types :initform (make-hash-table :test #'eq)
           :reader llvm-backend-types)
+   ;; C ABI types are intentionally separate from internal lowering.  Today
+   ;; most layouts coincide, but this cache makes the boundary explicit and
+   ;; prevents later internal representation changes from leaking to C.
+   (c-abi-types :initform (make-hash-table :test #'eq)
+                :reader llvm-backend-c-abi-types)
    (string-literal-counter :initform 0 :accessor llvm-backend-string-literal-counter)
    (trap-function :initform nil :accessor llvm-backend-trap-function)))
 

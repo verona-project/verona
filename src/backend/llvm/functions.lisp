@@ -25,30 +25,44 @@
       (backend-fail "LLVM does not provide the zeroext ABI attribute"))
     (llvm-create-enum-attribute (llvm-backend-context backend) kind 0)))
 
-(defun add-c-abi-boolean-signature-attributes (backend function parameter-types result-type)
-  "Annotate C `_Bool` positions so LLVM applies their target ABI extensions.
+(defun c-abi-sign-extension-attribute (backend)
+  (let ((kind (llvm-enum-attribute-kind "signext" 7)))
+    (when (zerop kind)
+      (backend-fail "LLVM does not provide the signext ABI attribute"))
+    (llvm-create-enum-attribute (llvm-backend-context backend) kind 0)))
 
-LLVM represents bool as i1, while several target C ABIs extend `_Bool` in
-register arguments and results.  Zero-extension is part of that boundary
-contract, not Verona's internal calling convention."
-  (when (typep result-type 'verona:boolean-type)
-    (llvm-add-attribute-at-index function 0 (c-abi-zero-extension-attribute backend)))
+(defun c-abi-extension-attribute (backend type)
+  "Return the mandatory C ABI extension attribute for narrow TYPE, if any."
+  (cond ((typep type 'verona:boolean-type) (c-abi-zero-extension-attribute backend))
+        ((typep type 'verona:char-type) (c-abi-zero-extension-attribute backend))
+        ((and (typep type 'verona:integer-type)
+              (member (verona:integer-type-width type) '(8 16)))
+         (if (verona:integer-type-signed type)
+             (c-abi-sign-extension-attribute backend)
+             (c-abi-zero-extension-attribute backend)))))
+
+(defun add-c-abi-boolean-signature-attributes (backend function parameter-types result-type)
+  "Annotate every narrow scalar position with its C ABI register extension.
+
+`bool` and `char` use zero extension; signed i8/i16 use sign extension and
+unsigned i8/u16 use zero extension.  The historical name is retained for API
+compatibility with callers that only knew about `_Bool`."
+  (let ((attribute (c-abi-extension-attribute backend result-type)))
+    (when attribute (llvm-add-attribute-at-index function 0 attribute)))
   (loop for index from 1
         for parameter-type in parameter-types
-        when (typep parameter-type 'verona:boolean-type)
-          do (llvm-add-attribute-at-index function index
-                                          (c-abi-zero-extension-attribute backend)))
+        for attribute = (c-abi-extension-attribute backend parameter-type)
+        when attribute do (llvm-add-attribute-at-index function index attribute))
   function)
 
 (defun add-c-abi-boolean-call-attributes (backend call parameter-types result-type)
   "Make an external call site agree with its C `_Bool` declaration."
-  (when (typep result-type 'verona:boolean-type)
-    (llvm-add-call-site-attribute call 0 (c-abi-zero-extension-attribute backend)))
+  (let ((attribute (c-abi-extension-attribute backend result-type)))
+    (when attribute (llvm-add-call-site-attribute call 0 attribute)))
   (loop for index from 1
         for parameter-type in parameter-types
-        when (typep parameter-type 'verona:boolean-type)
-          do (llvm-add-call-site-attribute call index
-                                            (c-abi-zero-extension-attribute backend)))
+        for attribute = (c-abi-extension-attribute backend parameter-type)
+        when attribute do (llvm-add-call-site-attribute call index attribute))
   call)
 
 (defun protocol-operation-implementation-llvm-name (declaration)
@@ -89,7 +103,7 @@ contract, not Verona's internal calling convention."
          (function (llvm:add-function
                     (llvm-backend-module backend)
                     (verona:semantic-external-function-declaration-external-name declaration)
-                    (lower-type backend
+                    (lower-c-abi-type backend
                                 (verona:semantic-external-function-declaration-type declaration)))))
     (add-c-abi-boolean-signature-attributes
      backend
@@ -137,7 +151,7 @@ contract, not Verona's internal calling convention."
                          (verona:native-export-binding-function export)))
          (wrapper (llvm:add-function (llvm-backend-module backend)
                                      (verona:native-export-binding-external-name export)
-                                     (lower-type backend function-type)))
+                                     (lower-c-abi-type backend function-type)))
          (block (llvm:append-basic-block wrapper "entry" :context (llvm-backend-context backend))))
     ;; Exported functions are the first symbols with an explicit visibility
     ;; contract.  Their Verona ABI implementation is local to this module;
@@ -152,9 +166,16 @@ contract, not Verona's internal calling convention."
      (verona:function-type-parameters function-type)
      (verona:function-type-result function-type))
     (llvm:position-builder-at-end (llvm-backend-builder backend) block)
-    (llvm:build-ret (llvm-backend-builder backend)
-                    (llvm:build-call (llvm-backend-builder backend)
-                                     verona-function (llvm:params wrapper) "verona.export"))
+    (let* ((parameters (verona:function-type-parameters function-type))
+           (result-type (verona:function-type-result function-type))
+           (result (llvm:build-call
+                    (llvm-backend-builder backend) verona-function
+                    (mapcar (lambda (parameter type)
+                              (c-abi-value-to-internal backend parameter type))
+                            (llvm:params wrapper) parameters)
+                    "verona.export")))
+      (llvm:build-ret (llvm-backend-builder backend)
+                      (c-abi-value-from-internal backend result result-type)))
     wrapper))
 
 (defun emit-global-constant (backend expression)

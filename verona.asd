@@ -22,6 +22,7 @@
                (:file "src/backend/llvm/expressions")
                (:file "src/backend/llvm/functions")
                (:file "src/backend/llvm/module")
+               (:file "src/backend/llvm/c-header")
                (:file "src/backend/llvm/codegen")))
 
 (asdf:defsystem #:verona/compiler

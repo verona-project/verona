@@ -331,6 +331,9 @@ the semantic type of a unit expression remains UnitType."
 (defclass semantic-array-type-syntax (semantic-type-syntax)
   ((element-type :initarg :element-type :reader semantic-array-type-syntax-element-type)
    (length :initarg :length :reader semantic-array-type-syntax-length)))
+(defclass semantic-function-type-syntax (semantic-type-syntax)
+  ((parameters :initarg :parameters :reader semantic-function-type-syntax-parameters)
+   (result :initarg :result :reader semantic-function-type-syntax-result)))
 
 (defclass for-clause ()
   ((syntax :initarg :syntax :reader for-clause-syntax)
@@ -580,6 +583,11 @@ the semantic type of a unit expression remains UnitType."
 (defclass conversion-expression (primitive-call) ())
 (defclass pointer-cast-expression (semantic-expression)
   ((operand :initarg :operand :reader pointer-cast-expression-operand)))
+;; Function declarations lower to LLVM function addresses.  Retain the
+;; language-level decay explicitly so ordinary Verona function values remain
+;; distinct from the C callback pointer representation.
+(defclass function-pointer-expression (semantic-expression)
+  ((operand :initarg :operand :reader function-pointer-expression-operand)))
 (defclass construct-expression (semantic-expression)
   ((product-type :initarg :product-type :reader construct-expression-product-type)
    (fields :initarg :fields :reader construct-expression-fields)))
@@ -954,6 +962,19 @@ the following type pass can turn it into canonical VERONA-TYPE objects."
 	          (make-instance 'semantic-array-type-syntax :syntax syntax
 	                         :element-type (resolve-type-syntax scope (second elements))
 	                         :length length)))
+	       ((string= (verona-name-value head) "function")
+	        (unless (= (length elements) 3)
+	          (error 'semantic-error :syntax syntax
+	                 :message "function requires a parameter list and result type"))
+	        (unless (verona-list-p (syntax-datum (second elements)))
+	          (error 'semantic-error :syntax (second elements)
+	                 :message "function parameters must be a list"))
+	        (make-instance 'semantic-function-type-syntax :syntax syntax
+	                       :parameters
+	                       (mapcar (lambda (parameter)
+	                                 (resolve-type-syntax scope parameter))
+	                               (verona-list-elements (syntax-datum (second elements))))
+	                       :result (resolve-type-syntax scope (third elements))))
 	       (t (error 'semantic-error :syntax head-syntax
 	                 :message "unknown type constructor")))))
 	  (t (error 'semantic-error :syntax syntax :message "expected a type")))))
@@ -1044,6 +1065,13 @@ the following type pass can turn it into canonical VERONA-TYPE objects."
 	            :message "array element type must be sized"))
 	   (type-context-array-type type-context element-type
 	                            (semantic-array-type-syntax-length resolved-type-syntax))))
+	((typep resolved-type-syntax 'semantic-function-type-syntax)
+	 (type-context-function-type
+	  type-context
+	  (mapcar (lambda (parameter) (resolve-type type-context parameter program))
+	          (semantic-function-type-syntax-parameters resolved-type-syntax))
+	  (resolve-type type-context
+	                (semantic-function-type-syntax-result resolved-type-syntax) program)))
 	(t (error "Unknown resolved type syntax ~S" resolved-type-syntax))))
 
 (define-condition duplicate-type-parameter-error (semantic-error) ()
@@ -2013,13 +2041,36 @@ recursive call can refer to the same concrete LLVM function."
   type)
 
 (defun c-abi-value-type-p (type)
-  "Whether TYPE is passed or returned as a first-stage C ABI value.
+  "Whether TYPE has a complete C object representation by value.
 
-BOOL maps to the target C ABI's `_Bool` representation."
-  (or (typep type 'boolean-type)
-      (typep type 'integer-type)
-      (typep type 'float-type)
-      (typep type 'pointer-type)))
+Pointers are the sole admissible representation of opaque objects and
+functions.  VOID is intentionally excluded here: it is a result-only ABI
+marker, never a C object or aggregate member."
+  (cond ((or (typep type 'boolean-type)
+             (typep type 'char-type)
+             (typep type 'integer-type)
+             (typep type 'float-type)) t)
+        ((typep type 'pointer-type)
+         (let ((pointee (pointer-type-pointee type)))
+           (or (typep pointee '(or void-type opaque-type))
+               (and (typep pointee 'function-type)
+                    (every #'c-abi-value-type-p (function-type-parameters pointee))
+                    (or (typep (function-type-result pointee) 'void-type)
+                        (c-abi-value-type-p (function-type-result pointee))))
+               (c-abi-value-type-p pointee))))
+        ((typep type 'array-type)
+         (c-abi-value-type-p (array-type-element-type type)))
+        ((typep type 'product-type)
+         (every (lambda (field) (c-abi-value-type-p (product-field-type field)))
+                (product-type-fields type)))
+        ((typep type 'sum-type)
+         (every (lambda (alternative)
+                  (every #'c-abi-value-type-p
+                         (sum-alternative-payload-types alternative)))
+                (sum-type-alternatives type)))
+        ;; Unit, never, void, unresolved generic parameters, function values,
+        ;; and opaque values have no C by-value ABI representation.
+        (t nil)))
 
 (defun validate-external-function-signature (declaration)
   "Reject unsupported C ABI shapes before backend lowering."
@@ -2028,7 +2079,7 @@ BOOL maps to the target C ABI's `_Bool` representation."
     (error 'semantic-error
            :syntax (declaration-source
                     (semantic-declaration-source-declaration declaration))
-           :message "external function parameters must use C ABI value types"))
+           :message "external function parameters must use C-compatible value types"))
   (unless (or (typep (semantic-external-function-declaration-result-type declaration)
                      'void-type)
               (c-abi-value-type-p
@@ -2036,7 +2087,7 @@ BOOL maps to the target C ABI's `_Bool` representation."
     (error 'semantic-error
            :syntax (declaration-source
                     (semantic-declaration-source-declaration declaration))
-           :message "external function result must use a C ABI value type or void"))
+           :message "external function result must use a C-compatible value type or void"))
   declaration)
 
 (defun resolve-native-exports (program modules)
@@ -2053,13 +2104,12 @@ BOOL maps to the target C ABI's `_Bool` representation."
             (error 'invalid-native-export :syntax (native-export-spec-source spec)
                    :message "duplicate native C export name"))
           (let ((signature (semantic-function-declaration-type semantic)))
-            ;; This is the same scalar/pointer rule used by external-function,
-            ;; in the reverse direction. Unit, products, and sums have no C
-            ;; ABI contract yet.
+            ;; Native exports use the same recursive C object contract as
+            ;; imports.  VOID is meaningful only for an external result.
             (unless (and (every #'c-abi-value-type-p (function-type-parameters signature))
                          (c-abi-value-type-p (function-type-result signature)))
               (error 'invalid-native-export :syntax (native-export-spec-source spec)
-                     :message "native export must use C ABI value types")))
+                     :message "native export must use C-compatible value types")))
           (push (native-export-spec-external-name spec) seen)
           (push (make-instance 'native-export-binding :function semantic
                                :external-name (native-export-spec-external-name spec)
@@ -2427,11 +2477,15 @@ LET bindings are addressable but remain immutable through their source name."
 	                                 :arguments arguments :function specialization
                                  :substitution substitution :type result-type)))))))))
     (let* ((callee (infer-expression head scope))
-	 (callee-type (expression-type callee)))
-    (unless (typep callee-type 'function-type)
+	 (callee-type (expression-type callee))
+         (callable-type (if (and (typep callee-type 'pointer-type)
+                                 (typep (pointer-type-pointee callee-type) 'function-type))
+                            (pointer-type-pointee callee-type)
+                            callee-type)))
+    (unless (typep callable-type 'function-type)
       (error 'semantic-not-callable-error :syntax (first elements)
 					  :actual callee-type))
-    (let ((parameter-types (function-type-parameters callee-type))
+    (let ((parameter-types (function-type-parameters callable-type))
 	  (argument-syntax (rest elements)))
       (unless (= (length argument-syntax) (length parameter-types))
 	(error 'wrong-argument-count-error :syntax syntax
@@ -2451,7 +2505,7 @@ LET bindings are addressable but remain immutable through their source name."
 						 :float-truncate))))
 	      (make-instance (if conversion-p 'conversion-expression 'primitive-call)
 			     :syntax syntax :callee callee :arguments arguments
-			     :operation operation :type (function-type-result callee-type)))
+		     :operation operation :type (function-type-result callable-type)))
 	    (let ((external (and (typep binding 'external-function-declaration)
 				 (semantic-program-declaration
 				  (semantic-scope-owning-program scope) binding))))
@@ -2460,11 +2514,11 @@ LET bindings are addressable but remain immutable through their source name."
 		  ;; materializes the ordinary Verona unit value.
 		  (make-instance 'external-call-expression :syntax syntax :callee callee
 				 :arguments arguments :external-function external
-				 :type (if (typep (function-type-result callee-type) 'void-type)
+			 :type (if (typep (function-type-result callable-type) 'void-type)
 					  (type-context-unit-type (semantic-scope-owning-type-context scope))
-					  (function-type-result callee-type)))
+					  (function-type-result callable-type)))
 		  (make-instance 'semantic-call :syntax syntax :callee callee
-				 :arguments arguments :type (function-type-result callee-type)))))))))))
+			 :arguments arguments :type (function-type-result callable-type)))))))))))
 
 (defun infer-field-expression (syntax scope)
   (let ((arguments (rest (verona-list-elements (syntax-datum syntax)))))
@@ -2977,11 +3031,21 @@ therefore visible, while the binding being built cannot see itself."
 	  ((and (floatp datum) (typep expected-type 'float-type))
 	   (make-instance 'float-literal :syntax syntax :value datum :type expected-type))
 	  (t (let ((expression (infer-value-expression syntax scope)))
-	       (unless (or (typep (expression-type expression) 'never-type)
-		   (compatible-p (expression-type expression) expected-type))
-		 (error 'type-mismatch-error :syntax syntax
-				     :actual (expression-type expression) :expected expected-type))
-	       expression)))))
+	       (cond ((and (typep expected-type 'pointer-type)
+	                   (typep (pointer-type-pointee expected-type) 'function-type)
+	                   (typep (expression-type expression) 'function-type)
+	                   (same-type-p (expression-type expression)
+	                                (pointer-type-pointee expected-type)))
+	              ;; C function designators decay to function pointers at the
+	              ;; boundary.  This is deliberately contextual: ordinary
+	              ;; Verona calls retain their FunctionType.
+	              (make-instance 'function-pointer-expression :syntax syntax
+	                             :operand expression :type expected-type))
+	             ((or (typep (expression-type expression) 'never-type)
+	                  (compatible-p (expression-type expression) expected-type))
+	              expression)
+	             (t (error 'type-mismatch-error :syntax syntax
+		               :actual (expression-type expression) :expected expected-type))))))))
 
 ;;; Backend-readiness validation ------------------------------------------
 
@@ -3238,6 +3302,13 @@ byte value; text literals are NUL-terminated pointers to U8."
 		      (typep (pointer-type-pointee
 			      (expression-type (pointer-cast-expression-operand expression))) 'void-type)))
 	(backend-validation-fail expression "pointer cast is not a void pointer conversion")))
+    ((typep expression 'function-pointer-expression)
+     (validate-expression-for-backend (function-pointer-expression-operand expression))
+     (unless (and (typep (expression-type expression) 'pointer-type)
+                  (typep (pointer-type-pointee (expression-type expression)) 'function-type)
+                  (same-type-p (expression-type (function-pointer-expression-operand expression))
+                               (pointer-type-pointee (expression-type expression))))
+       (backend-validation-fail expression "function pointer decay is not fully typed")))
     ((typep expression 'store-expression)
      (validate-expression-for-backend (assignment-expression-target expression))
      (validate-expression-for-backend (assignment-expression-value expression))

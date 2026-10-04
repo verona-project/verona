@@ -458,6 +458,10 @@ compare the LLVM ABI directly instead of relying on frontend object identity."
      ;; Pointer casts involving void* change only the Verona semantic type;
      ;; LLVM opaque pointers require no generated conversion instruction.
      (emit-value backend (verona:pointer-cast-expression-operand expression)))
+    ((typep expression 'verona:function-pointer-expression)
+     ;; Function declarations already denote their LLVM address.  The semantic
+     ;; node records the C-specific decay; opaque LLVM pointers need no cast.
+     (emit-value backend (verona:function-pointer-expression-operand expression)))
     ((typep expression 'verona:store-expression)
      (llvm:build-store (llvm-backend-builder backend)
                        (emit-value backend (verona:assignment-expression-value expression))
@@ -490,9 +494,11 @@ compare the LLVM ABI directly instead of relying on frontend object identity."
     ((typep expression 'verona:external-call-expression)
      (let* ((external (verona:external-call-expression-external-function expression))
 	    (function (backend-binding backend external))
-	    (arguments (mapcar (lambda (argument) (emit-value backend argument))
-			       (verona:semantic-call-arguments expression)))
 	    (parameter-types (verona:semantic-external-function-declaration-parameter-types external))
+	    (arguments (mapcar (lambda (argument type)
+                                 (c-abi-value-from-internal backend
+                                                            (emit-value backend argument) type))
+			       (verona:semantic-call-arguments expression) parameter-types))
 	    (result-type (verona:semantic-external-function-declaration-result-type external)))
        (if (typep (verona:semantic-external-function-declaration-result-type external)
 		  'verona:void-type)
@@ -501,26 +507,36 @@ compare the LLVM ABI directly instead of relying on frontend object identity."
 	     (unit-value backend expression))
 	   (let ((call (llvm:build-call (llvm-backend-builder backend) function arguments "call")))
 	     (add-c-abi-boolean-call-attributes backend call parameter-types result-type)
-	     (if tail-caller
-		 (mark-tail-call backend call tail-caller external)
-		 call)))))
+	     (let ((result (c-abi-value-to-internal backend call result-type)))
+	       (if tail-caller
+		   (mark-tail-call backend result tail-caller external)
+		   result))))))
     ((typep expression 'verona:semantic-call)
      (let ((callee (verona:semantic-call-callee expression)))
-       (unless (and (typep callee 'verona:reference-expression)
-                    (typep (verona:semantic-reference-binding callee)
-                           '(or verona:function-declaration
-                                verona:semantic-function-specialization
-                                verona:semantic-protocol-operation-implementation
-                                verona:semantic-generic-implementation)))
-         (backend-fail "ordinary call has no resolved concrete callable"))
-       (let* ((declaration (verona:semantic-reference-binding callee))
+       (let* ((callee-type (verona:expression-type callee))
+              (callback-type (and (typep callee-type 'verona:pointer-type)
+                                  (verona:pointer-type-pointee callee-type)))
+              (direct-declaration
+                (and (typep callee 'verona:reference-expression)
+                     (typep (verona:semantic-reference-binding callee)
+                            '(or verona:function-declaration
+                                 verona:semantic-function-specialization
+                                 verona:semantic-protocol-operation-implementation
+                                 verona:semantic-generic-implementation))
+                     (verona:semantic-reference-binding callee)))
               (call (llvm:build-call
                      (llvm-backend-builder backend)
-                     (backend-binding backend declaration)
+                     (if direct-declaration
+                         (backend-binding backend direct-declaration)
+                         (emit-value backend callee))
                      (mapcar (lambda (argument) (emit-value backend argument))
                              (verona:semantic-call-arguments expression))
                      "call")))
-         (if tail-caller
-             (mark-tail-call backend call tail-caller declaration)
+         (when (typep callback-type 'verona:function-type)
+           (add-c-abi-boolean-call-attributes
+            backend call (verona:function-type-parameters callback-type)
+            (verona:function-type-result callback-type)))
+         (if direct-declaration
+             (if tail-caller (mark-tail-call backend call tail-caller direct-declaration) call)
              call))))
     (t (backend-fail "expression ~S has no LLVM value lowering" expression))))

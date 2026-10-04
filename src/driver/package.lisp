@@ -10,6 +10,7 @@
                 #:target-configuration-features #:generate-llvm
                 #:verify-llvm-module #:emit-object #:add-platform-entry-wrapper
                 #:hide-verona-symbols
+                #:generate-c-header
                 #:llvm-backend-pointer-width #:llvm-backend-data-layout)
   (:export
    #:compiler-driver #:make-compiler-driver #:compiler-driver-search-paths

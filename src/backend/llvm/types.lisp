@@ -114,6 +114,77 @@ whose members are the alternative payload structs."
                 (llvm-name (verona:defined-type-declaration type))))
               (t (backend-fail "Verona type ~S has no LLVM representation" type))))))
 
+(defun lower-c-abi-type (backend type)
+  "Return TYPE's LLVM representation at a C ABI boundary.
+
+This is deliberately not an alias for LOWER-TYPE: callers must opt into the
+C contract.  Product and sum identities are shared with internal lowering so
+an export wrapper can forward them without a representation conversion.  A C
+array wrapper is lowered as a distinct named LLVM struct, matching the
+single-member wrapper emitted in the generated C declaration.
+"
+  (or (gethash type (llvm-backend-c-abi-types backend))
+      (setf (gethash type (llvm-backend-c-abi-types backend))
+            (cond
+              ((typep type '(or verona:boolean-type verona:char-type
+                                verona:integer-type verona:float-type
+                                verona:product-type
+                                verona:sum-type))
+               (lower-type backend type))
+              ((typep type 'verona:array-type)
+               ;; C has no by-value array parameter.  Its contract is the
+               ;; named single-member wrapper emitted in the public header.
+               (let ((struct (llvm:struct-create-named
+                              (llvm-backend-context backend)
+                              (format nil "verona.c.array.~A" (llvm-type-mangle type)))))
+                 (llvm:struct-set-body
+                  struct
+                  (list (llvm:array-type
+                         (lower-c-abi-type backend (verona:array-type-element-type type))
+                         (verona:array-type-length type))))
+                 struct))
+              ((typep type 'verona:pointer-type)
+               ;; LLVM opaque pointers do not encode pointee type.  Still
+               ;; recurse to make the C ABI contract checked and memoized,
+               ;; including pointer-to-function callbacks.
+               (let ((pointee (verona:pointer-type-pointee type)))
+                 (unless (typep pointee '(or verona:void-type verona:opaque-type))
+                   (lower-c-abi-type backend pointee))
+                 (llvm:pointer-type (llvm:int-type 8 :context (llvm-backend-context backend)))))
+              ((typep type 'verona:function-type)
+               (llvm:function-type
+                (lower-c-abi-type backend (verona:function-type-result type))
+                (mapcar (lambda (parameter) (lower-c-abi-type backend parameter))
+                        (verona:function-type-parameters type))))
+              ((typep type 'verona:void-type)
+               (llvm:void-type :context (llvm-backend-context backend)))
+              (t (backend-fail "Verona type ~S has no C ABI representation" type))))))
+
+(defun c-abi-value-from-internal (backend value type)
+  "Convert an internal value to TYPE's C ABI wrapper representation."
+  (if (typep type 'verona:array-type)
+      (let* ((c-type (lower-c-abi-type backend type))
+             (builder (llvm-backend-builder backend))
+             (address (llvm:build-alloca builder c-type "c.array.wrapper"))
+             (elements-address (llvm:build-struct-gep builder address 0
+                                                      "c.array.elements" c-type)))
+        (unless c-type (backend-fail "C array wrapper type was not created"))
+        (llvm:build-store builder value elements-address)
+        (llvm:build-load builder address "c.array.value" c-type))
+      value))
+
+(defun c-abi-value-to-internal (backend value type)
+  "Convert TYPE's C ABI wrapper representation to the internal value type."
+  (if (typep type 'verona:array-type)
+      (let* ((builder (llvm-backend-builder backend))
+             (c-type (lower-c-abi-type backend type))
+             (address (llvm:build-alloca builder c-type "c.array.wrapper"))
+             (elements-address (llvm:build-struct-gep builder address 0
+                                                      "c.array.elements" c-type)))
+        (llvm:build-store builder value address)
+        (llvm:build-load builder elements-address "array.value" (lower-type backend type)))
+      value))
+
 (defun unit-value (backend expression)
   (declare (ignore expression))
   (llvm:const-int (lower-type backend (verona:type-context-unit-representation-type

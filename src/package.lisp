@@ -356,6 +356,8 @@
    #:conversion-expression
    #:pointer-cast-expression
    #:pointer-cast-expression-operand
+   #:function-pointer-expression
+   #:function-pointer-expression-operand
    #:construct-expression
    #:construct-expression-product-type
    #:construct-expression-fields
@@ -422,6 +424,9 @@
    #:semantic-array-type-syntax
    #:semantic-array-type-syntax-element-type
    #:semantic-array-type-syntax-length
+   #:semantic-function-type-syntax
+   #:semantic-function-type-syntax-parameters
+   #:semantic-function-type-syntax-result
    #:verona-type
    #:type-parameter
    #:type-parameter-declaration

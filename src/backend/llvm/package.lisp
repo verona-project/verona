@@ -39,6 +39,10 @@
    #:add-platform-entry-wrapper
    #:validate-executable-entry-point
    #:lower-type
+   #:lower-c-abi-type
+   #:c-abi-value-from-internal
+   #:c-abi-value-to-internal
+   #:generate-c-header
    #:emit-value
    #:emit-place
    #:generate-llvm

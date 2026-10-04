@@ -247,6 +247,10 @@ explicit #+/#- conditions without changing LLVM's CPU FEATURES."
                                           (:darwin "dylib") (:linux "so")))))
      directory)))
 
+(defun library-header-path (output)
+  "Place a generated C header beside a static or shared library artifact."
+  (make-pathname :type "h" :defaults (pathname output)))
+
 (defun temporary-object-path ()
   (merge-pathnames (format nil "verona-~A.o" (gensym "OBJECT-"))
                    (uiop:temporary-directory)))
@@ -307,6 +311,8 @@ in-memory LLVM module, verification, object emission, and toolchain handoff."
                    (:shared-library (toolchain-link-shared-library (compiler-driver-toolchain driver)
                                                                    object output target link-options))))
             (when (probe-file object) (delete-file object)))))
+    (when (member artifact-kind '(:static-library :shared-library))
+      (generate-c-header program (library-header-path output)))
     (make-instance (artifact-class artifact-kind) :kind artifact-kind :path output :target target)))
 
 (defun compile-file (driver pathname &rest arguments)
