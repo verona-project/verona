@@ -2013,8 +2013,11 @@ recursive call can refer to the same concrete LLVM function."
   type)
 
 (defun c-abi-value-type-p (type)
-  "Whether TYPE is passed or returned as a first-stage C ABI value."
-  (or (typep type 'integer-type)
+  "Whether TYPE is passed or returned as a first-stage C ABI value.
+
+BOOL maps to the target C ABI's `_Bool` representation."
+  (or (typep type 'boolean-type)
+      (typep type 'integer-type)
       (typep type 'float-type)
       (typep type 'pointer-type)))
 

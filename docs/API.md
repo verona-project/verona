@@ -77,7 +77,7 @@ nominal type is required.
 | `(type NAME (product FIELD...))` | Define a nominal product type. |
 | `(type NAME (sum CASE...))` | Define a nominal sum type. |
 | `(function NAME ((parameter TYPE) ...) RESULT BODY)` | Define a function. |
-| `(external-function NAME "c_name" (TYPE...) RESULT)` | Declare a C function. Parameters must use scalar or pointer C ABI types; a result may also be `void`. |
+| `(external-function NAME "c_name" (TYPE...) RESULT)` | Declare a C function. Parameters must use `bool`, numeric scalar, or pointer C ABI types; a result may also be `void`. Verona `bool` follows the target C ABI's `_Bool` convention. |
 | `(macro NAME (parameter ...) BODY)` | Define a compile-time macro. Parameters and result are syntax objects. |
 | `(constant NAME TYPE VALUE)` | Define an immutable global. |
 | `(variable NAME TYPE INITIALIZER)` | Define a mutable global. |

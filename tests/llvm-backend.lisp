@@ -197,6 +197,27 @@
     (is (search "@strlen(" ir))
     (is (not (search "__verona_000066000072000065000065" ir)))))
 
+(test crosses-the-c-bool-abi
+  ;; The C fixture receives and returns C `_Bool`, exercising the ABI in both
+  ;; directions rather than merely checking Verona's internal i1 lowering.
+  (let* ((source
+           "(external-function invert \"verona_bool_invert\" (bool) bool)
+            (function main () exit-code
+              (match (invert false)
+                (true 42)
+                (false 1)))")
+         (unit (compile-string (make-compiler) source))
+         (backend (verona.backend.llvm:generate-llvm
+                   (compilation-unit-semantic-program unit)))
+         (ir (verona.backend.llvm:print-llvm-module backend)))
+    ;; `zeroext` is required at the C ABI boundary even though Verona's
+    ;; internal boolean representation is simply i1.
+    (is (search "declare zeroext i1 @verona_bool_invert(i1 zeroext)" ir))
+    (is (= 42
+           (compile-and-run-native-with-link-arguments
+            source
+            (list (namestring (native-c-fixture "tests/native/c/bool.c"))))))))
+
 (test calls-a-private-c-struct-through-an-opaque-handle
   ;; The fixture's struct definition is private to C.  Verona observes only
   ;; its nominal pointer type, so this also exercises native linking.

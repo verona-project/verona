@@ -124,6 +124,15 @@
                'verona:void-type))
     (is (typep (verona:type-context-void-type context) 'verona:void-type))))
 
+(test accepts-bool-in-c-abi-signatures
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(external-function invert \"verona_bool_invert\" (bool) bool)
+                 (function invert-export ((value bool)) bool (%not-primitive-bool value))
+                 (native-export invert-export \"verona_bool_invert_export\")"))
+         (program (compilation-unit-semantic-program unit)))
+    (is (eq program (validate-for-backend program)))))
+
 (test rejects-void-pointer-dereference
   (signals verona:invalid-expression-error
     (compile-string

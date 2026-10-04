@@ -160,13 +160,21 @@
     (unwind-protect
          (progn
            (with-open-file (stream source :direction :output :if-exists :supersede)
-             (write-string "(function add ((a i32) (b i32)) i32 (+ a b)) (native-export add)" stream))
+             (write-string "(function add ((a i32) (b i32)) i32 (+ a b))
+                            (function invert ((value bool)) bool (%not-primitive-bool value))
+                            (native-export add)
+                            (native-export invert)" stream))
            (verona.compiler:compile-root (verona.compiler:make-compiler-driver) source
                                          :artifact-kind :static-library :output library)
            (verona.compiler:compile-root (verona.compiler:make-compiler-driver) source
                                          :artifact-kind :shared-library :output shared)
            (with-open-file (stream c-source :direction :output :if-exists :supersede)
-             (write-string "int add(int, int); int main(void) { return add(20, 22) == 42 ? 0 : 1; }" stream))
+             (write-string "#include <stdbool.h>
+                            int add(int, int);
+                            bool invert(bool);
+                            int main(void) {
+                              return add(20, 22) == 42 && invert(false) && !invert(true) ? 0 : 1;
+                            }" stream))
            (multiple-value-bind (stdout stderr status)
                (uiop:run-program (list (or (uiop:getenv "VERONA_LINKER") "clang")
                                        (namestring c-source) (namestring library)

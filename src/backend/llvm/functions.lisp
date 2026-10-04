@@ -1,5 +1,56 @@
 (in-package #:verona.backend.llvm)
 
+(cffi:defcfun ("LLVMGetEnumAttributeKindForName" llvm-enum-attribute-kind) :unsigned-int
+  (name :string)
+  (length :size))
+
+(cffi:defcfun ("LLVMCreateEnumAttribute" llvm-create-enum-attribute) :pointer
+  (context :pointer)
+  (kind :unsigned-int)
+  (value :uint64))
+
+(cffi:defcfun ("LLVMAddAttributeAtIndex" llvm-add-attribute-at-index) :void
+  (function :pointer)
+  (index :unsigned-int)
+  (attribute :pointer))
+
+(cffi:defcfun ("LLVMAddCallSiteAttribute" llvm-add-call-site-attribute) :void
+  (call :pointer)
+  (index :unsigned-int)
+  (attribute :pointer))
+
+(defun c-abi-zero-extension-attribute (backend)
+  (let ((kind (llvm-enum-attribute-kind "zeroext" 7)))
+    (when (zerop kind)
+      (backend-fail "LLVM does not provide the zeroext ABI attribute"))
+    (llvm-create-enum-attribute (llvm-backend-context backend) kind 0)))
+
+(defun add-c-abi-boolean-signature-attributes (backend function parameter-types result-type)
+  "Annotate C `_Bool` positions so LLVM applies their target ABI extensions.
+
+LLVM represents bool as i1, while several target C ABIs extend `_Bool` in
+register arguments and results.  Zero-extension is part of that boundary
+contract, not Verona's internal calling convention."
+  (when (typep result-type 'verona:boolean-type)
+    (llvm-add-attribute-at-index function 0 (c-abi-zero-extension-attribute backend)))
+  (loop for index from 1
+        for parameter-type in parameter-types
+        when (typep parameter-type 'verona:boolean-type)
+          do (llvm-add-attribute-at-index function index
+                                          (c-abi-zero-extension-attribute backend)))
+  function)
+
+(defun add-c-abi-boolean-call-attributes (backend call parameter-types result-type)
+  "Make an external call site agree with its C `_Bool` declaration."
+  (when (typep result-type 'verona:boolean-type)
+    (llvm-add-call-site-attribute call 0 (c-abi-zero-extension-attribute backend)))
+  (loop for index from 1
+        for parameter-type in parameter-types
+        when (typep parameter-type 'verona:boolean-type)
+          do (llvm-add-call-site-attribute call index
+                                            (c-abi-zero-extension-attribute backend)))
+  call)
+
 (defun protocol-operation-implementation-llvm-name (declaration)
   (let ((implementation
           (verona:semantic-protocol-operation-implementation-implementation declaration)))
@@ -40,6 +91,11 @@
                     (verona:semantic-external-function-declaration-external-name declaration)
                     (lower-type backend
                                 (verona:semantic-external-function-declaration-type declaration)))))
+    (add-c-abi-boolean-signature-attributes
+     backend
+     function
+     (verona:semantic-external-function-declaration-parameter-types declaration)
+     (verona:semantic-external-function-declaration-result-type declaration))
     (setf (backend-binding backend source) function
           (backend-binding backend declaration) function)
     function))
@@ -90,6 +146,11 @@
           (llvm:visibility verona-function) :hidden)
     (setf (llvm:linkage wrapper) :external
           (llvm:visibility wrapper) :default)
+    (add-c-abi-boolean-signature-attributes
+     backend
+     wrapper
+     (verona:function-type-parameters function-type)
+     (verona:function-type-result function-type))
     (llvm:position-builder-at-end (llvm-backend-builder backend) block)
     (llvm:build-ret (llvm-backend-builder backend)
                     (llvm:build-call (llvm-backend-builder backend)
