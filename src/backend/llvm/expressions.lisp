@@ -116,9 +116,15 @@
 			value))))
 
 (defun sum-payload-aggregate (backend sum-value alternative)
-  (llvm:build-extract-value (llvm-backend-builder backend) sum-value
-                            (1+ (verona:sum-alternative-index alternative))
-                            "sum.payload"))
+  "Load ALTERNATIVE's active payload from SUM-VALUE's shared union storage."
+  (let* ((sum-type (verona:sum-alternative-sum-type alternative))
+         (llvm-sum-type (lower-type backend sum-type))
+         (payload-type (lowered-sum-payload-type backend alternative))
+         (builder (llvm-backend-builder backend))
+         (address (llvm:build-alloca builder llvm-sum-type "sum.value"))
+         (storage (llvm:build-struct-gep builder address 1 "sum.payload.addr" llvm-sum-type)))
+    (llvm:build-store builder sum-value address)
+    (llvm:build-load builder storage "sum.payload" payload-type)))
 
 (defun emit-pattern-bindings (backend scrutinee pattern)
   "Populate semantic PatternBinding identities after a case is selected."
@@ -126,15 +132,16 @@
     ((typep pattern 'verona:binding-pattern)
      (setf (backend-binding backend (verona:binding-pattern-binding pattern)) scrutinee))
     ((typep pattern 'verona:constructor-pattern)
-     (let ((payload (sum-payload-aggregate
-                     backend scrutinee (verona:constructor-pattern-alternative pattern))))
-       (loop for payload-pattern in (verona:constructor-pattern-payload-patterns pattern)
-             for index from 0
-             do (when (typep payload-pattern 'verona:binding-pattern)
-	                  (setf (backend-binding backend
-	                                         (verona:binding-pattern-binding payload-pattern))
-	                        (llvm:build-extract-value (llvm-backend-builder backend)
-	                                                  payload index "sum.binding"))))))))
+     (when (verona:constructor-pattern-payload-patterns pattern)
+       (let ((payload (sum-payload-aggregate
+                       backend scrutinee (verona:constructor-pattern-alternative pattern))))
+         (loop for payload-pattern in (verona:constructor-pattern-payload-patterns pattern)
+               for index from 0
+               do (when (typep payload-pattern 'verona:binding-pattern)
+	                    (setf (backend-binding backend
+	                                           (verona:binding-pattern-binding payload-pattern))
+	                          (llvm:build-extract-value (llvm-backend-builder backend)
+	                                                    payload index "sum.binding")))))))))
 
 (defun emit-match-dispatch (backend scrutinee pattern target fallback function)
   "Emit one ordered pattern test and leave the builder at FALLBACK."
@@ -391,25 +398,26 @@ compare the LLVM ABI directly instead of relying on frontend object identity."
     ((typep expression 'verona:sum-construct-expression)
      (let* ((alternative (verona:sum-construct-expression-alternative expression))
             (sum-type (verona:sum-alternative-sum-type alternative))
-            (aggregate (llvm:undef (lower-type backend sum-type)))
-            (aggregate (llvm:build-insert-value
-                        (llvm-backend-builder backend) aggregate
-                        (llvm:const-int (llvm:int-type 32 :context (llvm-backend-context backend))
-                                        (verona:sum-alternative-index alternative))
-                        0 "sum.tag"))
-            (payload (llvm:undef
-                      (llvm:struct-type
-                       (mapcar (lambda (payload-type) (lower-type backend payload-type))
-                               (verona:sum-alternative-payload-types alternative))
-                       nil :context (llvm-backend-context backend)))))
+            (llvm-sum-type (lower-type backend sum-type))
+            (builder (llvm-backend-builder backend))
+            (address (llvm:build-alloca builder llvm-sum-type "sum.value"))
+            (payload (llvm:undef (lowered-sum-payload-type backend alternative))))
+       ;; Zero the whole value so C consumers never observe indeterminate
+       ;; inactive-union bytes.
+       (llvm:build-store builder (llvm:const-null llvm-sum-type) address)
+       (llvm:build-store builder
+                         (llvm:const-int (llvm:int-type 32 :context (llvm-backend-context backend))
+                                         (verona:sum-alternative-index alternative))
+                         (llvm:build-struct-gep builder address 0 "sum.tag.addr" llvm-sum-type))
        (loop for value-expression in (verona:sum-construct-expression-arguments expression)
              for index from 0
              do (setf payload (llvm:build-insert-value (llvm-backend-builder backend)
                                                        payload (emit-value backend value-expression)
                                                        index "sum.payload.insert")))
-       (llvm:build-insert-value (llvm-backend-builder backend) aggregate payload
-                                (1+ (verona:sum-alternative-index alternative))
-                                "sum.payload")))
+       (when (verona:sum-alternative-payload-types alternative)
+         (llvm:build-store builder payload
+                           (llvm:build-struct-gep builder address 1 "sum.payload.addr" llvm-sum-type)))
+       (llvm:build-load builder address "sum.value" llvm-sum-type)))
     ((typep expression 'verona:array-construct-expression)
      (let ((aggregate (llvm:undef (lower-type backend (verona:expression-type expression)))))
        (loop for value-expression in (verona:array-construct-expression-elements expression)

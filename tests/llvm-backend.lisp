@@ -386,6 +386,16 @@
   (is (= 42 (compile-and-run-native "(function main () exit-code 42)"))))
 
 (test lowers-and-executes-sum-construction-and-constructor-patterns
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(type status (sum (idle) (count i64) (error i64)))
+                 (function identity ((value status)) status value)"))
+         (backend (verona.backend.llvm:generate-llvm
+                   (compilation-unit-semantic-program unit)))
+         (ir (verona.backend.llvm:print-llvm-module backend)))
+    ;; Tag plus one shared i64-aligned payload slot, not one slot per case.
+    (is (search "type { i32, { { i64 } } }" ir))
+    (is (not (search "type { i32, {}, { i64 }, { i64 } }" ir))))
   (is (= 42 (compile-and-run-native
              "(type option (sum (none) (some i64)))
               (function unwrap ((value option)) i64
