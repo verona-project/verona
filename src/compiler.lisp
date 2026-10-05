@@ -303,8 +303,8 @@ front-end knows only feature names, avoiding a dependency on a native backend.")
             (:constructor make-top-level-expansion-result (definitions)))
   "The unambiguous, internal result of expanding one top-level source form.
 
-DEFINITIONS is a list of primitive definition syntax objects.  A distinct
-result object avoids treating an ordinary list expression as several forms."
+  DEFINITIONS is a list of primitive definition S-expressions.  A distinct
+  result object avoids treating an ordinary list expression as several forms."
   (definitions '() :type list))
 
 (defparameter +definition-form-names+
@@ -508,14 +508,13 @@ never evaluates a declaration body."
        (when rest-name
          (environment-bind
           macro-environment rest-name
-          (syntax-with-datum *macro-expansion-syntax*
-                             (apply #'make-verona-list
-                                    (nthcdr (length parameter-names) arguments)))))
+          (nthcdr (length parameter-names) arguments)))
        (let ((result (evaluate body macro-environment)))
-         (unless (or (typep result 'syntax)
+         (unless (or (macro-s-expression-p result)
+                     (typep result 'syntax)
                      (typep result 'top-level-expansion-result))
            (definition-fail definition
-                            "%macro body must evaluate to syntax or top-level definitions"))
+                            "%macro body must evaluate to an S-expression or top-level definitions"))
          result)))
    :source definition))
 
@@ -901,10 +900,15 @@ TOP-LEVEL-EXPANSION-RESULT containing zero or more definition forms."
                                     (rest (verona-list-elements
                                            (syntax-datum form))))))
                        (cond ((typep result 'syntax) (expand-one result))
+                             ((macro-s-expression-p result)
+                              (expand-one (macro-result-syntax result form macro)))
                              ((typep result 'top-level-expansion-result)
                               (mapcan #'expand-one
                                       (mapcar (lambda (definition)
-                                                (annotate-macro-expansion definition form macro))
+                                                (unless (or (typep definition 'syntax)
+                                                            (macro-s-expression-p definition))
+                                                  (error 'invalid-macro-result-error :value definition))
+                                                (macro-result-syntax definition form macro))
                                               (top-level-expansion-result-definitions result))))
                              (t
                               (error 'invalid-macro-result-error :value result))))))))
@@ -928,6 +932,114 @@ or inventing attributes that its own surface language does not define."
   (bootstrap-definition-expansion source primitive-name
                                   (verona-list-elements (syntax-datum arguments))))
 
+(defun make-primitive-definition-s-expression (primitive-name arguments source)
+  "Return a primitive definition S-expression for macro-facing ARGUMENTS."
+  (unless (proper-s-expression-list-p arguments)
+    (error "primitive definition arguments must be an S-expression list"))
+  (syntax->macro-s-expression
+   (make-primitive-definition primitive-name
+                              (macro-s-expression->syntax arguments source)
+                              source)))
+
+(defun compile-time-name-component (value)
+  "Extract one identifier spelling from a compile-time VALUE."
+  (cond ((stringp value) value)
+        ((verona-name-p value) (verona-name-value value))
+        ;; Host evaluator clients may still provide syntax, but source macros
+        ;; receive plain identifier values.
+        ((typep value 'syntax)
+         (compile-time-name-component (syntax->macro-s-expression value)))
+        (t (error "name construction requires a string or identifier, received ~S" value))))
+
+(defun compile-time-keyword (text)
+  "Return an identifier S-expression named by TEXT for macro output."
+  (unless (stringp text)
+    (error "keyword requires a string, received ~S" text))
+  (when (string= text "")
+    (error "keyword requires a non-empty string"))
+  (make-verona-name text))
+
+(defun compile-time-keyword-concat (&rest parts)
+  "Concatenate compile-time identifier values into one identifier."
+  (when (null parts)
+    (error "keyword-concat requires at least one component"))
+  (let ((name (apply #'concatenate 'string (mapcar #'compile-time-name-component parts))))
+    (when (string= name "")
+      (error "keyword-concat cannot construct an empty name"))
+    (make-verona-name name)))
+
+(defun compile-time-symbol (text)
+  "Construct a plain Verona symbol from TEXT."
+  (compile-time-keyword text))
+
+(defun compile-time-symbol-name (symbol)
+  "Return SYMBOL's spelling as a string."
+  (unless (verona-name-p symbol)
+    (error "symbol-name requires a symbol, received ~S" symbol))
+  (verona-name-value symbol))
+
+(defun compile-time-symbol-concat (&rest parts)
+  "Construct a symbol by joining string and symbol components."
+  (apply #'compile-time-keyword-concat parts))
+
+(defun compile-time-string-concat (&rest strings)
+  "Concatenate compile-time strings."
+  (dolist (string strings)
+    (unless (stringp string)
+      (error "string-concat requires strings, received ~S" string)))
+  (apply #'concatenate 'string strings))
+
+(defun compile-time-string-length (string)
+  "Return STRING's character length."
+  (unless (stringp string)
+    (error "string-length requires a string, received ~S" string))
+  (length string))
+
+(defun compile-time-substring (string start &optional end)
+  "Return STRING between START and optional END."
+  (unless (stringp string)
+    (error "substring requires a string, received ~S" string))
+  (unless (and (integerp start) (<= 0 start)
+               (or (null end) (and (integerp end) (<= start end))))
+    (error "substring requires non-negative integer bounds"))
+  (subseq string start end))
+
+(defun compile-time-list (values)
+  "Validate VALUES as a proper macro S-expression list."
+  (unless (proper-s-expression-list-p values)
+    (error "list operation requires a proper list, received ~S" values))
+  values)
+
+(defun compile-time-cons (value list)
+  "Prepend VALUE to a proper macro list."
+  (unless (macro-s-expression-p value)
+    (error "cons requires an S-expression value, received ~S" value))
+  (cons value (compile-time-list list)))
+
+(defun compile-time-car (list)
+  "Return the first value in a non-empty macro list."
+  (let ((list (compile-time-list list)))
+    (when (null list)
+      (error "car requires a non-empty list"))
+    (first list)))
+
+(defun compile-time-cdr (list)
+  "Return every value but the first in a non-empty macro list."
+  (let ((list (compile-time-list list)))
+    (when (null list)
+      (error "cdr requires a non-empty list"))
+    (rest list)))
+
+(defun compile-time-append (&rest lists)
+  "Append proper macro lists."
+  (apply #'append (mapcar #'compile-time-list lists)))
+
+(defun compile-time-length (value)
+  "Return the length of a macro list or string."
+  (cond ((stringp value) (length value))
+        ((proper-s-expression-list-p value) (length value))
+        (t (error "length requires a string or proper list, received ~S" value))))
+
 (defun make-compilation-environment ()
   "Create the compile-time environment used while constructing one unit."
   (let ((environment (make-bootstrap-environment)))
@@ -939,7 +1051,8 @@ or inventing attributes that its own surface language does not define."
      (make-verona-function
       (lambda (&rest definitions)
         (dolist (definition definitions)
-          (check-type definition syntax))
+          (unless (macro-s-expression-p definition)
+            (error "definitions requires S-expression forms, received ~S" definition)))
         (make-top-level-expansion-result definitions))))
     ;; BASE is an ordinary, explicitly imported Verona module.  Its macros
     ;; delegate only their positional-to-named syntax conversion through this
@@ -949,7 +1062,39 @@ or inventing attributes that its own surface language does not define."
      environment (make-verona-name "compiler:definition")
      (make-verona-function
       (lambda (primitive-name arguments)
-        (make-primitive-definition primitive-name arguments))))
+        (make-primitive-definition-s-expression primitive-name arguments
+                                                *macro-expansion-syntax*))))
+    ;; These are compile-time constructors.  They return ordinary identifier
+    ;; values; expansion reattaches source syntax only after a macro returns.
+    (environment-bind environment (make-verona-name "keyword")
+                      (make-verona-function #'compile-time-keyword))
+    (environment-bind environment (make-verona-name "keyword-concat")
+                      (make-verona-function #'compile-time-keyword-concat))
+    (environment-bind environment (make-verona-name "symbol")
+                      (make-verona-function #'compile-time-symbol))
+    (environment-bind environment (make-verona-name "symbol-name")
+                      (make-verona-function #'compile-time-symbol-name))
+    (environment-bind environment (make-verona-name "symbol-concat")
+                      (make-verona-function #'compile-time-symbol-concat))
+    (environment-bind environment (make-verona-name "string-concat")
+                      (make-verona-function #'compile-time-string-concat))
+    (environment-bind environment (make-verona-name "string-length")
+                      (make-verona-function #'compile-time-string-length))
+    (environment-bind environment (make-verona-name "substring")
+                      (make-verona-function #'compile-time-substring))
+    (environment-bind environment (make-verona-name "list")
+                      (make-verona-function
+                       (lambda (&rest values) (compile-time-list values))))
+    (environment-bind environment (make-verona-name "cons")
+                      (make-verona-function #'compile-time-cons))
+    (environment-bind environment (make-verona-name "car")
+                      (make-verona-function #'compile-time-car))
+    (environment-bind environment (make-verona-name "cdr")
+                      (make-verona-function #'compile-time-cdr))
+    (environment-bind environment (make-verona-name "append")
+                      (make-verona-function #'compile-time-append))
+    (environment-bind environment (make-verona-name "length")
+                      (make-verona-function #'compile-time-length))
     environment))
 
 (defun top-level-form-head (form)

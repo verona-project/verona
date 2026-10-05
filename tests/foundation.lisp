@@ -394,6 +394,26 @@ baz"))
     (is (= 10 (evaluate (first forms) environment)))
     (is (= 6 (evaluate (second forms) environment)))))
 
+(test evaluates-macro-data-as-plain-s-expressions
+  (let* ((environment (verona::make-compilation-environment))
+         (forms (read-source
+                 (make-source
+                  "macro-data.vrn"
+                  "(symbol-name 'answer)
+                   (keyword-concat (keyword \"left-\") (symbol \"i32\"))
+                   (car '(first second))
+                   (append '(first) '(second third))")))
+         (generated-name (evaluate (second forms) environment))
+         (head (evaluate (third forms) environment))
+         (joined (evaluate (fourth forms) environment)))
+    (is (string= "answer" (evaluate (first forms) environment)))
+    (is (verona-name-p generated-name))
+    (is (string= "left-i32" (verona-name-value generated-name)))
+    (is (verona-name-p head))
+    (is (string= "first" (verona-name-value head)))
+    (is (equal '("first" "second" "third")
+               (mapcar #'verona-name-value joined)))))
+
 (test expands-macros-with-unevaluated-syntax-and-recursion
   (let* ((environment (make-environment))
 	 (received nil)
@@ -403,23 +423,17 @@ baz"))
      (make-verona-macro
       (lambda (&rest arguments)
 	(setf received arguments)
-	(let ((head (syntax-with-datum (first arguments)
-				       (make-verona-name "intermediate"))))
-	  (syntax-with-datum (first arguments)
-			     (apply #'make-verona-list head arguments))))))
+	(cons (make-verona-name "intermediate") arguments))))
     (environment-bind
      environment (make-verona-name "intermediate")
      (make-verona-macro
       (lambda (&rest arguments)
-	(let ((head (syntax-with-datum (first arguments)
-				       (make-verona-name "%test-definition"))))
-	  (syntax-with-datum (first arguments)
-			     (apply #'make-verona-list head arguments))))))
+	(cons (make-verona-name "%test-definition") arguments))))
     (let* ((expanded (expand (first forms) environment))
 	   (elements (verona-list-elements (syntax-datum expanded))))
       (is (= 2 (length received)))
-      (is (verona-name-p (syntax-datum (first received))))
-      (is (string= "foo" (verona-name-value (syntax-datum (first received)))))
+      (is (verona-name-p (first received)))
+      (is (string= "foo" (verona-name-value (first received))))
       (is (string= "%test-definition"
 		   (verona-name-value (syntax-datum (first elements)))))
       (is (string= "foo" (verona-name-value (syntax-datum (second elements))))))))
@@ -552,6 +566,18 @@ baz"))
          (function (second (unit-declarations unit))))
     (is (typep function 'function-declaration))
     (is (string= "identity" (verona-name-value (declaration-name function))))))
+
+(test expands-quasiquoted-base-macros-into-compilable-definitions
+  (let* ((unit (compile-file
+                (make-compiler :search-paths (list #P"base/src/"))
+                #P"tests/modules/base-macro-client.vrn"))
+         (function (second (unit-declarations unit)))
+         (constant (fourth (unit-declarations unit))))
+    (is (typep function 'function-declaration))
+    (is (string= "generated-i32"
+                 (verona-name-value (declaration-name function))))
+    (is (typep constant 'constant-declaration))
+    (is (string= "answer" (verona-name-value (declaration-name constant))))))
 
 (test registers-macros-sequentially-in-the-compile-time-environment
   ;; X evaluates to the original, unevaluated syntax argument, making this a

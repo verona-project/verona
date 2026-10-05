@@ -27,16 +27,64 @@
   (typep object 'verona-macro))
 
 (defun make-verona-macro (implementation &key source)
-  "Wrap IMPLEMENTATION as a callable that receives unevaluated SYNTAX arguments.
+  "Wrap IMPLEMENTATION as a callable that receives unevaluated S-expressions.
 
-IMPLEMENTATION must return one SYNTAX object."
+IMPLEMENTATION returns one S-expression form.  Compiler-owned SYNTAX remains
+at the expansion boundary so macro code manipulates ordinary Lisp data."
   (check-type implementation function)
   (make-instance 'verona-macro :implementation implementation :source source))
 
-;; Macro implementations receive their arguments as syntax objects.  Retaining
-;; the enclosing form during expansion lets the bootstrap definition macros
-;; replace only their head while preserving the complete source span.
+;; Macro implementations receive plain data.  Retaining the enclosing form
+;; during expansion lets the compiler restore source provenance only after a
+;; macro has returned its generated S-expression.
 (defvar *macro-expansion-syntax* nil)
+
+;; Name-building expressions conventionally use `,parameter` even inside an
+;; enclosing unquote.  Preserve that concise macro notation by treating an
+;; UNQUOTE evaluated while another unquote is active as a syntax-value lookup.
+(defvar *unquote-evaluation-p* nil)
+
+(defun proper-s-expression-list-p (value)
+  "Whether VALUE is a finite, proper host list."
+  (and (listp value)
+       (handler-case
+           (let ((length (list-length value)))
+             (not (null length)))
+         (type-error () nil))))
+
+(defun macro-s-expression-p (value)
+  "Whether VALUE belongs to the macro evaluator's plain S-expression model."
+  (cond ((null value) t)
+        ((consp value)
+         (and (proper-s-expression-list-p value)
+              (every #'macro-s-expression-p value)))
+        ((or (verona-name-p value) (qualified-name-p value)
+             (unit-literal-p value) (verona-boolean-literal-p value)
+             (stringp value) (characterp value) (numberp value))
+         t)
+        (t nil)))
+
+(defun syntax->macro-s-expression (syntax)
+  "Erase compiler source wrappers from SYNTAX for macro evaluation."
+  (check-type syntax syntax)
+  (let ((datum (syntax-datum syntax)))
+    (if (verona-list-p datum)
+        (mapcar #'syntax->macro-s-expression (verona-list-elements datum))
+        datum)))
+
+(defun macro-s-expression->syntax (value source)
+  "Attach SOURCE's provenance to plain macro VALUE at the compiler boundary."
+  (check-type source syntax)
+  (unless (macro-s-expression-p value)
+    (error "macro result is not an S-expression: ~S" value))
+  (make-syntax
+   (if (listp value)
+       (apply #'make-verona-list
+              (mapcar (lambda (element)
+                        (macro-s-expression->syntax element source))
+                      value))
+       value)
+   (syntax-source source) (syntax-start source) (syntax-end source)))
 
 (define-condition unbound-name-error (user-compilation-error)
   ((name :initarg :name :reader unbound-name-error-name))
@@ -53,7 +101,7 @@ IMPLEMENTATION must return one SYNTAX object."
 (define-condition invalid-macro-result-error (user-compilation-error)
   ((value :initarg :value :reader invalid-macro-result-error-value))
   (:report (lambda (condition stream)
-             (format stream "A Verona macro returned ~S, not syntax"
+             (format stream "A Verona macro returned ~S, not an S-expression"
                      (invalid-macro-result-error-value condition)))))
 
 (define-condition macro-expansion-limit-error (user-compilation-error)
@@ -94,13 +142,16 @@ IMPLEMENTATION must return one SYNTAX object."
     (error 'macro-expansion-limit-error :limit *macro-expansion-depth-limit*
            :syntax invocation))
   (incf *macro-expansion-count*)
-  (let ((result (let ((*macro-expansion-syntax* invocation))
-                  (apply (verona-macro-implementation macro) arguments))))
-    ;; Compiler top-level macros can additionally return their private
-    ;; multiple-definition result object.  It is annotated by that layer.
-    (if (typep result 'syntax)
-        (annotate-macro-expansion result invocation macro)
-        result)))
+  (let ((*macro-expansion-syntax* invocation)
+        (arguments (mapcar #'syntax->macro-s-expression arguments)))
+    (apply (verona-macro-implementation macro) arguments)))
+
+(defun macro-result-syntax (result invocation macro)
+  "Rehydrate RESULT at INVOCATION, retaining compatibility with host macros."
+  (let ((syntax (if (typep result 'syntax)
+                    result
+                    (macro-s-expression->syntax result invocation))))
+    (annotate-macro-expansion syntax invocation macro)))
 
 (defclass environment ()
   ((parent :initarg :parent :initform nil :reader environment-parent)
@@ -180,9 +231,9 @@ forms such as %FUNCTION are therefore left as Verona syntax for later processing
                  (if macro
                      (let* ((arguments (rest (verona-list-elements (syntax-datum form))))
                             (result (invoke-verona-macro macro form arguments)))
-                       (unless (typep result 'syntax)
+                       (unless (or (typep result 'syntax) (macro-s-expression-p result))
                          (error 'invalid-macro-result-error :value result))
-                       (expand-one result))
+                       (expand-one (macro-result-syntax result form macro)))
                      form))))
       (expand-one syntax))))
 
@@ -198,6 +249,47 @@ forms such as %FUNCTION are therefore left as Verona syntax for later processing
              (mapcar (lambda (argument) (evaluate argument environment))
                      (rest elements))))))
 
+(defun syntax-head-is-p (syntax name)
+  "Whether SYNTAX is a list headed by the unqualified NAME."
+  (let ((datum (syntax-datum syntax)))
+    (and (verona-list-p datum)
+         (let ((head (first (verona-list-elements datum))))
+           (and head
+                (verona-name-p (syntax-datum head))
+                (string= name (verona-name-value (syntax-datum head))))))))
+
+(defun special-form-arguments (syntax name)
+  "Return NAME's arguments, rejecting malformed reader-sugar expansions."
+  (let ((arguments (rest (verona-list-elements (syntax-datum syntax)))))
+    (unless (= (length arguments) 1)
+      (error "~A requires exactly one argument" name))
+    arguments))
+
+(defun quasiquote-value (template environment depth)
+  "Evaluate unquotes in TEMPLATE, producing an ordinary S-expression."
+  (let ((datum (syntax-datum template)))
+    (if (not (verona-list-p datum))
+        (syntax->macro-s-expression template)
+        (cond
+          ((syntax-head-is-p template "quasiquote")
+           (let ((arguments (special-form-arguments template "quasiquote")))
+             (list (syntax->macro-s-expression (first (verona-list-elements datum)))
+                   (quasiquote-value (first arguments) environment (1+ depth)))))
+          ((syntax-head-is-p template "unquote")
+           (let ((arguments (special-form-arguments template "unquote")))
+             (if (= depth 1)
+                 (let* ((*unquote-evaluation-p* t)
+                        (value (evaluate (first arguments) environment)))
+                   (unless (macro-s-expression-p value)
+                     (error "unquote expression must evaluate to an S-expression, received ~S" value))
+                   value)
+                 (list (syntax->macro-s-expression (first (verona-list-elements datum)))
+                       (quasiquote-value (first arguments) environment (1- depth))))))
+          (t
+           (mapcar (lambda (element)
+                     (quasiquote-value element environment depth))
+                   (verona-list-elements datum)))))))
+
 (defun evaluate (syntax environment)
   "Evaluate source-aware Verona SYNTAX in ENVIRONMENT and return a value."
   (check-type syntax syntax)
@@ -211,10 +303,21 @@ forms such as %FUNCTION are therefore left as Verona syntax for later processing
            (environment-lookup environment
                                (make-verona-name (qualified-name-string datum))))
           ((verona-list-p datum)
-           (let ((expanded (expand syntax environment)))
-             (if (eq expanded syntax)
-                 (evaluate-list syntax environment)
-                 (evaluate expanded environment))))
+           (cond ((syntax-head-is-p syntax "quote")
+                  (syntax->macro-s-expression
+                   (first (special-form-arguments syntax "quote"))))
+                 ((syntax-head-is-p syntax "quasiquote")
+                 (quasiquote-value
+                   (first (special-form-arguments syntax "quasiquote")) environment 1))
+                 ((syntax-head-is-p syntax "unquote")
+                  (if *unquote-evaluation-p*
+                      (evaluate (first (special-form-arguments syntax "unquote")) environment)
+                      (error "unquote is valid only inside quasiquote")))
+                 (t
+                  (let ((expanded (expand syntax environment)))
+                    (if (eq expanded syntax)
+                        (evaluate-list syntax environment)
+                        (evaluate expanded environment))))))
           ;; Unit, booleans, characters, numbers, and strings are
           ;; self-evaluating values.
           (t datum))))
@@ -356,7 +459,13 @@ later macro package will own documentation and other richer attributes."
   "Make a surface definition macro that emits PRIMITIVE-NAME's named clauses."
   (make-verona-macro
    (lambda (&rest arguments)
-     (bootstrap-definition-expansion *macro-expansion-syntax* primitive-name arguments))))
+     (let ((source *macro-expansion-syntax*))
+       (syntax->macro-s-expression
+        (bootstrap-definition-expansion
+         source primitive-name
+         (mapcar (lambda (argument)
+                   (macro-s-expression->syntax argument source))
+                 arguments)))))))
 
 (defun make-bootstrap-environment ()
   "Create the evaluator environment and its standard Verona definition macros."

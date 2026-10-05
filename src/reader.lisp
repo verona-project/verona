@@ -60,7 +60,8 @@
 (defun verona-delimiter-p (character)
   (or (null character)
       (verona-whitespace-p character)
-      (find character "();\"" :test #'char=)))
+      (member character '(#\( #\) #\; #\" #\' #\` #\,)
+              :test #'char=)))
 
 (defun feature-name-string (feature)
   "Return FEATURE's case-insensitive external spelling.
@@ -286,6 +287,20 @@ distinct CHAR type later."
                          (feature-available-p state feature)
                          (not (feature-available-p state feature)))))))))
 
+(defun read-prefixed-form (state start name)
+  "Read reader sugar such as `FORM or ,FORM as an ordinary syntax list."
+  (reader-advance state)
+  (when (reader-at-end-p state)
+    (reader-fail state (format nil "~A requires a following form" name) start))
+  (multiple-value-bind (form present-p) (read-form state)
+    (unless present-p
+      (reader-fail state (format nil "~A requires a selected following form" name) start))
+    (make-verona-list
+     (make-syntax (make-verona-name name) (reader-state-source state)
+                  (source-location-at (reader-state-source state) start)
+                  (reader-location state))
+     form)))
+
 (defun read-form (state)
   (skip-layout state)
   (when (reader-at-end-p state)
@@ -299,6 +314,12 @@ distinct CHAR type later."
                   (reader-fail state "unexpected ')'"))
                  ((char= character #\")
                   (read-string-literal state start))
+                 ((char= character #\')
+                  (read-prefixed-form state start "quote"))
+                 ((char= character #\`)
+                  (read-prefixed-form state start "quasiquote"))
+                 ((char= character #\,)
+                  (read-prefixed-form state start "unquote"))
                  ((char= character #\.)
                   (if (and (< (1+ start) (length (reader-contents state)))
                            (digit-char-p (char (reader-contents state) (1+ start))))

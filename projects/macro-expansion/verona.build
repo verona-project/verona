@@ -1,0 +1,6 @@
+(executable macro-expansion
+  (root macro-expansion)
+  (module-path "src")
+  (module-path "../../base/src")
+  (target native)
+  (optimize 0))

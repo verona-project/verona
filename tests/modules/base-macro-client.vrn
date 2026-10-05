@@ -1,0 +1,12 @@
+(import base)
+
+(base:macro generated-function (type)
+  `(base:function ,(keyword-concat (keyword "generated-") ,type)
+     () ,type 42))
+
+(generated-function i32)
+
+(base:macro generated-constant (name)
+  (list (keyword "%constant") name (keyword "i32") 42))
+
+(generated-constant answer)

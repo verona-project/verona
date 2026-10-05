@@ -1,0 +1,12 @@
+(import base)
+
+;; This macro receives STATUS as an ordinary S-expression and returns the
+;; primitive form that the compiler collects and compiles.
+(base:macro define-entry-point (status)
+  (list (keyword "%function")
+        (symbol "main")
+        (list)
+        (keyword "exit-code")
+        status))
+
+(define-entry-point 42)

@@ -78,7 +78,7 @@ nominal type is required.
 | `(type NAME (sum CASE...))` | Define a nominal sum type. |
 | `(function NAME ((parameter TYPE) ...) RESULT BODY)` | Define a function. |
 | `(external-function NAME "c_name" (TYPE...) RESULT)` | Declare a C function. Parameters must use `bool`, numeric scalar, or pointer C ABI types; a result may also be `void`. Verona `bool` follows the target C ABI's `_Bool` convention. |
-| `(macro NAME (parameter ...) BODY)` | Define a compile-time macro. Parameters and result are syntax objects. |
+| `(macro NAME (parameter ...) BODY)` | Define a compile-time macro. Parameters and result are S-expressions. |
 | `(constant NAME TYPE VALUE)` | Define an immutable global. |
 | `(variable NAME TYPE INITIALIZER)` | Define a mutable global. |
 | `(generic NAME (parameter ...))` | Declare a generic callable by arity. |
@@ -89,7 +89,7 @@ nominal type is required.
 | `(native-export NAME)` | Export a function with its Verona name to C. |
 | `(native-export NAME "c_name")` | Export a function to C with an explicit external name. |
 
-Macros may return one syntax object or a top-level sequence of definitions.
+Macros may return one S-expression form or a top-level sequence of definitions.
 Imports, exports, and native exports are only valid at the top level.
 
 ### Base macro module
@@ -122,6 +122,84 @@ definition constructor:
 `base` exports `macro`, `type`, `function`, `external-function`, `constant`,
 `variable`, `generic`, `protocol`, and `implementation`.  It does not add
 documentation or other attributes not defined by the calling macro.
+
+### Compile-time S-expression construction
+
+Macro bodies evaluate at compile time and return ordinary S-expressions.  The
+compiler retains source-aware syntax privately, restoring invocation provenance
+only after macro expansion.  This is the complete function surface available
+to a source-defined macro.  `base` macros are separately imported language
+forms, not implicit evaluator functions.
+
+| Function | Signature | Result / notes |
+| --- | --- | --- |
+| `+` | `(+ NUMBER...)` | Bootstrap arithmetic binding. It exists for evaluator tests and simple bootstrap macros; it is not a stable general-purpose macro library. |
+| `definitions` | `(definitions FORM...)` | Returns zero or more top-level S-expression forms from one macro expansion. Each argument must be an S-expression. |
+| `compiler:definition` | `(compiler:definition PRIMITIVE ARGUMENTS)` | Builds a primitive definition S-expression from the established positional contract. `PRIMITIVE` is one of the compiler `%...` definition names and `ARGUMENTS` is a list of S-expressions. This is the bridge used by the bundled `base` macros. |
+
+### Identifier functions
+
+An identifier value is the atom used in a returned S-expression where source
+would contain a name.  `keyword` is an ordinary function: it does not create a
+reserved source keyword, and it is currently equivalent to `symbol`.
+
+| Function | Signature | Result / notes |
+| --- | --- | --- |
+| `symbol` | `(symbol TEXT)` | Construct an identifier with the non-empty string `TEXT`. |
+| `symbol-name` | `(symbol-name SYMBOL)` | Return an identifier's spelling as a string. |
+| `symbol-concat` | `(symbol-concat PART...)` | Construct an identifier by joining strings and identifiers; requires at least one non-empty resulting component. |
+| `keyword` | `(keyword TEXT)` | Construct an identifier with the exact non-empty string `TEXT`; supplied for keyword-style macro conventions. |
+| `keyword-concat` | `(keyword-concat PART...)` | Construct an identifier by joining strings and identifiers; supplied for keyword-style macro conventions. |
+
+### String functions
+
+| Function | Signature | Result / notes |
+| --- | --- | --- |
+| `string-concat` | `(string-concat STRING...)` | Join zero or more strings. With no arguments, returns the empty string. |
+| `string-length` | `(string-length STRING)` | Return the character length of `STRING`. |
+| `substring` | `(substring STRING START [END])` | Return the portion from zero-based `START` through optional exclusive `END`. Bounds must be non-negative integers. |
+
+### List functions
+
+All compile-time lists are finite, proper S-expression lists.
+
+| Function | Signature | Result / notes |
+| --- | --- | --- |
+| `list` | `(list VALUE...)` | Construct a proper S-expression list. |
+| `cons` | `(cons VALUE LIST)` | Prepend an S-expression `VALUE` to a proper list. |
+| `car` | `(car LIST)` | Return the first item of a non-empty proper list. |
+| `cdr` | `(cdr LIST)` | Return all but the first item of a non-empty proper list. |
+| `append` | `(append LIST...)` | Join zero or more proper lists. |
+| `length` | `(length VALUE)` | Return the length of a string or proper list. |
+
+### Reader forms
+
+These forms are recognized by the reader and evaluator; they are not function
+bindings.
+
+| Form | Meaning |
+| --- | --- |
+| `'FORM` | Quote `FORM` as an S-expression. |
+| `` `FORM`` | Quasiquote an S-expression template. |
+| `,FORM` | Evaluate `FORM` and insert its S-expression value into a quasiquote template. |
+
+For example:
+
+```lisp
+(import base)
+
+(base:macro generated-function (type)
+  `(base:function ,(keyword-concat (keyword "generated-") ,type)
+     () ,type 42))
+
+(generated-function i32) ; defines generated-i32
+```
+
+The macro may return any ordinary top-level form, including
+`base:implementation`; expansion then continues normally and the resulting
+form is compiled as though it had appeared in the source.  `compiler:definition`
+remains available for a macro that needs to delegate one of the base positional
+definition contracts directly to the compiler.
 
 ### Primitive definition API
 
@@ -249,7 +327,7 @@ Verona-name API.  `unit-literal-p`, `verona-boolean-literal-p`, and
 | `environment-lookup environment name` | Resolve a name through parent environments; signals `unbound-name-error` when absent. |
 | `environment-child environment` | Create a child environment. |
 | `make-verona-function implementation` | Wrap a host function that receives evaluated Verona values. |
-| `make-verona-macro implementation` | Wrap a host function that receives unevaluated syntax and returns syntax. |
+| `make-verona-macro implementation` | Wrap a host function that receives unevaluated S-expressions and returns an S-expression. |
 | `evaluate syntax environment` | Evaluate a bootstrap evaluator expression. |
 | `expand syntax environment` | Expand macros at a syntax form's head. |
 | `make-bootstrap-environment` | Create the evaluator environment containing the standard definition-form macros. |
