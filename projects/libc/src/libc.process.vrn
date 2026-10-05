@@ -1,15 +1,17 @@
+(import base)
+
 (import libc.types :as types)
 
 ;; Environment, process creation, and process termination functions.
-(external-function getenv "getenv" (types:c-string) types:c-string)
-(external-function setenv "setenv" (types:c-string types:c-string types:c-int) types:c-int)
-(external-function unsetenv "unsetenv" (types:c-string) types:c-int)
-(external-function getpid "getpid" () types:pid-t)
-(external-function fork "fork" () types:pid-t)
-(external-function execv "execv" (types:c-string (pointer types:c-string)) types:c-int)
-(external-function execve "execve" (types:c-string (pointer types:c-string) (pointer types:c-string)) types:c-int)
-(external-function execvp "execvp" (types:c-string (pointer types:c-string)) types:c-int)
-(external-function wait "wait" ((pointer types:c-int)) types:pid-t)
-(external-function exit "exit" (types:c-int) void)
+(base:external-function getenv "getenv" (types:c-string) types:c-string)
+(base:external-function setenv "setenv" (types:c-string types:c-string types:c-int) types:c-int)
+(base:external-function unsetenv "unsetenv" (types:c-string) types:c-int)
+(base:external-function getpid "getpid" () types:pid-t)
+(base:external-function fork "fork" () types:pid-t)
+(base:external-function execv "execv" (types:c-string (pointer types:c-string)) types:c-int)
+(base:external-function execve "execve" (types:c-string (pointer types:c-string) (pointer types:c-string)) types:c-int)
+(base:external-function execvp "execvp" (types:c-string (pointer types:c-string)) types:c-int)
+(base:external-function wait "wait" ((pointer types:c-int)) types:pid-t)
+(base:external-function exit "exit" (types:c-int) void)
 
 (export getenv setenv unsetenv getpid fork execv execve execvp wait exit)

@@ -1,14 +1,16 @@
+(import base)
+
 (import libc.types :as types)
 
 ;; Allocation and byte-oriented memory functions.  free releases storage
 ;; obtained from the allocation functions; all pointer arguments must be valid.
-(external-function malloc "malloc" (types:size-t) (pointer void))
-(external-function calloc "calloc" (types:size-t types:size-t) (pointer void))
-(external-function realloc "realloc" ((pointer void) types:size-t) (pointer void))
-(external-function free "free" ((pointer void)) void)
-(external-function memcpy "memcpy" ((pointer void) (pointer void) types:size-t) (pointer void))
-(external-function memmove "memmove" ((pointer void) (pointer void) types:size-t) (pointer void))
-(external-function memset "memset" ((pointer void) types:c-int types:size-t) (pointer void))
-(external-function memcmp "memcmp" ((pointer void) (pointer void) types:size-t) types:c-int)
+(base:external-function malloc "malloc" (types:size-t) (pointer void))
+(base:external-function calloc "calloc" (types:size-t types:size-t) (pointer void))
+(base:external-function realloc "realloc" ((pointer void) types:size-t) (pointer void))
+(base:external-function free "free" ((pointer void)) void)
+(base:external-function memcpy "memcpy" ((pointer void) (pointer void) types:size-t) (pointer void))
+(base:external-function memmove "memmove" ((pointer void) (pointer void) types:size-t) (pointer void))
+(base:external-function memset "memset" ((pointer void) types:c-int types:size-t) (pointer void))
+(base:external-function memcmp "memcmp" ((pointer void) (pointer void) types:size-t) types:c-int)
 
 (export malloc calloc realloc free memcpy memmove memset memcmp)

@@ -1,15 +1,17 @@
+(import base)
+
 (import libc.types :as types)
 
 ;; Buffered stdio streams and character I/O.
-(external-function fopen "fopen" (types:c-string types:c-string) (pointer types:file-stream))
-(external-function fclose "fclose" ((pointer types:file-stream)) types:c-int)
-(external-function fread "fread" ((pointer void) types:size-t types:size-t (pointer types:file-stream)) types:size-t)
-(external-function fwrite "fwrite" ((pointer void) types:size-t types:size-t (pointer types:file-stream)) types:size-t)
-(external-function fgets "fgets" (types:c-string types:c-int (pointer types:file-stream)) types:c-string)
-(external-function fputs "fputs" (types:c-string (pointer types:file-stream)) types:c-int)
-(external-function getchar "getchar" () types:c-int)
-(external-function putchar "putchar" (types:c-int) types:c-int)
-(external-function puts "puts" (types:c-string) types:c-int)
-(external-function perror "perror" (types:c-string) void)
+(base:external-function fopen "fopen" (types:c-string types:c-string) (pointer types:file-stream))
+(base:external-function fclose "fclose" ((pointer types:file-stream)) types:c-int)
+(base:external-function fread "fread" ((pointer void) types:size-t types:size-t (pointer types:file-stream)) types:size-t)
+(base:external-function fwrite "fwrite" ((pointer void) types:size-t types:size-t (pointer types:file-stream)) types:size-t)
+(base:external-function fgets "fgets" (types:c-string types:c-int (pointer types:file-stream)) types:c-string)
+(base:external-function fputs "fputs" (types:c-string (pointer types:file-stream)) types:c-int)
+(base:external-function getchar "getchar" () types:c-int)
+(base:external-function putchar "putchar" (types:c-int) types:c-int)
+(base:external-function puts "puts" (types:c-string) types:c-int)
+(base:external-function perror "perror" (types:c-string) void)
 
 (export fopen fclose fread fwrite fgets fputs getchar putchar puts perror)

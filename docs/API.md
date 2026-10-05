@@ -92,6 +92,37 @@ nominal type is required.
 Macros may return one syntax object or a top-level sequence of definitions.
 Imports, exports, and native exports are only valid at the top level.
 
+### Base macro module
+
+The bundled standard library is a standalone project at
+[`base/`](../base/), whose `verona.build` declares its `base` module.  Add
+`base/src` to a consuming project's module path, then explicitly import the
+module and invoke its exported macros with the module qualifier:
+
+```lisp
+(import base)
+
+(base:function add ((left i32) (right i32)) i32
+  (+ left right))
+```
+
+Projects can replace a surface convention locally.  For example, this installs
+an unqualified `function` macro that delegates to the compiler's current
+definition constructor:
+
+```lisp
+(import base)
+
+(base:macro fn (&rest arguments)
+  (compiler:definition "%function" arguments))
+
+(fn main () exit-code 0)
+```
+
+`base` exports `macro`, `type`, `function`, `external-function`, `constant`,
+`variable`, `generic`, `protocol`, and `implementation`.  It does not add
+documentation or other attributes not defined by the calling macro.
+
 ### Primitive definition API
 
 The compiler-facing `%type`, `%function`, `%external-function`, `%macro`,

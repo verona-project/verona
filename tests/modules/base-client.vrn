@@ -1,0 +1,7 @@
+(import base)
+
+; BASE is explicit: use its macro to install a project-local spelling.
+(base:macro fn (&rest arguments)
+  (compiler:definition "%function" arguments))
+
+(fn identity ((value i32)) i32 value)

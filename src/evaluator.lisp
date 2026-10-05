@@ -205,6 +205,11 @@ forms such as %FUNCTION are therefore left as Verona syntax for later processing
   (let ((datum (syntax-datum syntax)))
     (cond ((verona-name-p datum)
            (environment-lookup environment datum))
+          ((qualified-name-p datum)
+           ;; Compile-time library functions, like imported macros, use the
+           ;; stable textual qualified spelling as their evaluator key.
+           (environment-lookup environment
+                               (make-verona-name (qualified-name-string datum))))
           ((verona-list-p datum)
            (let ((expanded (expand syntax environment)))
              (if (eq expanded syntax)

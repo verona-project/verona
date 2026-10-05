@@ -452,15 +452,29 @@ unambiguous."
       declaration)))
 
 (defun macro-parameter-names (definition parameters)
-  "Extract macro parameter names while retaining the parameter syntax itself."
+  "Extract required macro parameter names and an optional `&rest` name."
   (unless (verona-list-p (syntax-datum parameters))
     (definition-fail definition "%macro parameters must be a list"))
-  (mapcar (lambda (parameter)
-            (let ((name (syntax-datum parameter)))
-              (unless (verona-name-p name)
-                (definition-fail definition "%macro parameters must be Verona names"))
-              name))
-          (verona-list-elements (syntax-datum parameters))))
+  (let ((names '())
+        (rest-name nil)
+        (elements (verona-list-elements (syntax-datum parameters))))
+    (loop while elements
+          for parameter = (pop elements)
+          for name = (syntax-datum parameter)
+          do (unless (verona-name-p name)
+               (definition-fail definition "%macro parameters must be Verona names"))
+             (if (string= (verona-name-value name) "&rest")
+                 (progn
+                   (when (or rest-name (null elements) (cdr elements))
+                     (definition-fail definition
+                                      "%macro &rest must be followed by exactly one parameter name"))
+                   (let ((rest-parameter (pop elements)))
+                     (unless (verona-name-p (syntax-datum rest-parameter))
+                       (definition-fail definition
+                                        "%macro &rest parameter must be a Verona name"))
+                     (setf rest-name (syntax-datum rest-parameter))))
+                 (push name names)))
+    (values (nreverse names) rest-name)))
 
 (defun generic-parameter-names (definition parameters)
   "Extract the untyped parameter names that establish a generic's arity."
@@ -473,21 +487,30 @@ unambiguous."
               name))
           (verona-list-elements (syntax-datum parameters))))
 
-(defun declaration-macro (definition parameter-names body environment)
+(defun declaration-macro (definition parameter-names rest-name body environment)
   "Construct the compile-time macro represented by a %MACRO declaration.
 
 Macro bodies are evaluated only when the macro is invoked.  Discovery itself
 never evaluates a declaration body."
   (make-verona-macro
    (lambda (&rest arguments)
-     (unless (= (length arguments) (length parameter-names))
+     (unless (if rest-name
+                 (>= (length arguments) (length parameter-names))
+                 (= (length arguments) (length parameter-names)))
        (definition-fail definition
-                        "%macro expected ~D argument~:P, received ~D"
+                        "%macro expected ~:[exactly ~;at least ~]~D argument~:P, received ~D"
+                        (not (null rest-name))
                         (length parameter-names) (length arguments)))
      (let ((macro-environment (environment-child environment)))
        (loop for name in parameter-names
              for argument in arguments
              do (environment-bind macro-environment name argument))
+       (when rest-name
+         (environment-bind
+          macro-environment rest-name
+          (syntax-with-datum *macro-expansion-syntax*
+                             (apply #'make-verona-list
+                                    (nthcdr (length parameter-names) arguments)))))
        (let ((result (evaluate body macro-environment)))
          (unless (or (typep result 'syntax)
                      (typep result 'top-level-expansion-result))
@@ -597,14 +620,16 @@ the whole form is parsed as named clauses rather than silently mixing styles."
                 (parameters (definition-list-clause expanded-syntax
                                                      (definition-clause-value clauses ":parameters")
                                                      "macro parameters"))
-                (body (definition-clause-value clauses ":implementation"))
-                (parameter-names (macro-parameter-names expanded-syntax parameters))
-                (declaration (apply #'make-declaration 'macro-declaration name
-                                    :parameters parameters :body body
-                                    (definition-documentation-initargs expanded-syntax clauses))))
-           (environment-bind context name
-                             (declaration-macro expanded-syntax parameter-names body context))
-           declaration))
+                (body (definition-clause-value clauses ":implementation")))
+           (multiple-value-bind (parameter-names rest-name)
+               (macro-parameter-names expanded-syntax parameters)
+             (let ((declaration (apply #'make-declaration 'macro-declaration name
+                                       :parameters parameters :body body
+                                       (definition-documentation-initargs expanded-syntax clauses))))
+               (environment-bind context name
+                                 (declaration-macro expanded-syntax parameter-names rest-name
+                                                    body context))
+               declaration))))
         ((or (string= head "%constant") (string= head "%variable"))
          (named-arguments 2)
          (let* ((name (definition-name expanded-syntax (first arguments)))
@@ -790,15 +815,17 @@ expands syntax; this processor is the boundary that creates compiler objects."
                  (definition-fail expanded-syntax "%macro requires a name, parameters, and body"))
                (let* ((name (definition-name expanded-syntax (first arguments)))
                       (parameters (second arguments))
-                      (body (third arguments))
-                      (parameter-names (macro-parameter-names expanded-syntax parameters))
-                      (declaration (make-declaration 'macro-declaration name
-                                                     :parameters parameters :body body)))
-                 ;; Bind only after successful registration so a duplicate
-                 ;; definition cannot overwrite the existing macro.
-                 (environment-bind context name
-                                   (declaration-macro expanded-syntax parameter-names body context))
-                 declaration)))
+                      (body (third arguments)))
+                 (multiple-value-bind (parameter-names rest-name)
+                     (macro-parameter-names expanded-syntax parameters)
+                   (let ((declaration (make-declaration 'macro-declaration name
+                                                        :parameters parameters :body body)))
+                     ;; Bind only after successful registration so a duplicate
+                     ;; definition cannot overwrite the existing macro.
+                     (environment-bind context name
+                                       (declaration-macro expanded-syntax parameter-names rest-name
+                                                          body context))
+                     declaration)))))
             ((string= head "%constant")
              (let ((arguments (definition-elements expanded-syntax "constant" 3)))
               (unless (= (length arguments) 3)
@@ -883,6 +910,24 @@ TOP-LEVEL-EXPANSION-RESULT containing zero or more definition forms."
                               (error 'invalid-macro-result-error :value result))))))))
       (make-top-level-expansion-result (expand-one syntax)))))
 
+(defun make-primitive-definition (primitive-name arguments
+                                  &optional (source *macro-expansion-syntax*))
+  "Build a named-clause primitive definition from macro ARGUMENTS.
+
+PRIMITIVE-NAME must be one of +DEFINITION-FORM-NAMES+.  ARGUMENTS is a
+source-aware Verona list, allowing a source-defined macro to delegate its
+established positional contract to the compiler without reconstructing syntax
+or inventing attributes that its own surface language does not define."
+  (unless (and (stringp primitive-name)
+               (member primitive-name +definition-form-names+ :test #'string=))
+    (error "unknown primitive definition ~S" primitive-name))
+  (check-type arguments syntax)
+  (unless (verona-list-p (syntax-datum arguments))
+    (error "primitive definition arguments must be a Verona list"))
+  (check-type source syntax)
+  (bootstrap-definition-expansion source primitive-name
+                                  (verona-list-elements (syntax-datum arguments))))
+
 (defun make-compilation-environment ()
   "Create the compile-time environment used while constructing one unit."
   (let ((environment (make-bootstrap-environment)))
@@ -896,6 +941,15 @@ TOP-LEVEL-EXPANSION-RESULT containing zero or more definition forms."
         (dolist (definition definitions)
           (check-type definition syntax))
         (make-top-level-expansion-result definitions))))
+    ;; BASE is an ordinary, explicitly imported Verona module.  Its macros
+    ;; delegate only their positional-to-named syntax conversion through this
+    ;; small compiler API; the module remains free to replace the surface
+    ;; conventions without changing declaration collection.
+    (environment-bind
+     environment (make-verona-name "compiler:definition")
+     (make-verona-function
+      (lambda (primitive-name arguments)
+        (make-primitive-definition primitive-name arguments))))
     environment))
 
 (defun top-level-form-head (form)

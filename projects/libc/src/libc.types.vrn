@@ -1,49 +1,51 @@
+(import base)
+
 ;; C scalar aliases preserve the platform C ABI.  Use these at foreign-call
 ;; boundaries; ordinary Verona code should normally use the built-in types.
-(type c-char i8)
-(type c-uchar u8)
-(type c-short i16)
-(type c-ushort u16)
-(type c-int i32)
-(type c-uint u32)
-(type c-long i64)
-(type c-ulong u64)
-(type size-t usize)
-(type ssize-t isize)
-(type off-t i64)
-(type pid-t i32)
+(base:type c-char i8)
+(base:type c-uchar u8)
+(base:type c-short i16)
+(base:type c-ushort u16)
+(base:type c-int i32)
+(base:type c-uint u32)
+(base:type c-long i64)
+(base:type c-ulong u64)
+(base:type size-t usize)
+(base:type ssize-t isize)
+(base:type off-t i64)
+(base:type pid-t i32)
 #+darwin
-(type mode-t u16)
+(base:type mode-t u16)
 #+linux
-(type mode-t u32)
-(type time-t i64)
-(type clock-id-t i32)
-(type socket-length-t u32)
+(base:type mode-t u32)
+(base:type time-t i64)
+(base:type clock-id-t i32)
+(base:type socket-length-t u32)
 
 ;; File descriptors are integer handles.  The following opaque types are only
 ;; meaningful behind pointers returned to, or accepted from, libc.
-(type file-descriptor c-int)
-(type c-string (pointer u8))
-(type file-stream)
-(type directory-stream)
-(type file-status)
-(type time-specification)
-(type socket-address)
-(type address-info)
+(base:type file-descriptor c-int)
+(base:type c-string (pointer u8))
+(base:type file-stream)
+(base:type directory-stream)
+(base:type file-status)
+(base:type time-specification)
+(base:type socket-address)
+(base:type address-info)
 #+darwin
-(type pthread-thread (pointer void))
+(base:type pthread-thread (pointer void))
 #+linux
-(type pthread-thread c-ulong)
-(type pthread-mutex)
-(type pthread-condition)
+(base:type pthread-thread c-ulong)
+(base:type pthread-mutex)
+(base:type pthread-condition)
 
 ;; sockaddr_in has a different family field layout on Darwin and Linux.
 ;; Initialise its fields in platform-specific application code.
 #+darwin
-(type ipv4-socket-address
+(base:type ipv4-socket-address
   (product (length u8) (family u8) (port u16) (address u32) (padding (array u8 8))))
 #+linux
-(type ipv4-socket-address
+(base:type ipv4-socket-address
   (product (family u16) (port u16) (address u32) (padding (array u8 8))))
 
 (export

@@ -1,18 +1,20 @@
+(import base)
+
 (import libc.types :as types)
 
 ;; POSIX thread and synchronization declarations.  They need C-compatible
 ;; start routines and opaque storage, so they are intentionally low-level.
-(external-function pthread-create "pthread_create" ((pointer types:pthread-thread) (pointer void) (pointer void) (pointer void)) types:c-int)
-(external-function pthread-join "pthread_join" (types:pthread-thread (pointer (pointer void))) types:c-int)
-(external-function pthread-mutex-init "pthread_mutex_init" ((pointer types:pthread-mutex) (pointer void)) types:c-int)
-(external-function pthread-mutex-destroy "pthread_mutex_destroy" ((pointer types:pthread-mutex)) types:c-int)
-(external-function pthread-mutex-lock "pthread_mutex_lock" ((pointer types:pthread-mutex)) types:c-int)
-(external-function pthread-mutex-unlock "pthread_mutex_unlock" ((pointer types:pthread-mutex)) types:c-int)
-(external-function pthread-cond-init "pthread_cond_init" ((pointer types:pthread-condition) (pointer void)) types:c-int)
-(external-function pthread-cond-destroy "pthread_cond_destroy" ((pointer types:pthread-condition)) types:c-int)
-(external-function pthread-cond-wait "pthread_cond_wait" ((pointer types:pthread-condition) (pointer types:pthread-mutex)) types:c-int)
-(external-function pthread-cond-signal "pthread_cond_signal" ((pointer types:pthread-condition)) types:c-int)
-(external-function pthread-cond-broadcast "pthread_cond_broadcast" ((pointer types:pthread-condition)) types:c-int)
+(base:external-function pthread-create "pthread_create" ((pointer types:pthread-thread) (pointer void) (pointer void) (pointer void)) types:c-int)
+(base:external-function pthread-join "pthread_join" (types:pthread-thread (pointer (pointer void))) types:c-int)
+(base:external-function pthread-mutex-init "pthread_mutex_init" ((pointer types:pthread-mutex) (pointer void)) types:c-int)
+(base:external-function pthread-mutex-destroy "pthread_mutex_destroy" ((pointer types:pthread-mutex)) types:c-int)
+(base:external-function pthread-mutex-lock "pthread_mutex_lock" ((pointer types:pthread-mutex)) types:c-int)
+(base:external-function pthread-mutex-unlock "pthread_mutex_unlock" ((pointer types:pthread-mutex)) types:c-int)
+(base:external-function pthread-cond-init "pthread_cond_init" ((pointer types:pthread-condition) (pointer void)) types:c-int)
+(base:external-function pthread-cond-destroy "pthread_cond_destroy" ((pointer types:pthread-condition)) types:c-int)
+(base:external-function pthread-cond-wait "pthread_cond_wait" ((pointer types:pthread-condition) (pointer types:pthread-mutex)) types:c-int)
+(base:external-function pthread-cond-signal "pthread_cond_signal" ((pointer types:pthread-condition)) types:c-int)
+(base:external-function pthread-cond-broadcast "pthread_cond_broadcast" ((pointer types:pthread-condition)) types:c-int)
 
 (export pthread-create pthread-join pthread-mutex-init pthread-mutex-destroy
         pthread-mutex-lock pthread-mutex-unlock pthread-cond-init pthread-cond-destroy

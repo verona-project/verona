@@ -1,14 +1,16 @@
+(import base)
+
 (import libc.types :as types)
 
 ;; Small numeric and conversion utilities.  qsort and bsearch require C
 ;; callbacks, so they are declarations only until callback interop is available.
-(external-function abs "abs" (types:c-int) types:c-int)
-(external-function strtol "strtol" (types:c-string (pointer types:c-string) types:c-int) types:c-long)
-(external-function strtoul "strtoul" (types:c-string (pointer types:c-string) types:c-int) types:c-ulong)
-(external-function qsort "qsort" ((pointer void) types:size-t types:size-t (pointer void)) void)
-(external-function bsearch "bsearch" ((pointer void) (pointer void) types:size-t types:size-t (pointer void)) (pointer void))
-(external-function sin "sin" (f64) f64)
-(external-function cos "cos" (f64) f64)
-(external-function sqrt "sqrt" (f64) f64)
+(base:external-function abs "abs" (types:c-int) types:c-int)
+(base:external-function strtol "strtol" (types:c-string (pointer types:c-string) types:c-int) types:c-long)
+(base:external-function strtoul "strtoul" (types:c-string (pointer types:c-string) types:c-int) types:c-ulong)
+(base:external-function qsort "qsort" ((pointer void) types:size-t types:size-t (pointer void)) void)
+(base:external-function bsearch "bsearch" ((pointer void) (pointer void) types:size-t types:size-t (pointer void)) (pointer void))
+(base:external-function sin "sin" (f64) f64)
+(base:external-function cos "cos" (f64) f64)
+(base:external-function sqrt "sqrt" (f64) f64)
 
 (export abs strtol strtoul qsort bsearch sin cos sqrt)

@@ -1,0 +1,32 @@
+; Explicitly imported standard declaration macros.  The first declaration uses
+; the minimal compiler bootstrap; every following declaration is defined by
+; this module's own MACRO macro and can therefore be replaced by an importer.
+
+(macro macro (&rest arguments)
+  (compiler:definition "%macro" arguments))
+
+(macro type (&rest arguments)
+  (compiler:definition "%type" arguments))
+
+(macro function (&rest arguments)
+  (compiler:definition "%function" arguments))
+
+(macro external-function (&rest arguments)
+  (compiler:definition "%external-function" arguments))
+
+(macro constant (&rest arguments)
+  (compiler:definition "%constant" arguments))
+
+(macro variable (&rest arguments)
+  (compiler:definition "%variable" arguments))
+
+(macro generic (&rest arguments)
+  (compiler:definition "%generic" arguments))
+
+(macro protocol (&rest arguments)
+  (compiler:definition "%protocol" arguments))
+
+(macro implementation (&rest arguments)
+  (compiler:definition "%implementation" arguments))
+
+(export macro type function external-function constant variable generic protocol implementation)

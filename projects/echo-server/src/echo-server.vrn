@@ -1,3 +1,5 @@
+(import base)
+
 (import libc.types :as libc)
 (import libc.constants :as constants)
 (import libc.memory :as memory)
@@ -5,7 +7,7 @@
 (import libc.descriptor :as descriptor)
 (import libc.network :as network)
 
-(function write-string ((value (pointer u8))) unit
+(base:function write-string ((value (pointer u8))) unit
   (do
     (descriptor:write constants:STDOUT-FILENO
                       (cast (pointer void) value)
@@ -13,16 +15,16 @@
     unit))
 
 #+darwin
-(function make-ipv4-socket-address ((port u16) (address u32)) libc:ipv4-socket-address
+(base:function make-ipv4-socket-address ((port u16) (address u32)) libc:ipv4-socket-address
   (libc:ipv4-socket-address 16 2 (network:htons port) address
                              (array-of 0 0 0 0 0 0 0 0)))
 
 #+linux
-(function make-ipv4-socket-address ((port u16) (address u32)) libc:ipv4-socket-address
+(base:function make-ipv4-socket-address ((port u16) (address u32)) libc:ipv4-socket-address
   (libc:ipv4-socket-address 2 (network:htons port) address
                              (array-of 0 0 0 0 0 0 0 0)))
 
-(function bind-ipv4 ((descriptor libc:file-descriptor) (port u16) (address (pointer u8))) libc:c-int
+(base:function bind-ipv4 ((descriptor libc:file-descriptor) (port u16) (address (pointer u8))) libc:c-int
   (let ((ipv4-address u32 (network:inet-addr address)))
     (match ipv4-address
       (4294967295 -1)
@@ -33,11 +35,11 @@
                                (cast (pointer void) (& address-storage)))
                          16))))))
 
-(function announce () unit
+(base:function announce () unit
   (write-string
    "Verona echo server\nListening on 127.0.0.1:35000\nOne client is served at a time; every byte received is echoed back.\nConnect with: nc 127.0.0.1 35000\nStop with Ctrl-C.\n"))
 
-(function echo-client ((client libc:file-descriptor) (buffer (pointer void))) unit
+(base:function echo-client ((client libc:file-descriptor) (buffer (pointer void))) unit
   (match (descriptor:read client buffer 1)
     (-1 unit)
     (0 unit)
@@ -45,7 +47,7 @@
              (descriptor:write client buffer 1)
              (echo-client client buffer)))))
 
-(function serve ((server libc:file-descriptor) (buffer (pointer void))) exit-code
+(base:function serve ((server libc:file-descriptor) (buffer (pointer void))) exit-code
   (let ((peer-address libc:ipv4-socket-address
                       (make-ipv4-socket-address 0 0))
         (peer-address-length libc:socket-length-t 16))
@@ -61,7 +63,7 @@
              (descriptor:close client)
              (serve server buffer)))))))
 
-(function run () exit-code
+(base:function run () exit-code
   (let ((server libc:file-descriptor
                 (network:socket constants:AF-INET constants:SOCK-STREAM constants:IPPROTO-IP))
         (buffer (pointer void) (memory:malloc 1))
@@ -79,5 +81,5 @@
                           (announce)
                           (serve server buffer))))))))))))
 
-(function main () exit-code
+(base:function main () exit-code
   (run))

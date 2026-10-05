@@ -1,3 +1,5 @@
+(import base)
+
 (import libc.types :as libc)
 (import libc.constants :as constants)
 (import libc.memory :as memory)
@@ -5,32 +7,32 @@
 (import libc.stdio :as stdio)
 (import libc.descriptor :as descriptor)
 
-(function write-standard-output ((buffer (pointer void)) (size libc:size-t)) unit
+(base:function write-standard-output ((buffer (pointer void)) (size libc:size-t)) unit
   (do
     (descriptor:write constants:STDOUT-FILENO buffer size)
     unit))
 
-(function write-string ((value (pointer u8))) unit
+(base:function write-string ((value (pointer u8))) unit
   (write-standard-output
    (cast (pointer void) value)
    (string:strlen value)))
 
-(function clear-memory ((buffer (pointer void)) (size libc:size-t)) unit
+(base:function clear-memory ((buffer (pointer void)) (size libc:size-t)) unit
   (do
     (memory:memset buffer 0 size)
     unit))
 
-(function read-character () libc:c-int
+(base:function read-character () libc:c-int
   (stdio:getchar))
 
-(function announce () unit
+(base:function announce () unit
   (write-string
    "Verona calculator\nEnter a single-digit expression, for example: 6*7\nSupported operators: + - * /\nSubmit an empty line or EOF to exit.\n\n"))
 
-(function write-prompt () unit
+(base:function write-prompt () unit
   (write-string "calc> "))
 
-(function write-result ((value i32) (buffer (array u8 3))) unit
+(base:function write-result ((value i32) (buffer (array u8 3))) unit
   (let ((tens i32 (%/-primitive-i32 value 10))
         (ones i32 (%--primitive-i32 value
                                     (%*-primitive-i32
@@ -45,7 +47,7 @@
       (write-standard-output (cast (pointer void) (& buffer)) 3)
       unit)))
 
-(function evaluate ((left-character i32) (operator i32)
+(base:function evaluate ((left-character i32) (operator i32)
                     (right-character i32) (buffer (array u8 3))) unit
   (let ((left i32 (%--primitive-i32 left-character 48))
         (right i32 (%--primitive-i32 right-character 48)))
@@ -60,7 +62,7 @@
        (_ 0))
      buffer)))
 
-(function repl ((buffer (array u8 3))) exit-code
+(base:function repl ((buffer (array u8 3))) exit-code
   (do
     (write-prompt)
     (let ((left i32 (read-character)))
@@ -74,7 +76,7 @@
                (evaluate left operator right buffer)
                (repl buffer))))))))
 
-(function main () exit-code
+(base:function main () exit-code
   (do
     (announce)
     (repl (array-of 0 0 0))))

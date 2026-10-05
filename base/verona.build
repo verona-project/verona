@@ -1,0 +1,5 @@
+(static-library base
+  (root base)
+  (module-path "src")
+  (target native)
+  (optimize 0))

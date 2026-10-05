@@ -615,6 +615,7 @@
    #:resolve-compilation-unit
    #:resolve-program
    #:definition-form-p
+   #:make-primitive-definition
    #:process-definition
    #:expand-top-level
    #:top-level-expansion-result

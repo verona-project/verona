@@ -1,3 +1,5 @@
+(import base)
+
 ;; Build aggregator for the libc category modules.  Import the category that
 ;; owns an API, such as libc.network or libc.descriptor, in client code.
 (import libc.types)

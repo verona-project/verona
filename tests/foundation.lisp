@@ -545,6 +545,14 @@ baz"))
          (:type i64)
          (:implementation 42))")))
 
+(test imports-the-explicit-base-macro-module
+  (let* ((unit (compile-file
+                (make-compiler :search-paths (list #P"base/src/"))
+                #P"tests/modules/base-client.vrn"))
+         (function (second (unit-declarations unit))))
+    (is (typep function 'function-declaration))
+    (is (string= "identity" (verona-name-value (declaration-name function))))))
+
 (test registers-macros-sequentially-in-the-compile-time-environment
   ;; X evaluates to the original, unevaluated syntax argument, making this a
   ;; minimal executable macro body without defining surface macro syntax yet.

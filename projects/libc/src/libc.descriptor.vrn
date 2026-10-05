@@ -1,13 +1,15 @@
+(import base)
+
 (import libc.types :as types)
 
 ;; Unbuffered file-descriptor I/O and descriptor duplication.
-(external-function open "open" (types:c-string types:c-int types:mode-t) types:file-descriptor)
-(external-function close "close" (types:file-descriptor) types:c-int)
-(external-function read "read" (types:file-descriptor (pointer void) types:size-t) types:ssize-t)
-(external-function write "write" (types:file-descriptor (pointer void) types:size-t) types:ssize-t)
-(external-function lseek "lseek" (types:file-descriptor types:off-t types:c-int) types:off-t)
-(external-function pipe "pipe" ((pointer types:file-descriptor)) types:c-int)
-(external-function dup "dup" (types:file-descriptor) types:file-descriptor)
-(external-function dup2 "dup2" (types:file-descriptor types:file-descriptor) types:file-descriptor)
+(base:external-function open "open" (types:c-string types:c-int types:mode-t) types:file-descriptor)
+(base:external-function close "close" (types:file-descriptor) types:c-int)
+(base:external-function read "read" (types:file-descriptor (pointer void) types:size-t) types:ssize-t)
+(base:external-function write "write" (types:file-descriptor (pointer void) types:size-t) types:ssize-t)
+(base:external-function lseek "lseek" (types:file-descriptor types:off-t types:c-int) types:off-t)
+(base:external-function pipe "pipe" ((pointer types:file-descriptor)) types:c-int)
+(base:external-function dup "dup" (types:file-descriptor) types:file-descriptor)
+(base:external-function dup2 "dup2" (types:file-descriptor types:file-descriptor) types:file-descriptor)
 
 (export open close read write lseek pipe dup dup2)

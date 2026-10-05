@@ -1,172 +1,174 @@
+(import base)
+
 (import libc.types :as types)
 
 ;; Standard process and stream constants.
-(constant EOF types:c-int -1)
-(constant EXIT-SUCCESS types:c-int 0)
-(constant EXIT-FAILURE types:c-int 1)
-(constant STDIN-FILENO types:file-descriptor 0)
-(constant STDOUT-FILENO types:file-descriptor 1)
-(constant STDERR-FILENO types:file-descriptor 2)
+(base:constant EOF types:c-int -1)
+(base:constant EXIT-SUCCESS types:c-int 0)
+(base:constant EXIT-FAILURE types:c-int 1)
+(base:constant STDIN-FILENO types:file-descriptor 0)
+(base:constant STDOUT-FILENO types:file-descriptor 1)
+(base:constant STDERR-FILENO types:file-descriptor 2)
 
 ;; lseek origins.
-(constant SEEK-SET types:c-int 0)
-(constant SEEK-CUR types:c-int 1)
-(constant SEEK-END types:c-int 2)
+(base:constant SEEK-SET types:c-int 0)
+(base:constant SEEK-CUR types:c-int 1)
+(base:constant SEEK-END types:c-int 2)
 
 ;; Platform-specific flags for open.
 #+darwin
-(constant O-RDONLY types:c-int 0)
+(base:constant O-RDONLY types:c-int 0)
 #+darwin
-(constant O-WRONLY types:c-int 1)
+(base:constant O-WRONLY types:c-int 1)
 #+darwin
-(constant O-RDWR types:c-int 2)
+(base:constant O-RDWR types:c-int 2)
 #+darwin
-(constant O-ACCMODE types:c-int 3)
+(base:constant O-ACCMODE types:c-int 3)
 #+darwin
-(constant O-NONBLOCK types:c-int 4)
+(base:constant O-NONBLOCK types:c-int 4)
 #+darwin
-(constant O-APPEND types:c-int 8)
+(base:constant O-APPEND types:c-int 8)
 #+darwin
-(constant O-SHLOCK types:c-int 16)
+(base:constant O-SHLOCK types:c-int 16)
 #+darwin
-(constant O-EXLOCK types:c-int 32)
+(base:constant O-EXLOCK types:c-int 32)
 #+darwin
-(constant O-ASYNC types:c-int 64)
+(base:constant O-ASYNC types:c-int 64)
 #+darwin
-(constant O-NOFOLLOW types:c-int 256)
+(base:constant O-NOFOLLOW types:c-int 256)
 #+darwin
-(constant O-CREAT types:c-int 512)
+(base:constant O-CREAT types:c-int 512)
 #+darwin
-(constant O-TRUNC types:c-int 1024)
+(base:constant O-TRUNC types:c-int 1024)
 #+darwin
-(constant O-EXCL types:c-int 2048)
+(base:constant O-EXCL types:c-int 2048)
 #+darwin
-(constant O-EVTONLY types:c-int 32768)
+(base:constant O-EVTONLY types:c-int 32768)
 #+darwin
-(constant O-NOCTTY types:c-int 131072)
+(base:constant O-NOCTTY types:c-int 131072)
 #+darwin
-(constant O-DIRECTORY types:c-int 1048576)
+(base:constant O-DIRECTORY types:c-int 1048576)
 #+darwin
-(constant O-SYMLINK types:c-int 2097152)
+(base:constant O-SYMLINK types:c-int 2097152)
 #+darwin
-(constant O-CLOEXEC types:c-int 16777216)
+(base:constant O-CLOEXEC types:c-int 16777216)
 #+darwin
-(constant O-NOFOLLOW-ANY types:c-int 536870912)
+(base:constant O-NOFOLLOW-ANY types:c-int 536870912)
 #+darwin
-(constant O-EXEC types:c-int 1073741824)
+(base:constant O-EXEC types:c-int 1073741824)
 
 #+linux
-(constant O-RDONLY types:c-int 0)
+(base:constant O-RDONLY types:c-int 0)
 #+linux
-(constant O-WRONLY types:c-int 1)
+(base:constant O-WRONLY types:c-int 1)
 #+linux
-(constant O-RDWR types:c-int 2)
+(base:constant O-RDWR types:c-int 2)
 #+linux
-(constant O-ACCMODE types:c-int 3)
+(base:constant O-ACCMODE types:c-int 3)
 #+linux
-(constant O-NONBLOCK types:c-int 2048)
+(base:constant O-NONBLOCK types:c-int 2048)
 #+linux
-(constant O-APPEND types:c-int 1024)
+(base:constant O-APPEND types:c-int 1024)
 #+linux
-(constant O-ASYNC types:c-int 8192)
+(base:constant O-ASYNC types:c-int 8192)
 #+linux
-(constant O-NOFOLLOW types:c-int 131072)
+(base:constant O-NOFOLLOW types:c-int 131072)
 #+linux
-(constant O-CREAT types:c-int 64)
+(base:constant O-CREAT types:c-int 64)
 #+linux
-(constant O-TRUNC types:c-int 512)
+(base:constant O-TRUNC types:c-int 512)
 #+linux
-(constant O-EXCL types:c-int 128)
+(base:constant O-EXCL types:c-int 128)
 #+linux
-(constant O-NOCTTY types:c-int 256)
+(base:constant O-NOCTTY types:c-int 256)
 #+linux
-(constant O-DIRECTORY types:c-int 65536)
+(base:constant O-DIRECTORY types:c-int 65536)
 #+linux
-(constant O-CLOEXEC types:c-int 524288)
+(base:constant O-CLOEXEC types:c-int 524288)
 #+linux
-(constant O-DIRECT types:c-int 16384)
+(base:constant O-DIRECT types:c-int 16384)
 #+linux
-(constant O-NOATIME types:c-int 262144)
+(base:constant O-NOATIME types:c-int 262144)
 #+linux
-(constant O-PATH types:c-int 2097152)
+(base:constant O-PATH types:c-int 2097152)
 
 ;; File permission bits used with creation and directory functions.
-(constant S-IRUSR types:mode-t 256)
-(constant S-IWUSR types:mode-t 128)
-(constant S-IXUSR types:mode-t 64)
-(constant S-IRGRP types:mode-t 32)
-(constant S-IWGRP types:mode-t 16)
-(constant S-IXGRP types:mode-t 8)
-(constant S-IROTH types:mode-t 4)
-(constant S-IWOTH types:mode-t 2)
-(constant S-IXOTH types:mode-t 1)
+(base:constant S-IRUSR types:mode-t 256)
+(base:constant S-IWUSR types:mode-t 128)
+(base:constant S-IXUSR types:mode-t 64)
+(base:constant S-IRGRP types:mode-t 32)
+(base:constant S-IWGRP types:mode-t 16)
+(base:constant S-IXGRP types:mode-t 8)
+(base:constant S-IROTH types:mode-t 4)
+(base:constant S-IWOTH types:mode-t 2)
+(base:constant S-IXOTH types:mode-t 1)
 
 ;; wait option: return immediately if no child has exited.
-(constant WNOHANG types:c-int 1)
+(base:constant WNOHANG types:c-int 1)
 
 ;; Socket families, kinds, protocols, and options for the networking calls.
-(constant AF-UNSPEC types:c-int 0)
-(constant AF-UNIX types:c-int 1)
-(constant AF-INET types:c-int 2)
+(base:constant AF-UNSPEC types:c-int 0)
+(base:constant AF-UNIX types:c-int 1)
+(base:constant AF-INET types:c-int 2)
 #+darwin
-(constant AF-INET6 types:c-int 30)
+(base:constant AF-INET6 types:c-int 30)
 #+linux
-(constant AF-INET6 types:c-int 10)
-(constant SOCK-STREAM types:c-int 1)
-(constant SOCK-DGRAM types:c-int 2)
-(constant SOCK-RAW types:c-int 3)
-(constant SOCK-RDM types:c-int 4)
-(constant SOCK-SEQPACKET types:c-int 5)
-(constant IPPROTO-IP types:c-int 0)
-(constant IPPROTO-ICMP types:c-int 1)
-(constant IPPROTO-TCP types:c-int 6)
-(constant IPPROTO-UDP types:c-int 17)
+(base:constant AF-INET6 types:c-int 10)
+(base:constant SOCK-STREAM types:c-int 1)
+(base:constant SOCK-DGRAM types:c-int 2)
+(base:constant SOCK-RAW types:c-int 3)
+(base:constant SOCK-RDM types:c-int 4)
+(base:constant SOCK-SEQPACKET types:c-int 5)
+(base:constant IPPROTO-IP types:c-int 0)
+(base:constant IPPROTO-ICMP types:c-int 1)
+(base:constant IPPROTO-TCP types:c-int 6)
+(base:constant IPPROTO-UDP types:c-int 17)
 #+darwin
-(constant SOL-SOCKET types:c-int 65535)
+(base:constant SOL-SOCKET types:c-int 65535)
 #+linux
-(constant SOL-SOCKET types:c-int 1)
-(constant SO-REUSEADDR types:c-int 4)
+(base:constant SOL-SOCKET types:c-int 1)
+(base:constant SO-REUSEADDR types:c-int 4)
 
 ;; Common POSIX error codes returned by functions that report failure as -1.
-(constant EPERM types:c-int 1)
-(constant ENOENT types:c-int 2)
-(constant ESRCH types:c-int 3)
-(constant EINTR types:c-int 4)
-(constant EIO types:c-int 5)
-(constant ENXIO types:c-int 6)
-(constant E2BIG types:c-int 7)
-(constant ENOEXEC types:c-int 8)
-(constant EBADF types:c-int 9)
-(constant ECHILD types:c-int 10)
+(base:constant EPERM types:c-int 1)
+(base:constant ENOENT types:c-int 2)
+(base:constant ESRCH types:c-int 3)
+(base:constant EINTR types:c-int 4)
+(base:constant EIO types:c-int 5)
+(base:constant ENXIO types:c-int 6)
+(base:constant E2BIG types:c-int 7)
+(base:constant ENOEXEC types:c-int 8)
+(base:constant EBADF types:c-int 9)
+(base:constant ECHILD types:c-int 10)
 #+darwin
-(constant EDEADLK types:c-int 11)
-(constant ENOMEM types:c-int 12)
-(constant EACCES types:c-int 13)
-(constant EFAULT types:c-int 14)
-(constant EBUSY types:c-int 16)
-(constant EEXIST types:c-int 17)
-(constant EXDEV types:c-int 18)
-(constant ENODEV types:c-int 19)
-(constant ENOTDIR types:c-int 20)
-(constant EISDIR types:c-int 21)
-(constant EINVAL types:c-int 22)
-(constant ENFILE types:c-int 23)
-(constant EMFILE types:c-int 24)
-(constant ENOTTY types:c-int 25)
-(constant EFBIG types:c-int 27)
-(constant ENOSPC types:c-int 28)
-(constant ESPIPE types:c-int 29)
-(constant EROFS types:c-int 30)
-(constant EMLINK types:c-int 31)
-(constant EPIPE types:c-int 32)
-(constant EDOM types:c-int 33)
-(constant ERANGE types:c-int 34)
+(base:constant EDEADLK types:c-int 11)
+(base:constant ENOMEM types:c-int 12)
+(base:constant EACCES types:c-int 13)
+(base:constant EFAULT types:c-int 14)
+(base:constant EBUSY types:c-int 16)
+(base:constant EEXIST types:c-int 17)
+(base:constant EXDEV types:c-int 18)
+(base:constant ENODEV types:c-int 19)
+(base:constant ENOTDIR types:c-int 20)
+(base:constant EISDIR types:c-int 21)
+(base:constant EINVAL types:c-int 22)
+(base:constant ENFILE types:c-int 23)
+(base:constant EMFILE types:c-int 24)
+(base:constant ENOTTY types:c-int 25)
+(base:constant EFBIG types:c-int 27)
+(base:constant ENOSPC types:c-int 28)
+(base:constant ESPIPE types:c-int 29)
+(base:constant EROFS types:c-int 30)
+(base:constant EMLINK types:c-int 31)
+(base:constant EPIPE types:c-int 32)
+(base:constant EDOM types:c-int 33)
+(base:constant ERANGE types:c-int 34)
 #+darwin
-(constant EAGAIN types:c-int 35)
+(base:constant EAGAIN types:c-int 35)
 #+linux
-(constant EDEADLK types:c-int 35)
+(base:constant EDEADLK types:c-int 35)
 #+linux
-(constant EAGAIN types:c-int 11)
+(base:constant EAGAIN types:c-int 11)
 
 (export
  EOF EXIT-SUCCESS EXIT-FAILURE STDIN-FILENO STDOUT-FILENO STDERR-FILENO

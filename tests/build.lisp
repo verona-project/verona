@@ -45,6 +45,17 @@
     (is (equal :native (verona.compiler:build-target-compilation-target core)))
     (is (= 0 (verona.compiler:build-target-optimization core)))))
 
+(test standard-library-is-a-base-module-project
+  (let* ((root (asdf:system-source-directory :verona))
+         (file (verona.compiler:parse-build-file
+                (merge-pathnames "base/verona.build" root)))
+         (base (verona.compiler:find-build-target file "base")))
+    (is (typep base 'verona.compiler:static-library-target))
+    (is (string= "base"
+                 (module-name-string
+                  (verona.compiler:build-target-root-module base))))
+    (is (probe-file (first (verona.compiler:build-target-module-paths base))))))
+
 (test validates-build-declarations-before-compilation
   (flet ((parse (contents)
            (verona.compiler:parse-build-source
