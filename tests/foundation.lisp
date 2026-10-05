@@ -20,6 +20,8 @@
 		#:environment-child #:environment-lookup #:unbound-name-error
 		#:evaluate #:expand #:unit-literal-p
 		#:declaration-name #:declaration-source #:declaration-expanded-syntax #:declaration-module
+		#:declaration-documentation #:declaration-documentation-syntax
+		#:declaration-type-declaration
 		#:type-declaration #:type-declaration-kind #:type-declaration-body #:type-alias-declaration
 		#:type-alias-declaration-target
 		#:function-declaration #:function-declaration-parameters
@@ -28,8 +30,8 @@
 		#:constant-declaration #:constant-declaration-type #:constant-declaration-value
 		#:variable-declaration #:variable-declaration-type #:variable-declaration-initializer
 		#:generic-declaration #:generic-declaration-arity
-		#:implementation-declaration
-		#:duplicate-declaration-error #:non-definition-top-level-error #:verona-macro-p
+		#:implementation-declaration #:implementation-declaration-protocol-application
+		#:definition-error #:duplicate-declaration-error #:non-definition-top-level-error #:verona-macro-p
 		#:semantic-program-declaration #:semantic-function-declaration
 		#:semantic-program-type-context #:semantic-type-declaration
 		#:semantic-type-alias-declaration
@@ -451,6 +453,98 @@ baz"))
     (is (= 0 (syntax-datum (variable-declaration-initializer variable))))
     (is (eq type (module-lookup module (make-verona-name "Point"))))))
 
+(test collects-named-type-definition-clauses
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(%type Point
+                    (:type (product (x i32) (y i32)))
+                    (:documentation \"A point.\"))
+                  (%type UserId (:type (alias i64)))
+                  (%type Handle (:type opaque))"))
+         (declarations (unit-declarations unit))
+         (point (first declarations)))
+    (is (= 3 (length declarations)))
+    (is (typep point 'type-declaration))
+    (is (string= "A point." (declaration-documentation point)))
+    (is (stringp (syntax-datum (declaration-documentation-syntax point))))
+    (is (typep (second declarations) 'type-alias-declaration))
+    (is (eq :opaque (type-declaration-kind (third declarations))))))
+
+(test collects-named-function-definition-clauses
+  (let ((function (first (unit-declarations
+                          (compile-string
+                           (make-compiler)
+                           "(%function add
+                               (:type (function ((left i32) (right i32)) i32))
+                               (:implementation (+ left right))
+                               (:documentation \"Add two integers.\"))")))))
+    (is (typep function 'function-declaration))
+    (is (typep (declaration-type-declaration function) 'verona:syntax))
+    (is (string= "Add two integers." (declaration-documentation function)))))
+
+(test collects-named-external-function-definition-clauses
+  (let ((external (first (unit-declarations
+                          (compile-string
+                           (make-compiler)
+                           "(%external-function c-abs
+                               (:type (function (i32) i32))
+                               (:external-name \"abs\"))")))))
+    (is (typep external 'verona:external-function-declaration))
+    (is (string= "abs" (verona:external-function-declaration-external-name external)))))
+
+(test collects-named-macro-definition-clauses
+  (let ((macro (first (unit-declarations
+                       (compile-string
+                        (make-compiler)
+                        "(%macro identity
+                            (:parameters (form))
+                            (:implementation form))")))))
+    (is (typep macro 'macro-declaration))))
+
+(test collects-named-value-definition-clauses
+  (let ((declarations (unit-declarations
+                       (compile-string
+                        (make-compiler)
+                        "(%constant answer (:type i32) (:implementation 42))
+                          (%variable counter (:type i32) (:implementation 0))"))))
+    (is (typep (first declarations) 'constant-declaration))
+    (is (typep (second declarations) 'variable-declaration))))
+
+(test collects-named-generic-implementation-definition-clauses
+  (let ((declarations (unit-declarations
+                       (compile-string
+                        (make-compiler)
+                        "(%generic choose (:parameters (value)))
+                          (%implementation
+                            (:generic choose)
+                            (:type (function ((value i32)) i32))
+                            (:implementation value))"))))
+    (is (typep (first declarations) 'generic-declaration))
+    (is (typep (second declarations) 'implementation-declaration))))
+
+(test collects-named-protocol-implementation-definition-clauses
+  (let ((declarations (unit-declarations
+                       (compile-string
+                        (make-compiler)
+                        "(%protocol measurement
+                            (:parameters (a))
+                            (:operations ((measure ((value a)) i32))))
+                          (%implementation
+                            (:protocol (measurement i32))
+                            (:operations ((function measure ((value i32)) i32 value))))"))))
+    (is (typep (first declarations) 'verona:protocol-declaration))
+    (is (typep (second declarations) 'implementation-declaration))
+    (is (implementation-declaration-protocol-application (second declarations)))))
+
+(test rejects-duplicate-named-definition-clauses
+  (signals definition-error
+    (compile-string
+     (make-compiler)
+     "(%constant answer
+         (:type i32)
+         (:type i64)
+         (:implementation 42))")))
+
 (test registers-macros-sequentially-in-the-compile-time-environment
   ;; X evaluates to the original, unevaluated syntax argument, making this a
   ;; minimal executable macro body without defining surface macro syntax yet.
@@ -474,25 +568,40 @@ baz"))
       (is (verona-macro-p
 	   (environment-lookup environment (make-verona-name name)))))))
 
-(test bootstrap-definition-macros-mechanically-rewrite-their-heads
+(test bootstrap-definition-macros-emit-named-clauses
   (let ((environment (make-bootstrap-environment)))
-	    (dolist (specification '(("type" . "%type")
-			     ("function" . "%function")
-			     ("macro" . "%macro")
-			     ("constant" . "%constant")
-			     ("variable" . "%variable")
-                             ("generic" . "%generic")
-                             ("implementation" . "%implementation")))
+	    (dolist (specification '(("type Point i32" "%type" (":type"))
+			     ("function add ((value i32)) i32 value" "%function"
+                                      (":type" ":implementation"))
+			     ("external-function c-abs \"abs\" (i32) i32" "%external-function"
+                                      (":type" ":external-name"))
+			     ("macro identity (form) form" "%macro"
+                                      (":parameters" ":implementation"))
+			     ("constant answer i32 42" "%constant" (":type" ":implementation"))
+			     ("variable counter i32 0" "%variable" (":type" ":implementation"))
+                             ("generic choose (value)" "%generic" (":parameters"))
+                             ("protocol measurement (a) (measure ((value a)) i32)" "%protocol"
+                              (":parameters" ":operations"))
+                             ("implementation choose ((value i32)) i32 value" "%implementation"
+                              (":generic" ":type" ":implementation"))
+                             ("implementation (measurement i32) (function measure ((value i32)) i32 value)"
+                              "%implementation" (":protocol" ":operations"))))
       (let* ((form (first (read-source
 			   (make-source "expansion.vrn"
-					(format nil "(~A declaration payload)"
-						(car specification))))))
-	     (original-tail (rest (verona-list-elements (syntax-datum form))))
+					(format nil "(~A)" (first specification))))))
 	     (expanded (expand form environment))
-	     (expanded-elements (verona-list-elements (syntax-datum expanded))))
-	(is (string= (cdr specification)
+	     (expanded-elements (verona-list-elements (syntax-datum expanded)))
+             (clauses (if (string= (second specification) "%implementation")
+                          (rest expanded-elements)
+                          (cddr expanded-elements))))
+	(is (string= (second specification)
 		     (verona-name-value (syntax-datum (first expanded-elements)))))
-	(is (every #'eq original-tail (rest expanded-elements)))))))
+	(is (equal (third specification)
+                   (mapcar (lambda (clause)
+                             (verona-name-value
+                              (syntax-datum
+                               (first (verona-list-elements (syntax-datum clause))))))
+                           clauses)))))))
 
 (test compiles-surface-definition-macros-without-interpreting-their-content
   (let* ((contents

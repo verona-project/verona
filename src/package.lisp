@@ -161,6 +161,9 @@
    #:declaration-expanded-syntax
    #:declaration-module
    #:declaration-compilation-unit
+   #:declaration-documentation
+   #:declaration-documentation-syntax
+   #:declaration-type-declaration
    #:type-declaration
    #:type-declaration-kind
    #:type-declaration-body

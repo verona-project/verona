@@ -166,6 +166,8 @@ directory containing `verona.build`.
 
 For the complete source-language, Common Lisp, LLVM, compiler-driver, and
 declarative-build reference, see [the API documentation](docs/API.md).
+The planned language and tooling work is described in the
+[roadmap](docs/ROADMAP.md).
 
 ## Editor support
 

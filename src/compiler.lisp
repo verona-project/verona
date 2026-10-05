@@ -171,7 +171,17 @@ front-end knows only feature names, avoiding a dependency on a native backend.")
    (expanded-syntax :initarg :expanded-syntax :reader declaration-expanded-syntax)
    (module :initarg :module
            :reader declaration-module
-           :reader declaration-compilation-unit)))
+           :reader declaration-compilation-unit)
+   ;; Named primitive-definition clauses are retained independently from a
+   ;; declaration's legacy positional fields.  This makes documentation and
+   ;; declaration-level type syntax available to compile-time clients without
+   ;; forcing every kind of declaration to manufacture a runtime body.
+   (documentation :initarg :documentation :initform nil
+                  :reader declaration-documentation)
+   (documentation-syntax :initarg :documentation-syntax :initform nil
+                         :reader declaration-documentation-syntax)
+   (type-declaration :initarg :type-declaration :initform nil
+                     :reader declaration-type-declaration)))
 
 (defclass type-declaration (declaration)
   ((kind :initarg :kind :reader type-declaration-kind)
@@ -335,6 +345,70 @@ result object avoids treating an ordinary list expression as several forms."
                        expected-name minimum-arguments))
     arguments))
 
+(defun definition-clause-p (syntax)
+  "Whether SYNTAX has the single-value `(:keyword value)` clause shape."
+  (let ((datum (syntax-datum syntax)))
+    (and (verona-list-p datum)
+         (= (length (verona-list-elements datum)) 2)
+         (let ((head (syntax-datum (first (verona-list-elements datum)))))
+           (and (verona-name-p head)
+                (plusp (length (verona-name-value head)))
+                (char= (char (verona-name-value head) 0) #\:))))))
+
+(defun parse-definition-clauses (definition clauses allowed required)
+  "Validate and index named primitive-definition CLAUSES.
+
+The returned alist maps a clause spelling such as `:type` to its value syntax.
+Every accepted clause deliberately has one value; multi-item payloads use an
+ordinary Verona list as that value, preserving an unambiguous source span."
+  (let ((result '()))
+    (dolist (clause clauses)
+      (unless (definition-clause-p clause)
+        (definition-fail clause "definition clauses must have the shape (:keyword value)"))
+      (let* ((elements (verona-list-elements (syntax-datum clause)))
+             (name (verona-name-value (syntax-datum (first elements))))
+             (value (second elements)))
+        (unless (member name allowed :test #'string=)
+          (definition-fail clause "~A does not accept the ~A clause" definition name))
+        (when (assoc name result :test #'string=)
+          (definition-fail clause "duplicate ~A clause" name))
+        (push (cons name value) result)))
+    (dolist (name required)
+      (unless (assoc name result :test #'string=)
+        (definition-fail definition "definition requires a ~A clause" name)))
+    result))
+
+(defun definition-clause-value (clauses name)
+  (cdr (assoc name clauses :test #'string=)))
+
+(defun definition-documentation-initargs (definition clauses)
+  "Return constructor arguments for a declaration's optional documentation."
+  (let ((syntax (definition-clause-value clauses ":documentation")))
+    (if syntax
+        (let ((text (syntax-datum syntax)))
+          (unless (stringp text)
+            (definition-fail syntax "documentation must be a string"))
+          (list :documentation text :documentation-syntax syntax))
+        '())))
+
+(defun function-type-declaration-components (definition type-syntax)
+  "Decode `(:type (function PARAMETERS RESULT))` for callable declarations."
+  (unless (verona-list-p (syntax-datum type-syntax))
+    (definition-fail type-syntax "function type declaration must be a list"))
+  (let ((elements (verona-list-elements (syntax-datum type-syntax))))
+    (unless (and (= (length elements) 3)
+                 (verona-name-p (syntax-datum (first elements)))
+                 (string= (verona-name-value (syntax-datum (first elements)))
+                           "function"))
+      (definition-fail type-syntax
+                       "function type declaration must be (function (parameters...) result)"))
+    (values (second elements) (third elements))))
+
+(defun definition-list-clause (definition syntax description)
+  (unless (verona-list-p (syntax-datum syntax))
+    (definition-fail syntax "~A must be a list" description))
+  syntax)
+
 (defun find-declaration (unit name)
   "Look up NAME in MODULE's declaration namespace.
 
@@ -422,6 +496,200 @@ never evaluates a declaration body."
          result)))
    :source definition))
 
+(defun named-definition-syntax-p (syntax)
+  "Whether SYNTAX uses the named-clause primitive-definition API.
+
+Legacy positional forms remain accepted while the surface macro package is
+being designed.  Once a clause appears in the position where this API starts,
+the whole form is parsed as named clauses rather than silently mixing styles."
+  (let* ((head (definition-head-name syntax))
+         (arguments (and head (rest (verona-list-elements (syntax-datum syntax))))))
+    (cond ((null head) nil)
+          ((string= head "%implementation")
+           (and arguments (definition-clause-p (first arguments))))
+          (t (and (second arguments) (definition-clause-p (second arguments)))))))
+
+(defun process-named-definition (context unit source expanded-syntax)
+  "Collect one named-clause primitive definition into a source declaration."
+  (let ((head (definition-head-name expanded-syntax))
+        (arguments (rest (verona-list-elements (syntax-datum expanded-syntax)))))
+    (flet ((make-declaration (class name &rest initargs)
+             (register-declaration
+              unit
+              (apply #'make-instance class :name name :source source
+                     :expanded-syntax expanded-syntax :module unit initargs)))
+           (named-arguments (minimum)
+             (when (< (length arguments) minimum)
+               (definition-fail expanded-syntax "%~A requires named clauses" (subseq head 1)))))
+      (cond
+        ((string= head "%type")
+         (named-arguments 2)
+         (let* ((name (definition-name expanded-syntax (first arguments)))
+                (clauses (parse-definition-clauses expanded-syntax (rest arguments)
+                                                   '(":type" ":documentation") '(":type")))
+                (type-syntax (definition-clause-value clauses ":type"))
+                (type-datum (syntax-datum type-syntax))
+                (initargs (append (list :type-declaration type-syntax)
+                                  (definition-documentation-initargs expanded-syntax clauses))))
+           (cond
+             ((and (verona-name-p type-datum)
+                   (string= (verona-name-value type-datum) "opaque"))
+              (apply #'make-declaration 'type-declaration name :kind :opaque :body '() initargs))
+             ((verona-list-p type-datum)
+              (let* ((elements (verona-list-elements type-datum))
+                     (kind-syntax (first elements))
+                     (kind (and kind-syntax (syntax-datum kind-syntax))))
+                (unless (and kind (verona-name-p kind))
+                  (definition-fail type-syntax "type declaration must name a type kind"))
+                (cond
+                  ((string= (verona-name-value kind) "alias")
+                   (unless (= (length elements) 2)
+                     (definition-fail type-syntax "alias type declaration must be (alias target)"))
+                   (apply #'make-declaration 'type-alias-declaration name
+                          :target (second elements) initargs))
+                  ((member (verona-name-value kind) '("product" "sum") :test #'string=)
+                   (apply #'make-declaration 'type-declaration name
+                          :kind (if (string= (verona-name-value kind) "product") :product :sum)
+                          :body (list type-syntax) initargs))
+                  (t (definition-fail type-syntax "unknown type declaration kind ~A"
+                                      (verona-name-value kind))))))
+             (t (definition-fail type-syntax
+                                 "type declaration must be opaque, (alias ...), (product ...), or (sum ...)")))))
+        ((string= head "%function")
+         (named-arguments 2)
+         (let* ((name (definition-name expanded-syntax (first arguments)))
+                (clauses (parse-definition-clauses expanded-syntax (rest arguments)
+                                                   '(":type" ":implementation" ":documentation" ":for")
+                                                   '(":type" ":implementation"))))
+           (multiple-value-bind (parameters result)
+               (function-type-declaration-components expanded-syntax
+                                                     (definition-clause-value clauses ":type"))
+             (apply #'make-declaration 'function-declaration name
+                    :parameters parameters :return-type result
+                    :for-clause (definition-clause-value clauses ":for")
+                    :body (definition-clause-value clauses ":implementation")
+                    :type-declaration (definition-clause-value clauses ":type")
+                    (definition-documentation-initargs expanded-syntax clauses)))))
+        ((string= head "%external-function")
+         (named-arguments 2)
+         (let* ((name (definition-name expanded-syntax (first arguments)))
+                (clauses (parse-definition-clauses expanded-syntax (rest arguments)
+                                                   '(":type" ":external-name" ":documentation")
+                                                   '(":type" ":external-name")))
+                (external-name-syntax (definition-clause-value clauses ":external-name"))
+                (external-name (syntax-datum external-name-syntax)))
+           (unless (stringp external-name)
+             (definition-fail external-name-syntax "external function name must be a string"))
+           (multiple-value-bind (parameters result)
+               (function-type-declaration-components expanded-syntax
+                                                     (definition-clause-value clauses ":type"))
+             (definition-list-clause expanded-syntax parameters "external function parameter types")
+             (apply #'make-declaration 'external-function-declaration name
+                    :external-name external-name :parameter-types parameters :result-type result
+                    :type-declaration (definition-clause-value clauses ":type")
+                    (definition-documentation-initargs expanded-syntax clauses)))))
+        ((string= head "%macro")
+         (named-arguments 2)
+         (let* ((name (definition-name expanded-syntax (first arguments)))
+                (clauses (parse-definition-clauses expanded-syntax (rest arguments)
+                                                   '(":parameters" ":implementation" ":documentation")
+                                                   '(":parameters" ":implementation")))
+                (parameters (definition-list-clause expanded-syntax
+                                                     (definition-clause-value clauses ":parameters")
+                                                     "macro parameters"))
+                (body (definition-clause-value clauses ":implementation"))
+                (parameter-names (macro-parameter-names expanded-syntax parameters))
+                (declaration (apply #'make-declaration 'macro-declaration name
+                                    :parameters parameters :body body
+                                    (definition-documentation-initargs expanded-syntax clauses))))
+           (environment-bind context name
+                             (declaration-macro expanded-syntax parameter-names body context))
+           declaration))
+        ((or (string= head "%constant") (string= head "%variable"))
+         (named-arguments 2)
+         (let* ((name (definition-name expanded-syntax (first arguments)))
+                (clauses (parse-definition-clauses expanded-syntax (rest arguments)
+                                                   '(":type" ":implementation" ":documentation")
+                                                   '(":type" ":implementation")))
+                (type (definition-clause-value clauses ":type"))
+                (implementation (definition-clause-value clauses ":implementation"))
+                (initargs (append (list :type-declaration type)
+                                  (definition-documentation-initargs expanded-syntax clauses))))
+           (if (string= head "%constant")
+               (apply #'make-declaration 'constant-declaration name
+                      :type type :value implementation initargs)
+               (apply #'make-declaration 'variable-declaration name
+                      :type type :initializer implementation initargs))))
+        ((string= head "%generic")
+         (named-arguments 2)
+         (let* ((name (definition-name expanded-syntax (first arguments)))
+                (clauses (parse-definition-clauses expanded-syntax (rest arguments)
+                                                   '(":parameters" ":documentation") '(":parameters")))
+                (parameters (definition-list-clause expanded-syntax
+                                                     (definition-clause-value clauses ":parameters")
+                                                     "generic parameters"))
+                (names (generic-parameter-names expanded-syntax parameters)))
+           (apply #'make-declaration 'generic-declaration name
+                  :parameters names :arity (length names)
+                  (definition-documentation-initargs expanded-syntax clauses))))
+        ((string= head "%protocol")
+         (named-arguments 2)
+         (let* ((name (definition-name expanded-syntax (first arguments)))
+                (clauses (parse-definition-clauses expanded-syntax (rest arguments)
+                                                   '(":parameters" ":operations" ":documentation")
+                                                   '(":parameters" ":operations")))
+                (parameters (definition-list-clause expanded-syntax
+                                                     (definition-clause-value clauses ":parameters")
+                                                     "protocol type parameters"))
+                (operations (definition-list-clause expanded-syntax
+                                                    (definition-clause-value clauses ":operations")
+                                                    "protocol operations")))
+           (apply #'make-declaration 'protocol-declaration name
+                  :parameters parameters :operations (verona-list-elements (syntax-datum operations))
+                  (definition-documentation-initargs expanded-syntax clauses))))
+        ((string= head "%implementation")
+         (let ((clauses (parse-definition-clauses expanded-syntax arguments
+                                                  '(":generic" ":protocol" ":type" ":implementation"
+                                                    ":operations" ":documentation") '())))
+           (let ((generic (definition-clause-value clauses ":generic"))
+                 (protocol (definition-clause-value clauses ":protocol")))
+             (when (and generic protocol)
+               (definition-fail expanded-syntax "%implementation cannot name both a generic and a protocol"))
+             (unless (or generic protocol)
+               (definition-fail expanded-syntax "%implementation requires a :generic or :protocol clause"))
+             (if generic
+                 (progn
+                   (dolist (required '(":type" ":implementation"))
+                     (unless (definition-clause-value clauses required)
+                       (definition-fail expanded-syntax "%implementation for a generic requires a ~A clause" required)))
+                   (let ((target (syntax-datum generic)))
+                     (unless (or (verona-name-p target) (qualified-name-p target))
+                       (definition-fail generic "generic implementation target must be a name"))
+                     (multiple-value-bind (parameters result)
+                         (function-type-declaration-components expanded-syntax
+                                                               (definition-clause-value clauses ":type"))
+                       (apply #'make-declaration 'implementation-declaration
+                              (if (qualified-name-p target) (qualified-name-name target) target)
+                              :generic-name target :parameters parameters :return-type result
+                              :body (definition-clause-value clauses ":implementation")
+                              :type-declaration (definition-clause-value clauses ":type")
+                              (definition-documentation-initargs expanded-syntax clauses)))))
+                 (progn
+                   (unless (definition-clause-value clauses ":operations")
+                     (definition-fail expanded-syntax
+                                      "%implementation for a protocol requires an :operations clause"))
+                   (definition-list-clause expanded-syntax protocol "protocol application")
+                   (let ((operations (definition-list-clause expanded-syntax
+                                                              (definition-clause-value clauses ":operations")
+                                                              "protocol implementation operations")))
+                     (apply #'make-declaration 'implementation-declaration
+                            (make-verona-name "implementation")
+                            :protocol-application protocol
+                            :operations (verona-list-elements (syntax-datum operations))
+                            :type-declaration protocol
+                            (definition-documentation-initargs expanded-syntax clauses))))))))
+        (t (definition-fail expanded-syntax "unknown primitive definition form ~A" head))))))
+
 (defun process-definition (context unit source &optional (expanded-syntax source))
   "Turn EXPANDED-SYNTAX into a declaration, retaining its original SOURCE.
 
@@ -431,6 +699,9 @@ expands syntax; this processor is the boundary that creates compiler objects."
   (check-type unit compilation-unit)
   (check-type source syntax)
   (check-type expanded-syntax syntax)
+  (when (named-definition-syntax-p expanded-syntax)
+    (return-from process-definition
+      (process-named-definition context unit source expanded-syntax)))
   (let ((head (definition-head-name expanded-syntax)))
     (unless head
       (error 'non-definition-top-level-error

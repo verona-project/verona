@@ -169,7 +169,11 @@ feature spelling while preserving the language's case-sensitive identifiers."
            ;; The grammar has no exponent notation; appending D0 makes the
            ;; resulting Common Lisp number the language's f64 representation.
            (read-from-string (concatenate 'string text "d0")))
-          ((string= text ":as") (make-verona-name text))
+          ;; Leading-colon names are declaration clauses.  `:as` predates
+          ;; the general form as IMPORT's alias clause; retaining all of them
+          ;; as ordinary Verona names keeps clause parsing in the compiler.
+          ((and (plusp (length text)) (char= (char text 0) #\:))
+           (make-verona-name text))
           ((find #\: text) (read-qualified-name-text state text start))
           ((find #\. text)
            ;; Dots are meaningful only when an enclosing grammar production

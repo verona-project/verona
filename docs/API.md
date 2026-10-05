@@ -92,6 +92,34 @@ nominal type is required.
 Macros may return one syntax object or a top-level sequence of definitions.
 Imports, exports, and native exports are only valid at the top level.
 
+### Primitive definition API
+
+The compiler-facing `%type`, `%function`, `%external-function`, `%macro`,
+`%constant`, `%variable`, `%generic`, `%implementation`, and `%protocol`
+forms accept named, source-aware clauses.  This API is intended for generated
+definitions and compiler clients; the surface forms above remain available.
+Every declaration accepts optional `(:documentation "text")`, retained on the
+collected declaration with its source syntax.
+
+```lisp
+(%type Point
+  (:type (product (x i32) (y i32)))
+  (:documentation "A two-dimensional integer point."))
+
+(%function add
+  (:type (function ((left i32) (right i32)) i32))
+  (:implementation (+ left right)))
+```
+
+Clause sets are declaration-specific: `%type` requires `:type`;
+`%function`, `%constant`, and `%variable` require `:type` and
+`:implementation`; `%external-function` requires `:type` and
+`:external-name`; `%macro` requires `:parameters` and `:implementation`;
+`%generic` requires `:parameters`; and `%protocol` requires `:parameters`
+and `:operations`.  A generic `%implementation` uses `:generic`, `:type`,
+and `:implementation`; a protocol `%implementation` uses `:protocol` and
+`:operations`.  A clause may appear at most once.
+
 ### Platform feature conditionals
 
 Prefix one form with `#+name` to include it when `name` is available, or with
@@ -239,7 +267,7 @@ requiring slot access:
 
 | Family | Public accessors |
 | --- | --- |
-| Source declarations | `declaration-name`, `declaration-source`, `declaration-expanded-syntax`, `declaration-module`, `declaration-compilation-unit`; `type-declaration-kind`, `type-declaration-body`, `type-alias-declaration-target`; `function-declaration-parameters`, `function-declaration-return-type`, `function-declaration-body`; `external-function-declaration-external-name`, `external-function-declaration-parameter-types`, `external-function-declaration-result-type`; `macro-declaration-parameters`, `macro-declaration-body`; `constant-declaration-type`, `constant-declaration-value`; `variable-declaration-type`, `variable-declaration-initializer`; `generic-declaration-parameters`, `generic-declaration-arity`; `implementation-declaration-generic-name`, `implementation-declaration-parameters`, `implementation-declaration-return-type`, `implementation-declaration-body`. |
+| Source declarations | `declaration-name`, `declaration-source`, `declaration-expanded-syntax`, `declaration-module`, `declaration-compilation-unit`, `declaration-documentation`, `declaration-documentation-syntax`, and `declaration-type-declaration`; `type-declaration-kind`, `type-declaration-body`, `type-alias-declaration-target`; `function-declaration-parameters`, `function-declaration-return-type`, `function-declaration-body`; `external-function-declaration-external-name`, `external-function-declaration-parameter-types`, `external-function-declaration-result-type`; `macro-declaration-parameters`, `macro-declaration-body`; `constant-declaration-type`, `constant-declaration-value`; `variable-declaration-type`, `variable-declaration-initializer`; `generic-declaration-parameters`, `generic-declaration-arity`; `implementation-declaration-generic-name`, `implementation-declaration-parameters`, `implementation-declaration-return-type`, `implementation-declaration-body`. |
 | Scopes and programs | `make-semantic-scope`, `semantic-scope-child`, `semantic-scope-bind`, `semantic-scope-find`, `semantic-scope-lookup`, `semantic-scope-parent`, `semantic-scope-owning-program`, `semantic-scope-owning-type-context`, `semantic-scope-owning-function`; `semantic-program-module-scope-for`, `semantic-program-declaration`, `make-bootstrap-semantic-scope`; `semantic-program-bootstrap-scope`, `semantic-program-module-scope`, `semantic-program-declarations`, `semantic-program-type-context`, `program-entry-module`, `program-modules`, `program-module-graph`, `program-target`, `semantic-program-native-exports`. |
 | Bindings and generics | `semantic-binding-name`; parameter, pattern, and let-binding accessors prefixed `parameter-binding-`, `pattern-binding-`, and `let-binding-`; `generic-name`, `generic-arity`, `generic-implementations`, `generic-find-implementation`; `generic-binding-generic`; and generic-implementation accessors prefixed `generic-implementation-`. |
 | Semantic declarations | `semantic-declaration-source-declaration`; accessors prefixed `semantic-type-declaration-`, `semantic-type-alias-declaration-`, `semantic-constant-declaration-`, `semantic-variable-declaration-`, `semantic-function-declaration-`, `semantic-external-function-declaration-`, and `semantic-generic-implementation-`. |

@@ -214,19 +214,144 @@ forms such as %FUNCTION are therefore left as Verona syntax for later processing
           ;; self-evaluating values.
           (t datum))))
 
-(defun bootstrap-definition-macro (primitive-name)
-  "Make a surface definition macro that mechanically produces PRIMITIVE-NAME.
+(defun bootstrap-generated-name (form name)
+  (syntax-with-datum form (make-verona-name name)))
 
-The arguments remain their original syntax objects: this layer deliberately
-does not inspect, evaluate, or otherwise interpret declaration contents."
+(defun bootstrap-generated-list (form &rest elements)
+  (syntax-with-datum form (apply #'make-verona-list elements)))
+
+(defun bootstrap-definition-clause (form name value)
+  (bootstrap-generated-list form (bootstrap-generated-name form name) value))
+
+(defun bootstrap-function-type (form parameters result)
+  (bootstrap-generated-list form (bootstrap-generated-name form "function")
+                            parameters result))
+
+(defun bootstrap-definition-arguments (form primitive-name arguments count)
+  (unless (= (length arguments) count)
+    (error "~A requires ~D argument~:P" primitive-name count))
+  arguments)
+
+(defun bootstrap-definition-expansion (form primitive-name arguments)
+  "Translate established surface declarations into named primitive clauses.
+
+Only information expressed by the existing surface forms is generated.  A
+later macro package will own documentation and other richer attributes."
+  (flet ((clauses (&rest clauses)
+           (let ((elements (verona-list-elements (syntax-datum form))))
+             (syntax-with-datum form
+                                (apply #'make-verona-list
+                                       (syntax-with-datum (first elements)
+                                                          (make-verona-name primitive-name))
+                                       clauses)))))
+    (cond
+      ((string= primitive-name "%type")
+       (unless (member (length arguments) '(1 2))
+         (error "%type requires a name and at most one type body"))
+       (let ((name (first arguments)))
+         (if (null (rest arguments))
+             (clauses name
+                      (bootstrap-definition-clause form ":type"
+                                                   (bootstrap-generated-name form "opaque")))
+             (let* ((body (second arguments))
+                    (datum (syntax-datum body))
+                    (elements (and (verona-list-p datum) (verona-list-elements datum)))
+                    (head (and elements (syntax-datum (first elements))))
+                    (type (if (and (verona-name-p head)
+                                   (member (verona-name-value head) '("product" "sum")
+                                           :test #'string=))
+                              body
+                              (bootstrap-generated-list form
+                                                        (bootstrap-generated-name form "alias")
+                                                        body))))
+               ;; Preserve the old surface diagnostic instead of turning an
+               ;; accidental field list into an alias target that fails much
+               ;; later during semantic resolution.
+               (when (and elements
+                          (or (verona-list-p head)
+                              (and (= (length elements) 2)
+                                   (verona-name-p head)
+                                   (not (member (verona-name-value head)
+                                                '("pointer" "array" "product" "sum")
+                                                :test #'string=)))))
+                 (definition-fail form
+                                  "implicit product syntax is not supported; use (type ~A (product ...))"
+                                  (verona-name-value (syntax-datum name))))
+               (clauses name (bootstrap-definition-clause form ":type" type))))))
+      ((string= primitive-name "%function")
+       (unless (member (length arguments) '(4 5))
+         (error "%function requires a name, optional for clause, parameters, return type, and body"))
+       (let ((polymorphic-p (= (length arguments) 5)))
+         (let ((name (first arguments))
+               (for-clause (and polymorphic-p (second arguments)))
+               (parameters (if polymorphic-p (third arguments) (second arguments)))
+               (result (if polymorphic-p (fourth arguments) (third arguments)))
+               (body (if polymorphic-p (fifth arguments) (fourth arguments))))
+           (apply #'clauses name
+                  (append (list (bootstrap-definition-clause
+                                 form ":type"
+                                 (bootstrap-function-type form parameters result)))
+                          (when for-clause
+                            (list (bootstrap-definition-clause form ":for" for-clause)))
+                          (list (bootstrap-definition-clause form ":implementation" body)))))))
+      ((string= primitive-name "%external-function")
+       (bootstrap-definition-arguments form primitive-name arguments 4)
+       (destructuring-bind (name external-name parameters result) arguments
+         (clauses name
+                  (bootstrap-definition-clause form ":type"
+                                               (bootstrap-function-type form parameters result))
+                  (bootstrap-definition-clause form ":external-name" external-name))))
+      ((string= primitive-name "%macro")
+       (bootstrap-definition-arguments form primitive-name arguments 3)
+       (destructuring-bind (name parameters body) arguments
+         (clauses name
+                  (bootstrap-definition-clause form ":parameters" parameters)
+                  (bootstrap-definition-clause form ":implementation" body))))
+      ((or (string= primitive-name "%constant")
+           (string= primitive-name "%variable"))
+       (bootstrap-definition-arguments form primitive-name arguments 3)
+       (destructuring-bind (name type implementation) arguments
+         (clauses name
+                  (bootstrap-definition-clause form ":type" type)
+                  (bootstrap-definition-clause form ":implementation" implementation))))
+      ((string= primitive-name "%generic")
+       (bootstrap-definition-arguments form primitive-name arguments 2)
+       (destructuring-bind (name parameters) arguments
+         (clauses name (bootstrap-definition-clause form ":parameters" parameters))))
+      ((string= primitive-name "%protocol")
+       (when (< (length arguments) 2)
+         (error "%protocol requires a name and type parameter list"))
+       (let ((name (first arguments))
+             (parameters (second arguments))
+             (operations (apply #'bootstrap-generated-list form (cddr arguments))))
+         (clauses name
+                  (bootstrap-definition-clause form ":parameters" parameters)
+                  (bootstrap-definition-clause form ":operations" operations))))
+      ((string= primitive-name "%implementation")
+       (when (< (length arguments) 2)
+         (error "%implementation requires a target and payload"))
+       (let ((target (first arguments)))
+         (if (verona-list-p (syntax-datum target))
+             (clauses
+              (bootstrap-definition-clause form ":protocol" target)
+              (bootstrap-definition-clause
+               form ":operations"
+               (apply #'bootstrap-generated-list form (rest arguments))))
+             (progn
+               (bootstrap-definition-arguments form primitive-name arguments 4)
+               (destructuring-bind (generic parameters result body) arguments
+                 (clauses
+                  (bootstrap-definition-clause form ":generic" generic)
+                  (bootstrap-definition-clause form ":type"
+                                               (bootstrap-function-type form parameters result))
+                  (bootstrap-definition-clause form ":implementation" body)))))))
+      (t (error "unknown bootstrap primitive ~S" primitive-name)))))
+
+(defun bootstrap-definition-macro (primitive-name)
+  "Make a surface definition macro that emits PRIMITIVE-NAME's named clauses."
   (make-verona-macro
    (lambda (&rest arguments)
-     (let* ((form *macro-expansion-syntax*)
-            (elements (verona-list-elements (syntax-datum form)))
-            (head (syntax-with-datum (first elements)
-                                     (make-verona-name primitive-name))))
-       (syntax-with-datum form
-                          (apply #'make-verona-list head arguments))))))
+     (bootstrap-definition-expansion *macro-expansion-syntax* primitive-name arguments))))
 
 (defun make-bootstrap-environment ()
   "Create the evaluator environment and its standard Verona definition macros."
