@@ -89,8 +89,9 @@ nominal type is required.
 | `(native-export NAME)` | Export a function with its Verona name to C. |
 | `(native-export NAME "c_name")` | Export a function to C with an explicit external name. |
 
-Macros may return one S-expression form or a top-level sequence of definitions.
-Imports, exports, and native exports are only valid at the top level.
+Macros may return one S-expression form in an expression position, or a
+top-level sequence of definitions when invoked at the top level. Imports,
+exports, and native exports are only valid at the top level.
 
 ### Base macro module
 
@@ -195,11 +196,13 @@ For example:
 (generated-function i32) ; defines generated-i32
 ```
 
-The macro may return any ordinary top-level form, including
+At the top level, a macro may return any ordinary top-level form, including
 `base:implementation`; expansion then continues normally and the resulting
-form is compiled as though it had appeared in the source.  `compiler:definition`
-remains available for a macro that needs to delegate one of the base positional
-definition contracts directly to the compiler.
+form is compiled as though it had appeared in the source. In an executable
+expression position, it returns exactly one expression form, which expands
+before resolution and type checking. `compiler:definition` remains available
+for a macro that needs to delegate one of the base positional definition
+contracts directly to the compiler.
 
 ### Primitive definition API
 

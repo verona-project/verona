@@ -1,12 +1,13 @@
 (import base)
 
-;; This macro receives STATUS as an ordinary S-expression and returns the
-;; primitive form that the compiler collects and compiles.
-(base:macro define-entry-point (status)
-  (list (keyword "%function")
-        (symbol "main")
-        (list)
-        (keyword "exit-code")
-        status))
+;; Application defines the executable entry point. BODY is an ordinary
+;; S-expression, so the generated declaration is still compiled normally.
+(base:macro application (body)
+  `(base:function main () exit-code ,body))
 
-(define-entry-point 42)
+;; This is expanded in the body emitted by APPLICATION, demonstrating that
+;; macros work in executable expression positions as well as at top level.
+(base:macro exit-status (status)
+  status)
+
+(application (exit-status 42))

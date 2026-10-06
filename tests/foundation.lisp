@@ -53,7 +53,7 @@
 		#:primitive-call #:primitive-call-operation #:conversion-expression
 		#:primitive-operation #:primitive-operation-kind #:primitive-operation-parameter-types
 		#:primitive-operation-result-type #:primitive-operation-nan-semantics
-		#:integer-literal #:boolean-literal #:character-literal #:character-literal-value #:string-literal
+		#:integer-literal #:integer-literal-value #:boolean-literal #:character-literal #:character-literal-value #:string-literal
 		#:sequence-expression #:sequence-expression-expressions
 		#:let-expression #:let-expression-bindings #:let-expression-scope #:let-expression-body
 		#:let-binding #:let-binding-type #:let-binding-initializer
@@ -674,6 +674,35 @@ baz"))
 			     (make-verona-name "identity"))))
     (is (typep type 'type-declaration))
     (is (string= "Later" (verona-name-value (declaration-name type))))))
+
+(test expands-macros-in-runtime-expression-positions
+  (let* ((module (compile-string
+                  (make-compiler)
+                  "(macro identity (form) form)
+                   (function literal () i8 (identity 42))
+                   (function nested () i32 (do (identity 0) (identity 7)))"
+                  :name "expression-macros.vrn"))
+         (declarations (unit-declarations module))
+         (program (compilation-unit-semantic-program module))
+         (literal (semantic-program-declaration program (second declarations)))
+         (nested (semantic-program-declaration program (third declarations)))
+         (literal-body (semantic-function-declaration-body literal))
+         (nested-body (semantic-function-declaration-body nested))
+         (nested-expressions (sequence-expression-expressions nested-body)))
+    ;; Declarations retain the source invocation; only the semantic expression
+    ;; is replaced by the macro result.
+    (is (string= "identity"
+                 (verona-name-value
+                  (syntax-datum
+                   (first (verona-list-elements
+                           (syntax-datum (function-declaration-body
+                                          (second declarations)))))))))
+    (is (typep literal-body 'integer-literal))
+    (is (= 42 (integer-literal-value literal-body)))
+    (is (typep nested-body 'sequence-expression))
+    (is (every (lambda (expression) (typep expression 'integer-literal))
+               nested-expressions))
+    (is (equal '(0 7) (mapcar #'integer-literal-value nested-expressions)))))
 
 (test retains-original-and-expanded-declaration-syntax
   (let* ((module (compile-string

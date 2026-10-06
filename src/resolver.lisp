@@ -2912,11 +2912,26 @@ therefore visible, while the binding being built cannot see itself."
 					    :type (type-context-unit-type
 						   (semantic-scope-owning-type-context scope))))))
 
+(defun expand-expression-macros (syntax scope)
+  "Expand SYNTAX at an executable expression position.
+
+The compile-time environment belongs to the owning module, rather than to the
+semantic lexical scope.  This keeps macro lookup independent of runtime
+bindings while allowing nested expression analysis to expand macros at every
+expression position."
+  (check-type syntax syntax)
+  (check-type scope semantic-scope)
+  (let ((module (semantic-scope-owning-module scope)))
+    (if module
+        (expand syntax (module-environment module))
+        syntax)))
+
 (defun infer-expression (syntax scope)
   "Analyze SYNTAX in SCOPE and return a fully typed semantic expression."
   (check-type syntax syntax)
   (check-type scope semantic-scope)
-  (let ((datum (syntax-datum syntax))
+  (let* ((syntax (expand-expression-macros syntax scope))
+         (datum (syntax-datum syntax))
 	(context (semantic-scope-owning-type-context scope)))
     (cond ((unit-literal-p datum)
 	   (make-instance 'unit-expression :syntax syntax
@@ -3003,7 +3018,8 @@ therefore visible, while the binding being built cannot see itself."
 (defun check-expression (syntax scope expected-type)
   "Analyze SYNTAX with EXPECTED-TYPE, contextually typing numeric literals."
   (check-type expected-type verona-type)
-  (let ((datum (syntax-datum syntax)))
+  (let* ((syntax (expand-expression-macros syntax scope))
+         (datum (syntax-datum syntax)))
 	(cond ((and (verona-list-p datum)
 		    (expression-special-form-name syntax)
 		    (string= (expression-special-form-name syntax) "array-of"))
