@@ -1,4 +1,5 @@
 (static-library libc
+  (version "0.1.0")
   (root libc)
   (module-path "src")
   (module-path "../../base/src")

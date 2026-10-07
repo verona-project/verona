@@ -16,7 +16,7 @@
                 (library \"sqlite3\")
                 (library-path \"vendor/lib\")
                 (framework \"CoreFoundation\"))
-              (static-library core (root core))
+              (static-library core (root core) (version \"2.3.4\"))
               (shared-library plugin (root plugin) (target \"x86_64-unknown-linux-gnu\"))"))
          (file (verona.compiler:parse-build-source source :directory #P"/private/tmp/build-config/"))
          (app (verona.compiler:find-build-target file "app"))
@@ -43,7 +43,8 @@
     (is (string= "x86_64-unknown-linux-gnu"
                  (verona.compiler:build-target-compilation-target plugin)))
     (is (equal :native (verona.compiler:build-target-compilation-target core)))
-    (is (= 0 (verona.compiler:build-target-optimization core)))))
+    (is (= 0 (verona.compiler:build-target-optimization core)))
+    (is (string= "2.3.4" (verona.compiler:build-target-version core)))))
 
 (test standard-library-is-a-base-module-project
   (let* ((root (asdf:system-source-directory :verona))
@@ -66,6 +67,8 @@
       (parse "(executable app (root app) (target native) (target \"x86_64-unknown-linux-gnu\"))"))
     (signals verona.compiler:build-parse-error
       (parse "(executable app (root app) (features))"))
+    (signals verona.compiler:build-parse-error
+      (parse "(static-library app (root app) (version \"1.0\") (version \"2.0\"))"))
     (signals verona.compiler:build-parse-error
       (parse "(executable app (root app) (features enabled) (features disabled))"))
     (signals verona.compiler:unknown-build-option-error

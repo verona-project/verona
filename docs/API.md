@@ -20,6 +20,7 @@ artifact path.
 
 | Option | Meaning |
 | --- | --- |
+| `--version`, `-V` | Print the Verona release version. |
 | `-o PATH`, `--output PATH` | Write the artifact to `PATH`. |
 | `--emit object` | Emit an object file. |
 | `--emit executable` | Emit a native executable (the default). `main` must have type `() -> unit`. |
@@ -471,9 +472,14 @@ canonical Verona package source and artifact roots, respectively, and must be
 absolute paths. They do not affect C-library lookup; native C libraries remain
 per-build `-L`, `-l`, or `pkg-config` inputs.
 
+Verona 0.1.0 is the initial release line. `verona --version` prints the
+version declared by the primary compiler system. Bundled libraries declare the
+same release version in their build metadata.
+
 | Function | Description |
 | --- | --- |
 | `resolve-compilation-target &key triple cpu features reader-features` | Resolve LLVM target data, pointer width, platform, object format, and optional explicit Verona reader features before front-end analysis. |
+| `verona-version` | Return the primary compiler release version. |
 | `resolve-verona-environment &key getenv` | Read and validate the required Verona source and library roots. `getenv` supports embedding and tests. |
 | `make-link-options &key libraries library-search-paths frameworks` | Build native linker options. |
 | `make-native-toolchain &key compiler archiver` | Create the default linker/archiver adapter. Defaults read `VERONA_LINKER` and `VERONA_AR`. |
@@ -503,7 +509,7 @@ and `link-options-frameworks`.
 or `(shared-library NAME ...)` target. Every target needs exactly one
 `(root module.name)`. Optional clauses are `(module-path "PATH")`,
 `(target native)` or `(target "TRIPLE")`, `(optimize 0|1|2|3)`,
-`(features NAME...)`, `(library "NAME")`, `(library-path "PATH")`, and
+`(version "VERSION")`, `(features NAME...)`, `(library "NAME")`, `(library-path "PATH")`, and
 `(framework "NAME")`.  `features` may appear once per target and supplies
 reader conditions to that target and all of its imported Verona modules.
 The combined feature list is append-only: compiler-provided features come
@@ -514,6 +520,10 @@ first, then `verona build … --feature NAME` flags, then this target's
 (executable app
   (root app.main)
   (features sqlite telemetry))
+
+(static-library example
+  (root example)
+  (version "0.1.0"))
 ```
 
 | Function | Description |

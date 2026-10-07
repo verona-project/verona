@@ -18,6 +18,10 @@
         (is (verona:unit-literal-p return-type))
         (is (string= "i32" (verona:verona-name-value return-type))))))
 
+(test reports-the-primary-asdf-release-version
+  (is (string= "0.1.0" (verona.compiler:verona-version)))
+  (is (string= "0.1.0" (verona.compiler:main (list "--version")))))
+
 (test resolves-independent-verona-package-directories-from-environment
   (let ((environment
           (verona.compiler:resolve-verona-environment

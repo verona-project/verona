@@ -32,6 +32,10 @@
 (define-condition archiver-failure (toolchain-failure) ())
 (define-condition shared-library-link-failure (linker-failure) ())
 
+(defun verona-version ()
+  "Return the release version declared by the primary Verona ASDF system."
+  (asdf:component-version (asdf:find-system :verona)))
+
 (defmethod verona:diagnostic-code-for ((condition unsupported-artifact))
   (declare (ignore condition)) "E1001")
 (defmethod verona:diagnostic-code-for ((condition unsupported-target))

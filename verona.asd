@@ -1,5 +1,6 @@
 (asdf:defsystem #:verona
   :description "The Verona compiler front-end foundation"
+  :version "0.1.0"
   :serial t
   :components ((:file "src/package")
                (:file "src/source")
@@ -27,6 +28,7 @@
 
 (asdf:defsystem #:verona/compiler
   :description "Verona compiler driver and native artifact toolchain"
+  :version "0.1.0"
   :depends-on (#:verona/backend/llvm)
   :serial t
   :components ((:file "src/driver/package")

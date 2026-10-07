@@ -54,6 +54,9 @@
    (compilation-target :initarg :compilation-target
                        :reader build-target-compilation-target)
    (optimization :initarg :optimization :reader build-target-optimization)
+   ;; Package versioning belongs to build metadata. It is optional for local
+   ;; projects but bundled libraries declare it explicitly for releases.
+   (version :initarg :version :initform nil :reader build-target-version)
    (reader-features :initarg :reader-features :initform '()
                     :reader build-target-reader-features)
    (link-options :initarg :link-options :reader build-target-link-options)))
@@ -119,6 +122,12 @@
       (build-fail 'build-parse-error syntax "~A requires a string" option))
     datum))
 
+(defun build-version (syntax)
+  (let ((version (build-string syntax "version")))
+    (when (or (string= version "") (find #\Newline version) (find #\Return version))
+      (build-fail 'build-parse-error syntax "version requires a non-empty single-line string"))
+    version))
+
 (defun build-feature-names (arguments option)
   "Read one non-empty FEATURES clause as Verona identifier spellings."
   (unless arguments
@@ -134,7 +143,7 @@
 (defun resolve-build-directory (value directory)
   (uiop:ensure-directory-pathname (merge-pathnames value directory)))
 
-(defun parse-build-option (option directory root target optimization reader-features
+(defun parse-build-option (option directory root target optimization version reader-features
                            module-paths libraries library-paths frameworks)
   (let* ((elements (build-list-elements option "build option"))
          (head (build-head option "build option"))
@@ -168,6 +177,9 @@
            (unless (and (integerp value) (<= 0 value 3))
              (build-fail 'build-parse-error option "optimize must be an integer from 0 through 3"))
            (setf optimization value)))
+        ((string= head "version")
+         (duplicate-p version "version")
+         (setf version (build-version (one-argument))))
         ((string= head "features")
          (duplicate-p reader-features "features")
          (setf reader-features (build-feature-names arguments option)))
@@ -179,7 +191,7 @@
         ((string= head "framework")
          (push (build-string (one-argument) "framework") frameworks))
         (t (build-fail 'unknown-build-option-error option "unknown build option ~A" head))))
-    (values root target optimization reader-features
+    (values root target optimization version reader-features
             module-paths libraries library-paths frameworks)))
 
 (defun artifact-target-class (head syntax)
@@ -198,12 +210,12 @@
     (let ((name-datum (verona:syntax-datum (first arguments))))
       (unless (verona:verona-name-p name-datum)
         (build-fail 'build-parse-error (first arguments) "build target name must be a name"))
-      (let ((root nil) (target nil) (optimization nil) (reader-features nil)
+      (let ((root nil) (target nil) (optimization nil) (version nil) (reader-features nil)
             (module-paths '()) (libraries '()) (library-paths '()) (frameworks '()))
         (dolist (option (rest arguments))
-          (multiple-value-setq (root target optimization reader-features
-                                        module-paths libraries library-paths frameworks)
-            (parse-build-option option directory root target optimization reader-features module-paths
+          (multiple-value-setq (root target optimization version reader-features
+                                     module-paths libraries library-paths frameworks)
+            (parse-build-option option directory root target optimization version reader-features module-paths
                                 libraries library-paths frameworks)))
         (unless root
           (build-fail 'build-parse-error syntax "~A target ~A requires exactly one root option"
@@ -214,6 +226,7 @@
                        :module-paths (or (nreverse module-paths) (list directory))
                        :compilation-target (or target :native)
                        :optimization (or optimization 0)
+                       :version version
                        :reader-features reader-features
                        :link-options (make-link-options
                                       :libraries (nreverse libraries)

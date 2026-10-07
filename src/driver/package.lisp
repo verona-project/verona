@@ -31,6 +31,7 @@
    #:toolchain-emit-object #:toolchain-link-executable
    #:toolchain-archive-static-library #:toolchain-link-shared-library
    #:compile-root #:compile-file #:default-output-path
+   #:verona-version
    #:compiler-driver-error #:unsupported-artifact #:unsupported-target
    #:llvm-verification-failure #:object-emission-failure #:invalid-entry-point
    #:tool-failure #:tool-failure-executable #:tool-failure-arguments
@@ -52,7 +53,8 @@
    #:build-file #:build-file-source #:build-file-targets
    #:build-target #:build-target-name #:build-target-root-module
    #:build-target-module-paths #:build-target-compilation-target
-   #:build-target-optimization #:build-target-reader-features #:build-target-link-options
+   #:build-target-optimization #:build-target-version #:build-target-reader-features
+   #:build-target-link-options
    #:executable-target #:static-library-target #:shared-library-target
    #:build-invocation #:make-build-invocation #:build-invocation-target-name
    #:build-invocation-output-directory #:build-invocation-reader-features

@@ -14,6 +14,11 @@
   "Command line entry point for `verona compile` and `verona build`."
   (handler-case
       (let ((command (pop arguments)))
+        (when (and command (or (string= command "--version") (string= command "-V")))
+          (unless (null arguments)
+            (cli-fail "--version does not accept arguments"))
+          (format t "~A~%" (verona-version))
+          (return-from main (verona-version)))
         (when (and command (string= command "build"))
           (let ((target (pop arguments)) (output-directory (pop arguments))
                 (reader-features '()))
