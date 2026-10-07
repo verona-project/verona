@@ -465,9 +465,16 @@ Backend configuration/readback accessors are `llvm-backend-context`,
 
 ## Native compiler-driver and build API
 
+`resolve-verona-environment` reads the required independent
+`VERONA_SOURCE_DIR` and `VERONA_LIBRARY_DIR` variables. They identify the
+canonical Verona package source and artifact roots, respectively, and must be
+absolute paths. They do not affect C-library lookup; native C libraries remain
+per-build `-L`, `-l`, or `pkg-config` inputs.
+
 | Function | Description |
 | --- | --- |
 | `resolve-compilation-target &key triple cpu features reader-features` | Resolve LLVM target data, pointer width, platform, object format, and optional explicit Verona reader features before front-end analysis. |
+| `resolve-verona-environment &key getenv` | Read and validate the required Verona source and library roots. `getenv` supports embedding and tests. |
 | `make-link-options &key libraries library-search-paths frameworks` | Build native linker options. |
 | `make-native-toolchain &key compiler archiver` | Create the default linker/archiver adapter. Defaults read `VERONA_LINKER` and `VERONA_AR`. |
 | `make-compiler-driver &key search-paths target optimization-level toolchain` | Configure a reusable native compiler driver. |
@@ -481,6 +488,7 @@ Backend configuration/readback accessors are `llvm-backend-context`,
 
 Driver accessors are `compiler-driver-search-paths`, `compiler-driver-target`,
 `compiler-driver-optimization-level`, `compiler-driver-toolchain`,
+`verona-environment-source-directory`, `verona-environment-library-directory`,
 `compilation-target-triple`, `compilation-target-cpu`,
 `compilation-target-features`, `compilation-target-data-layout`,
 `compilation-target-reader-features`,

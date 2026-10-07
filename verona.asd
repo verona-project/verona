@@ -31,6 +31,7 @@
   :serial t
   :components ((:file "src/driver/package")
                (:file "src/driver/driver")
+               (:file "src/driver/environment")
                (:file "src/driver/build")
                (:file "src/driver/cli")))
 

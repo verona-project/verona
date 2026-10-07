@@ -39,6 +39,14 @@
    #:toolchain-failure-exit-status #:toolchain-failure-stdout
    #:toolchain-failure-stderr #:linker-failure #:archiver-failure
    #:shared-library-link-failure
+   ;; Verona package installation and discovery environment.
+   #:verona-environment #:resolve-verona-environment
+   #:verona-environment-source-directory #:verona-environment-library-directory
+   #:verona-environment-error #:missing-verona-environment-variable
+   #:missing-verona-environment-variable-name
+   #:invalid-verona-environment-directory
+   #:invalid-verona-environment-directory-variable
+   #:invalid-verona-environment-directory-value
    ;; Declarative build configuration.
    #:build-name #:make-build-name #:build-name-p #:build-name-value #:build-name=
    #:build-file #:build-file-source #:build-file-targets

@@ -18,6 +18,28 @@
         (is (verona:unit-literal-p return-type))
         (is (string= "i32" (verona:verona-name-value return-type))))))
 
+(test resolves-independent-verona-package-directories-from-environment
+  (let ((environment
+          (verona.compiler:resolve-verona-environment
+           :getenv (lambda (variable)
+                     (cond ((string= variable "VERONA_SOURCE_DIR") "/private/tmp/verona-source")
+                           ((string= variable "VERONA_LIBRARY_DIR") "/private/tmp/verona-library"))))))
+    (is (string= "/private/tmp/verona-source/"
+                 (namestring (verona.compiler:verona-environment-source-directory environment))))
+    (is (string= "/private/tmp/verona-library/"
+                 (namestring (verona.compiler:verona-environment-library-directory environment))))))
+
+(test requires-both-verona-package-directory-environment-variables
+  (signals verona.compiler:missing-verona-environment-variable
+    (verona.compiler:resolve-verona-environment
+     :getenv (lambda (variable)
+               (and (string= variable "VERONA_SOURCE_DIR") "/private/tmp/verona-source"))))
+  (signals verona.compiler:invalid-verona-environment-directory
+    (verona.compiler:resolve-verona-environment
+     :getenv (lambda (variable)
+               (if (string= variable "VERONA_SOURCE_DIR") "relative/source"
+                   "/private/tmp/verona-library")))))
+
 (test compiler-target-provides-platform-and-explicit-reader-features
   (let* ((target (verona.compiler:resolve-compilation-target
                   :reader-features '("project-switch")))
