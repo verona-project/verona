@@ -23,7 +23,7 @@ artifact path.
 | `--version`, `-V` | Print the Verona release version. |
 | `-o PATH`, `--output PATH` | Write the artifact to `PATH`. |
 | `--emit object` | Emit an object file. |
-| `--emit executable` | Emit a native executable (the default). `main` must have type `() -> unit`. |
+| `--emit executable` | Emit a native executable (the default). `main` returns `exit-code` and may accept `(argc i32)` and `(argv (pointer (pointer u8)))`. |
 | `--emit static-library` | Emit `libNAME.a`. |
 | `--emit shared-library` | Emit `libNAME.dylib` on Darwin or `libNAME.so` on Linux. |
 | `--target TRIPLE` | Compile for an LLVM target triple. |
@@ -274,6 +274,7 @@ the named spellings are case-insensitive. Unicode characters are not supported y
 | `(do expression...)` | Evaluate expressions in order and return the last value. |
 | `(& place)`, `(address-of place)` | Create a pointer to an addressable place. |
 | `(deref pointer)`, `(dereference pointer)` | Turn a pointer to a complete type into a place. |
+| `(pointer-offset pointer integer)` | Advance a pointer by an element count. The pointer must target a complete type; callers are responsible for bounds and lifetime. |
 | `(load place)` | Read a place. |
 | `(assign place value)`, `(store place value)` | Write a writable place. |
 | `(cast Type value)` | Explicit pointer cast. |
@@ -443,7 +444,7 @@ Use this layer after `compile-string` or `compile-file`, passing the unit's
 | `emit-object backend output` | Verify and emit an object file. |
 | `emit-output program output &key configuration` | Emit IR, an object, or an executable according to `codegen-configuration-output-kind`. |
 | `build-executable program output &key configuration` | Legacy convenience path that lowers and links an executable. |
-| `add-platform-entry-wrapper backend program` | Add the C `main` adapter for a Verona `main : () -> unit`. |
+| `add-platform-entry-wrapper backend program` | Add the C `main` adapter for a Verona `main : () -> exit-code` or `main : (i32, (pointer (pointer u8))) -> exit-code`. |
 | `validate-executable-entry-point program` | Validate that executable entry-point contract. |
 | `lower-type backend type` | Lower a canonical Verona type to LLVM. |
 | `emit-value backend expression` | Emit an LLVM value for a resolved expression. |

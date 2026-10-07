@@ -126,10 +126,13 @@ verona compile src/lib.vrn --emit static-library -o libverona.a
 verona compile src/lib.vrn --emit shared-library -o libverona.dylib
 ```
 
-Executables require `(function main () unit ...)`; the generated platform
-wrapper returns status zero. Object files, static libraries, and shared
-libraries do not require `main`. `-L`, `-l`, and `--framework` pass native
-linker inputs through the driver; frameworks are Darwin-only.
+Executables may use either `(function main () exit-code ...)` or
+`(function main ((argc i32) (argv (pointer (pointer u8)))) exit-code ...)`.
+The latter receives the platform's C-style argument count and vector; use
+`(load (deref (pointer-offset argv index)))` to read an argument pointer.
+Object files, static libraries, and shared libraries do not require `main`.
+`-L`, `-l`, and `--framework` pass native linker inputs through the driver;
+frameworks are Darwin-only.
 
 Verona-module visibility is separate from native visibility. Expose a function
 to C with an explicit top-level declaration:

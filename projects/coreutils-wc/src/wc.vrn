@@ -1,0 +1,81 @@
+(import base)
+
+(import libc.constants :as constants)
+(import libc.stdio :as stdio)
+(import libc.types :as libc)
+
+;; This first port implements the POSIX wc default stream mode. Command-line
+;; arguments are available through MAIN's argc/argv parameters for a future
+;; flags-and-file-operands layer.
+
+(base:function whitespace ((character libc:c-int)) bool
+  (match character
+    (9 true)
+    (10 true)
+    (11 true)
+    (12 true)
+    (13 true)
+    (32 true)
+    (_ false)))
+
+(base:function write-character ((character libc:c-int)) unit
+  (do
+    (stdio:putchar character)
+    unit))
+
+(base:function write-digit ((digit u64)) unit
+  (write-character
+   (%trunc-primitive-u64-i32
+    (%+-primitive-u64 digit 48))))
+
+(base:function write-number ((value u64)) unit
+  (match (%<-primitive-u64 value 10)
+    (true (write-digit value))
+    (false
+     (do
+       (write-number (%/-primitive-u64 value 10))
+       (write-digit (%--primitive-u64 value
+                                      (%*-primitive-u64
+                                       (%/-primitive-u64 value 10) 10)))
+       unit))))
+
+(base:function write-counts ((lines u64) (words u64) (bytes u64)) unit
+  (do
+    (write-number lines)
+    (write-character 32)
+    (write-number words)
+    (write-character 32)
+    (write-number bytes)
+    (write-character 10)
+    unit))
+
+;; Each recursive call is in tail position and only carries scalar values, so
+;; the LLVM backend can lower the stream walk as a musttail loop.
+(base:function count-standard-input
+  ((lines u64) (words u64) (bytes u64) (inside-word bool))
+  exit-code
+  (let ((character libc:c-int (stdio:getchar)))
+    (match character
+      (-1 (do
+            (write-counts lines words bytes)
+            0))
+      (_ (let ((next-bytes u64 (%+-primitive-u64 bytes 1)))
+           (match (whitespace character)
+             (true
+              (count-standard-input
+               (match character
+                 (10 (%+-primitive-u64 lines 1))
+                 (_ lines))
+               words
+               next-bytes
+               false))
+             (false
+              (match inside-word
+                (true (count-standard-input lines words next-bytes true))
+                (false (count-standard-input lines
+                                             (%+-primitive-u64 words 1)
+                                             next-bytes
+                                             true))))))))))
+
+(base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (count-standard-input 0 0 0 false))

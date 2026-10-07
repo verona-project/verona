@@ -77,17 +77,34 @@
                   (source-name= (semantic-source-binding declaration) "main")))
            (semantic-declarations program)))
 
+(defun command-line-entry-point-p (program entry)
+  "Whether ENTRY accepts the portable C argc/argv pair."
+  (let* ((context (verona:semantic-program-type-context program))
+         (parameters (verona:semantic-function-declaration-parameters entry))
+         (byte (verona:type-context-integer-type context nil 8))
+         (arguments (verona:type-context-pointer-type
+                     context (verona:type-context-pointer-type context byte))))
+    (and (= (length parameters) 2)
+         (eq (verona:parameter-binding-type (first parameters))
+             (verona:type-context-c-int-type context))
+         (eq (verona:parameter-binding-type (second parameters)) arguments))))
+
 (defun validate-executable-entry-point (program)
-  "Enforce the Verona executable contract: main : () -> exit-code."
+  "Enforce the Verona executable contract.
+
+An executable may use either `main : () -> exit-code` or the C-compatible
+`main : (i32, (pointer (pointer u8))) -> exit-code` form for argc and argv."
   (let ((entry (find-entry-function program)))
     (unless entry
       (entry-fail "executable requires a Verona function named main"))
-    (unless (null (verona:semantic-function-declaration-parameters entry))
-      (entry-fail "Verona main must not have parameters"))
     (unless (eq (verona:semantic-function-declaration-return-type entry)
                 (verona:type-context-c-int-type
                  (verona:semantic-program-type-context program)))
       (entry-fail "Verona main must return exit-code (the C int type)"))
+    (unless (or (null (verona:semantic-function-declaration-parameters entry))
+                (command-line-entry-point-p program entry))
+      (entry-fail
+       "Verona main must have no parameters or parameters (i32, (pointer (pointer u8)))"))
     entry))
 
 (defun add-platform-entry-wrapper (backend program)
@@ -95,14 +112,22 @@
   (let* ((entry (validate-executable-entry-point program))
          (verona-main (backend-binding backend entry))
          (context (llvm-backend-context backend))
+         (argument-main-p (command-line-entry-point-p program entry))
          (platform-main (llvm:add-function
                          (llvm-backend-module backend) "main"
-                         (llvm:function-type (llvm:int32-type :context context) '())))
+                         (llvm:function-type
+                          (llvm:int32-type :context context)
+                          (if argument-main-p
+                              (list (llvm:int32-type :context context)
+                                    (llvm:pointer-type (llvm:int-type 8 :context context)))
+                              '()))))
          (block (llvm:append-basic-block platform-main "entry" :context context)))
     (llvm:position-builder-at-end (llvm-backend-builder backend) block)
     (llvm:build-ret (llvm-backend-builder backend)
                     (llvm:build-call (llvm-backend-builder backend)
-                                     verona-main '() "verona.exit"))
+                                     verona-main
+                                     (if argument-main-p (llvm:params platform-main) '())
+                                     "verona.exit"))
     platform-main))
 
 (defun add-legacy-platform-entry-wrapper (backend program)

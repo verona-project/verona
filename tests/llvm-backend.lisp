@@ -19,6 +19,19 @@
       (when (probe-file executable)
         (delete-file executable)))))
 
+(defun compile-and-run-native-with-arguments (source arguments)
+  (let* ((executable (native-test-path "program"))
+         (unit (compile-string (make-compiler) source))
+         (program (compilation-unit-semantic-program unit)))
+    (unwind-protect
+         (progn
+           (verona.backend.llvm:build-executable program executable)
+           (nth-value 2 (uiop:run-program (cons (namestring executable) arguments)
+                                           :output :string :error-output :string
+                                           :ignore-error-status t)))
+      (when (probe-file executable)
+        (delete-file executable)))))
+
 (defun compile-and-run-native-with-link-arguments (source arguments)
   (let* ((executable (native-test-path "program"))
          (unit (compile-string (make-compiler) source))
@@ -290,6 +303,21 @@
   (is (= 0 (compile-and-run-native
              (format nil "(function noop () unit unit)~%
                           (function main () exit-code (do (noop) 0))")))))
+
+(test passes-command-line-arguments-to-verona-main
+  (is (= 42
+         (compile-and-run-native-with-arguments
+          "(external-function strcmp \"strcmp\" ((pointer u8) (pointer u8)) i32)
+           (function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
+             (match (%=-primitive-i32 argc 2)
+               (false 1)
+               (true
+                (let ((argument (pointer u8)
+                                (load (deref (pointer-offset argv 1)))))
+                  (match (strcmp argument \"answer\")
+                    (0 42)
+                    (_ 2))))))"
+          '("answer")))))
 
 (test executes-explicit-conversions-natively
   (is (= 42 (compile-and-run-native

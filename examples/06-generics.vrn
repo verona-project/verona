@@ -9,5 +9,5 @@
 (function twenty-two () i32
   22)
 
-(function main () exit-code
+(function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (combine (twenty) (twenty-two)))

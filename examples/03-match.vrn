@@ -3,5 +3,5 @@
     (true left)
     (false right)))
 
-(function main () exit-code
+(function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (maximum 20 42))

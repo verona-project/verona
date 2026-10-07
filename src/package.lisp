@@ -359,6 +359,9 @@
    #:conversion-expression
    #:pointer-cast-expression
    #:pointer-cast-expression-operand
+   #:pointer-offset-expression
+   #:pointer-offset-expression-pointer
+   #:pointer-offset-expression-offset
    #:function-pointer-expression
    #:function-pointer-expression-operand
    #:construct-expression

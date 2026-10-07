@@ -1,1 +1,1 @@
-(function main () exit-code 0)
+(function main ((argc i32) (argv (pointer (pointer u8)))) exit-code 0)

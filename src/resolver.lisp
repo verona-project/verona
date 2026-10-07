@@ -583,6 +583,9 @@ the semantic type of a unit expression remains UnitType."
 (defclass conversion-expression (primitive-call) ())
 (defclass pointer-cast-expression (semantic-expression)
   ((operand :initarg :operand :reader pointer-cast-expression-operand)))
+(defclass pointer-offset-expression (semantic-expression)
+  ((pointer :initarg :pointer :reader pointer-offset-expression-pointer)
+   (offset :initarg :offset :reader pointer-offset-expression-offset)))
 ;; Function declarations lower to LLVM function addresses.  Retain the
 ;; language-level decay explicitly so ordinary Verona function values remain
 ;; distinct from the C callback pointer representation.
@@ -2875,6 +2878,27 @@ therefore visible, while the binding being built cannot see itself."
                :message "cast permits only (pointer T) to or from (pointer void)"))
       (make-instance 'pointer-cast-expression :syntax syntax :operand operand :type target))))
 
+(defun infer-pointer-offset-expression (syntax scope)
+  "Compute POINTER plus OFFSET elements, preserving POINTER's pointee type."
+  (let ((arguments (rest (verona-list-elements (syntax-datum syntax)))))
+    (unless (= (length arguments) 2)
+      (error 'invalid-expression-error :syntax syntax
+             :message "pointer-offset requires a pointer and an integer offset"))
+    (let* ((pointer (infer-value-expression (first arguments) scope))
+           (pointer-type (expression-type pointer))
+           (offset (infer-value-expression (second arguments) scope)))
+      (unless (typep pointer-type 'pointer-type)
+        (error 'invalid-expression-error :syntax (first arguments)
+               :message "pointer-offset requires a pointer"))
+      (when (typep (pointer-type-pointee pointer-type) '(or void-type opaque-type))
+        (error 'invalid-expression-error :syntax (first arguments)
+               :message "pointer-offset requires a pointer to a complete type"))
+      (unless (typep (expression-type offset) 'integer-type)
+        (error 'invalid-expression-error :syntax (second arguments)
+               :message "pointer-offset requires an integer offset"))
+      (make-instance 'pointer-offset-expression :syntax syntax
+                     :pointer pointer :offset offset :type pointer-type))))
+
 (defun load-place-expression (syntax place)
   "Make a read from PLACE explicit in the resolved semantic program."
   (unless (and (typep place 'place-expression)
@@ -3011,6 +3035,8 @@ expression position."
 		      (infer-load-expression syntax scope))
 		     ((and special (string= special "cast"))
 		      (infer-pointer-cast-expression syntax scope))
+		     ((and special (string= special "pointer-offset"))
+		      (infer-pointer-offset-expression syntax scope))
 		     (t (infer-call-expression syntax scope))))))
 	  (t (error 'invalid-expression-error :syntax syntax
 					      :message "unsupported expression")))))

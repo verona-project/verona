@@ -5,5 +5,5 @@
     ((none) 0)
     ((some number) number)))
 
-(function main () exit-code
+(function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (unwrap (some 42)))

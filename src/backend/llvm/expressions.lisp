@@ -458,6 +458,15 @@ compare the LLVM ABI directly instead of relying on frontend object identity."
      ;; Pointer casts involving void* change only the Verona semantic type;
      ;; LLVM opaque pointers require no generated conversion instruction.
      (emit-value backend (verona:pointer-cast-expression-operand expression)))
+    ((typep expression 'verona:pointer-offset-expression)
+     (let* ((pointer (verona:pointer-offset-expression-pointer expression))
+            (pointer-type (verona:expression-type pointer)))
+       (llvm:build-gep
+        (llvm-backend-builder backend)
+        (emit-value backend pointer)
+        (list (emit-value backend (verona:pointer-offset-expression-offset expression)))
+        "pointer.offset"
+        (lower-type backend (verona:pointer-type-pointee pointer-type)))))
     ((typep expression 'verona:function-pointer-expression)
      ;; Function declarations already denote their LLVM address.  The semantic
      ;; node records the C-specific decay; opaque LLVM pointers need no cast.
