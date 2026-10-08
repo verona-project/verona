@@ -357,6 +357,8 @@
    #:primitive-call
    #:primitive-call-operation
    #:conversion-expression
+   #:character-integer-conversion-expression
+   #:character-integer-conversion-expression-operand
    #:pointer-cast-expression
    #:pointer-cast-expression-operand
    #:pointer-offset-expression

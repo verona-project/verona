@@ -581,6 +581,8 @@ the semantic type of a unit expression remains UnitType."
 ;; Conversion calls are a distinct semantic class so a backend can lower
 ;; them mechanically without inspecting primitive names or argument types.
 (defclass conversion-expression (primitive-call) ())
+(defclass character-integer-conversion-expression (semantic-expression)
+  ((operand :initarg :operand :reader character-integer-conversion-expression-operand)))
 (defclass pointer-cast-expression (semantic-expression)
   ((operand :initarg :operand :reader pointer-cast-expression-operand)))
 (defclass pointer-offset-expression (semantic-expression)
@@ -3070,9 +3072,14 @@ expression position."
 	   (infer-let-expression syntax scope expected-type))
 	  ((and (integerp datum) (typep expected-type 'integer-type))
 	   (make-instance 'integer-literal :syntax syntax :value datum :type expected-type))
-	  ((and (floatp datum) (typep expected-type 'float-type))
-	   (make-instance 'float-literal :syntax syntax :value datum :type expected-type))
-	  (t (let ((expression (infer-value-expression syntax scope)))
+	      ((and (floatp datum) (typep expected-type 'float-type))
+	       (make-instance 'float-literal :syntax syntax :value datum :type expected-type))
+	      ((and (characterp datum) (typep expected-type 'integer-type))
+	       ;; ASCII character literals are directly representable at every
+	       ;; integer width, so contextual C integer positions need no separate
+	       ;; source-level conversion form.
+	       (make-instance 'character-literal :syntax syntax :value datum :type expected-type))
+	      (t (let ((expression (infer-value-expression syntax scope)))
 	       (cond ((and (typep expected-type 'pointer-type)
 	                   (typep (pointer-type-pointee expected-type) 'function-type)
 	                   (typep (expression-type expression) 'function-type)
@@ -3083,6 +3090,13 @@ expression position."
 	              ;; Verona calls retain their FunctionType.
 	              (make-instance 'function-pointer-expression :syntax syntax
 	                             :operand expression :type expected-type))
+	             ((and (typep (expression-type expression) 'char-type)
+	                   (typep expected-type 'integer-type))
+	              ;; CHAR is an ASCII code unit. Widen it automatically for C
+	              ;; character APIs and integer comparisons, but never narrow an
+	              ;; arbitrary integer back to CHAR implicitly.
+	              (make-instance 'character-integer-conversion-expression
+	                             :syntax syntax :operand expression :type expected-type))
 	             ((or (typep (expression-type expression) 'never-type)
 	                  (compatible-p (expression-type expression) expected-type))
 	              expression)
@@ -3344,6 +3358,12 @@ byte value; text literals are NUL-terminated pointers to U8."
 		      (typep (pointer-type-pointee
 			      (expression-type (pointer-cast-expression-operand expression))) 'void-type)))
 	(backend-validation-fail expression "pointer cast is not a void pointer conversion")))
+    ((typep expression 'character-integer-conversion-expression)
+     (let ((operand (character-integer-conversion-expression-operand expression)))
+       (validate-expression-for-backend operand)
+       (unless (and (typep (expression-type operand) 'char-type)
+                    (typep (expression-type expression) 'integer-type))
+         (backend-validation-fail expression "character conversion is not an integer widening"))))
     ((typep expression 'function-pointer-expression)
      (validate-expression-for-backend (function-pointer-expression-operand expression))
      (unless (and (typep (expression-type expression) 'pointer-type)

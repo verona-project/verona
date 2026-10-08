@@ -51,6 +51,8 @@
 		#:semantic-call #:semantic-call-callee #:semantic-call-arguments
 		#:semantic-expression-type #:expression-source
 		#:primitive-call #:primitive-call-operation #:conversion-expression
+		#:character-integer-conversion-expression
+		#:character-integer-conversion-expression-operand
 		#:primitive-operation #:primitive-operation-kind #:primitive-operation-parameter-types
 		#:primitive-operation-result-type #:primitive-operation-nan-semantics
 		#:integer-literal #:integer-literal-value #:boolean-literal #:character-literal #:character-literal-value #:string-literal
@@ -1060,6 +1062,21 @@ baz"))
 	    (primitive-operation-kind (primitive-call-operation comparison))))
     (is (eq :ordered-false
 	    (primitive-operation-nan-semantics (primitive-call-operation comparison))))
+    (is (eq program (validate-for-backend program)))))
+
+(test automatically-widens-characters-to-integers
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(external-function putchar \"putchar\" (i32) i32)
+                 (function emit ((character char)) i32 (putchar character))"))
+         (program (compilation-unit-semantic-program unit))
+         (emit (semantic-program-declaration program (second (unit-declarations unit))))
+         (call (semantic-function-declaration-body emit))
+         (conversion (first (semantic-call-arguments call))))
+    (is (typep conversion 'character-integer-conversion-expression))
+    (is (typep (character-integer-conversion-expression-operand conversion)
+               'load-expression))
+    (is (typep (semantic-expression-type conversion) 'integer-type))
     (is (eq program (validate-for-backend program)))))
 
 (test enforces-exact-primitive-types-and-explicit-memory-reads
