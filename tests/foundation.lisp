@@ -144,7 +144,7 @@
      "(external-function allocate \"malloc\" (usize) (pointer void))
        (function main () i32
          (let ((memory (pointer void) (allocate 1)))
-           (load (deref memory))))")))
+           (deref memory)))")))
 
 (test models-nominal-opaque-types-for-c-handles
   (let* ((unit (compile-string
@@ -192,7 +192,7 @@
      (make-compiler)
      "(type handle)
       (external-function acquire \"acquire\" () (pointer handle))
-      (function invalid () i32 (load (deref (acquire))))")))
+      (function invalid () i32 (deref (acquire)))")))
 
 (test keeps-void-aliases-transparent
   (let* ((unit (compile-string (make-compiler) "(type legacy-handle void)"))
@@ -1081,13 +1081,13 @@ baz"))
     (is (typep (semantic-expression-type conversion) 'integer-type))
     (is (eq program (validate-for-backend program)))))
 
-(test enforces-exact-primitive-types-and-explicit-memory-reads
+(test enforces-exact-primitive-types-and-implicit-memory-reads
   (signals type-mismatch-error
     (compile-string (make-compiler)
                     "(function wrong ((value i32)) i64 (%+-primitive-i64 value 1))"))
   (let* ((unit (compile-string
 		(make-compiler)
-		"(function read ((address (pointer i64))) i64 (load (dereference address)))\
+		"(function read ((address (pointer i64))) i64 (dereference address))\
                  (function write ((address (pointer i64)) (value i64)) unit\
                    (do (store (dereference address) value) unit))"))
 	 (program (compilation-unit-semantic-program unit))
@@ -1098,6 +1098,16 @@ baz"))
     (is (typep (load-expression-place (semantic-function-declaration-body read-function))
 	       'dereference-expression))
     (is (typep (first (sequence-expression-expressions write-body)) 'store-expression))
+    (is (eq program (validate-for-backend program)))))
+
+(test treats-load-as-an-ordinary-callable-name
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(function load ((value i64)) i64 value)
+                 (function main () i64 (load 42))"))
+         (program (compilation-unit-semantic-program unit))
+         (main (semantic-program-declaration program (second (unit-declarations unit)))))
+    (is (typep (semantic-function-declaration-body main) 'semantic-call))
     (is (eq program (validate-for-backend program)))))
 
 (test models-unit-as-a-distinct-singleton-with-pointer-width-representation

@@ -2908,12 +2908,6 @@ therefore visible, while the binding being built cannot see itself."
     (error 'not-addressable-error :syntax syntax :message "load requires an addressable place"))
   (make-instance 'load-expression :syntax syntax :place place :type (expression-type place)))
 
-(defun infer-load-expression (syntax scope)
-  (let ((arguments (rest (verona-list-elements (syntax-datum syntax)))))
-    (unless (= (length arguments) 1)
-      (error 'invalid-expression-error :syntax syntax :message "load requires exactly one operand"))
-    (load-place-expression syntax (infer-expression (first arguments) scope))))
-
 (defun infer-value-expression (syntax scope)
   "Infer SYNTAX in a value context, preserving reads as explicit LOAD nodes."
   (let ((expression (infer-expression syntax scope)))
@@ -3033,8 +3027,6 @@ expression position."
 		      (infer-dereference-expression syntax scope))
 		     ((and special (string= special "dereference"))
 		      (infer-dereference-expression syntax scope))
-		     ((and special (string= special "load"))
-		      (infer-load-expression syntax scope))
 		     ((and special (string= special "cast"))
 		      (infer-pointer-cast-expression syntax scope))
 		     ((and special (string= special "pointer-offset"))

@@ -34,7 +34,7 @@
     unit))
 
 (base:function write-string ((value (pointer u8))) unit
-  (let ((character u8 (load (deref value))))
+  (let ((character u8 (deref value)))
     (match character
       (0 unit)
       (_ (do
@@ -83,7 +83,7 @@
           unit)))))
 
 (base:function argument-at ((argv (pointer (pointer u8))) (index i32)) (pointer u8)
-  (load (deref (pointer-offset argv index))))
+  (deref (pointer-offset argv index)))
 
 (base:function matches-option
   ((argument (pointer u8)) (short-option (pointer u8)) (long-option (pointer u8)))
@@ -112,7 +112,7 @@
     (false (default-selection))))
 
 (base:function option-like ((argument (pointer u8))) bool
-  (match (load (deref argument))
+  (match (deref argument)
     (#\- true)
     (_ false)))
 

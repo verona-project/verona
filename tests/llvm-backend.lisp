@@ -313,7 +313,7 @@
                (false 1)
                (true
                 (let ((argument (pointer u8)
-                                (load (deref (pointer-offset argv 1)))))
+                                (deref (pointer-offset argv 1))))
                   (match (strcmp argument \"answer\")
                     (0 42)
                     (_ 2))))))"

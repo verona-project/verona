@@ -279,11 +279,15 @@ explicit. Unicode characters are not supported yet.
 | `(& place)`, `(address-of place)` | Create a pointer to an addressable place. |
 | `(deref pointer)`, `(dereference pointer)` | Turn a pointer to a complete type into a place. |
 | `(pointer-offset pointer integer)` | Advance a pointer by an element count. The pointer must target a complete type; callers are responsible for bounds and lifetime. |
-| `(load place)` | Read a place. |
 | `(assign place value)`, `(store place value)` | Write a writable place. |
 | `(cast Type value)` | Explicit pointer cast. |
 | `+`, `-`, `*`, `/` | Generic arithmetic for every signed/unsigned integer type and for `f32`/`f64`; operands must have the same type. |
 | `==`, `!=`, `<`, `<=`, `>`, `>=` | Generic comparison for the same numeric type families; result is `bool`. Float comparisons are ordered, so a NaN operand makes the comparison false. |
+
+Addressable places are read implicitly wherever a value is required. For
+example, `(deref pointer)` reads the pointed-to value when it appears as a
+function argument, initializer, return value, or arithmetic operand; it remains
+a place when used with `&`, `assign`, or `store`.
 
 The compiler also exposes concrete bootstrap primitives.  They are useful for
 compiler tests and generated code, not typical `.vrn` programs:
