@@ -1,27 +1,45 @@
 (import base)
 
-(import libc.constants :as constants)
 (import libc.stdio :as stdio)
+(import libc.string :as string)
 (import libc.types :as libc)
+(import libc.constants :as constants)
+(import libc.descriptor :as descriptor)
 
-;; This first port implements the POSIX wc default stream mode. Command-line
-;; arguments are available through MAIN's argc/argv parameters for a future
-;; flags-and-file-operands layer.
+(base:type selection
+  (product (lines bool) (words bool) (bytes bool)))
+
+(base:type parsed-options
+  (product (selected selection) (first-input i32) (valid bool)))
+
+(base:type counts
+  (product (lines u64) (words u64) (bytes u64)))
+
+(base:type count-result
+  (product (value counts) (complete bool)))
 
 (base:function whitespace ((character libc:c-int)) bool
   (match character
-    (9 true)
-    (10 true)
-    (11 true)
-    (12 true)
-    (13 true)
-    (32 true)
+    (#\tab true)
+    (#\newline true)
+    (#\vertical_tab true)
+    (#\form_feed true)
+    (#\return true)
+    (#\space true)
     (_ false)))
 
 (base:function write-character ((character libc:c-int)) unit
   (do
     (stdio:putchar character)
     unit))
+
+(base:function write-string ((value (pointer u8))) unit
+  (let ((character u8 (load (deref value))))
+    (match character
+      (0 unit)
+      (_ (do
+          (write-character (%zext-primitive-u8-i32 character))
+          (write-string (pointer-offset value 1)))))))
 
 (base:function write-digit ((digit u64)) unit
   (write-character
@@ -39,43 +57,237 @@
                                        (%/-primitive-u64 value 10) 10)))
        unit))))
 
-(base:function write-counts ((lines u64) (words u64) (bytes u64)) unit
-  (do
-    (write-number lines)
-    (write-character 32)
-    (write-number words)
-    (write-character 32)
-    (write-number bytes)
-    (write-character 10)
-    unit))
+(base:function write-selected ((value u64) (enabled bool) (written bool)) bool
+  (match enabled
+    (false written)
+    (true (do
+           (match written
+             (false unit)
+             (true (write-character #\space)))
+           (write-number value)
+           true))))
 
-;; Each recursive call is in tail position and only carries scalar values, so
-;; the LLVM backend can lower the stream walk as a musttail loop.
-(base:function count-standard-input
-  ((lines u64) (words u64) (bytes u64) (inside-word bool))
-  exit-code
-  (let ((character libc:c-int (stdio:getchar)))
-    (match character
-      (-1 (do
-            (write-counts lines words bytes)
-            0))
-      (_ (let ((next-bytes u64 (%+-primitive-u64 bytes 1)))
+(base:function write-counts
+  ((value counts) (selected selection) (name (pointer u8)) (show-name bool))
+  unit
+  (let ((after-lines bool (write-selected (field value lines) (field selected lines) false)))
+    (let ((after-words bool (write-selected (field value words) (field selected words) after-lines)))
+      (let ((after-bytes bool (write-selected (field value bytes) (field selected bytes) after-words)))
+        (do
+          (match show-name
+            (true (do
+                   (write-character #\space)
+                   (write-string name)))
+            (false unit))
+          (write-character #\newline)
+          unit)))))
+
+(base:function argument-at ((argv (pointer (pointer u8))) (index i32)) (pointer u8)
+  (load (deref (pointer-offset argv index))))
+
+(base:function matches-option
+  ((argument (pointer u8)) (short-option (pointer u8)) (long-option (pointer u8)))
+  bool
+  (match (string:strcmp argument short-option)
+    (0 true)
+    (_ (match (string:strcmp argument long-option)
+         (0 true)
+         (_ false)))))
+
+(base:function select-lines ((value selection)) selection
+  (selection true (field value words) (field value bytes)))
+
+(base:function select-words ((value selection)) selection
+  (selection (field value lines) true (field value bytes)))
+
+(base:function select-bytes ((value selection)) selection
+  (selection (field value lines) (field value words) true))
+
+(base:function default-selection () selection
+  (selection true true true))
+
+(base:function selected-or-default ((selected selection) (specified bool)) selection
+  (match specified
+    (true selected)
+    (false (default-selection))))
+
+(base:function option-like ((argument (pointer u8))) bool
+  (match (load (deref argument))
+    (#\- true)
+    (_ false)))
+
+(base:function parse-options
+  ((argc i32) (argv (pointer (pointer u8))) (index i32)
+   (selected selection) (specified bool))
+  parsed-options
+  (match (%>=-primitive-i32 index argc)
+    (true (parsed-options (selected-or-default selected specified) index true))
+    (false
+     (let ((argument (pointer u8) (argument-at argv index))
+           (next-index i32 (%+-primitive-i32 index 1)))
+       (match (string:strcmp argument "--")
+         (0 (parsed-options (selected-or-default selected specified) next-index true))
+         (_ (match (matches-option argument "-l" "--lines")
+              (true (parse-options argc argv next-index (select-lines selected) true))
+              (false
+               (match (matches-option argument "-w" "--words")
+                 (true (parse-options argc argv next-index (select-words selected) true))
+                 (false
+                  (match (matches-option argument "-c" "--bytes")
+                    (true (parse-options argc argv next-index (select-bytes selected) true))
+                    (false
+                     (match (option-like argument)
+                       (true (parsed-options selected index false))
+                       (false (parsed-options (selected-or-default selected specified)
+                                              index
+                                              true)))))))))))))))
+
+(base:function add-counts ((left counts) (right counts)) counts
+  (counts (%+-primitive-u64 (field left lines) (field right lines))
+          (%+-primitive-u64 (field left words) (field right words))
+          (%+-primitive-u64 (field left bytes) (field right bytes))))
+
+;; The stream walk holds just one input byte. Each recursive call carries
+;; scalar values and products of scalar values, so LLVM can lower it as a
+;; musttail loop.
+(base:function count-stream
+  ((file-descriptor libc:file-descriptor) (lines u64) (words u64)
+   (bytes u64) (inside-word bool))
+  count-result
+  (let ((byte u8 0))
+    (match (descriptor:read file-descriptor (cast (pointer void) (& byte)) 1)
+      (0 (count-result (counts lines words bytes) true))
+      (1 (let ((character libc:c-int (%zext-primitive-u8-i32 byte))
+               (next-bytes u64 (%+-primitive-u64 bytes 1)))
            (match (whitespace character)
              (true
-              (count-standard-input
+              (count-stream
+               file-descriptor
                (match character
-                 (10 (%+-primitive-u64 lines 1))
+                 (#\newline (%+-primitive-u64 lines 1))
                  (_ lines))
                words
                next-bytes
                false))
              (false
               (match inside-word
-                (true (count-standard-input lines words next-bytes true))
-                (false (count-standard-input lines
-                                             (%+-primitive-u64 words 1)
-                                             next-bytes
-                                             true))))))))))
+                (true (count-stream file-descriptor lines words next-bytes true))
+                (false (count-stream file-descriptor
+                                     lines
+                                     (%+-primitive-u64 words 1)
+                                     next-bytes
+                                     true)))))))
+      (_ (count-result (counts lines words bytes) false)))))
+
+(base:function process-stream
+  ((argc i32) (argv (pointer (pointer u8))) (next-index i32)
+   (selected selection) (name (pointer u8)) (result count-result)
+   (total counts) (input-count i32) (failed bool))
+  exit-code
+  (match (field result complete)
+    (true
+     (let ((value counts (field result value)))
+       (do
+        (write-counts value selected name true)
+        (process-inputs argc
+                        argv
+                        next-index
+                        selected
+                        (add-counts total value)
+                        (%+-primitive-i32 input-count 1)
+                        failed))))
+    (false
+     (do
+      (stdio:perror name)
+      (process-inputs argc
+                      argv
+                      next-index
+                      selected
+                      total
+                      (%+-primitive-i32 input-count 1)
+                      true)))))
+
+(base:function process-open-file
+  ((argc i32) (argv (pointer (pointer u8))) (next-index i32)
+   (selected selection) (name (pointer u8)) (file-descriptor libc:file-descriptor)
+   (total counts) (input-count i32) (failed bool))
+  exit-code
+  (let ((result count-result (count-stream file-descriptor 0 0 0 false)))
+    (do
+     (descriptor:close file-descriptor)
+     (process-stream argc argv next-index selected name result total input-count failed))))
+
+(base:function process-inputs
+  ((argc i32) (argv (pointer (pointer u8))) (index i32) (selected selection)
+   (total counts) (input-count i32) (failed bool))
+  exit-code
+  (match (%>=-primitive-i32 index argc)
+    (true
+     (do
+      (match (%>-primitive-i32 input-count 1)
+        (true (write-counts total selected "total" true))
+        (false unit))
+      (match failed
+        (true 1)
+        (false 0))))
+    (false
+     (let ((name (pointer u8) (argument-at argv index))
+           (next-index i32 (%+-primitive-i32 index 1)))
+       (match (string:strcmp name "-")
+         (0 (process-stream argc
+                            argv
+                            next-index
+                            selected
+                            name
+                            (count-stream constants:STDIN-FILENO 0 0 0 false)
+                            total
+                            input-count
+                            failed))
+         (_ (let ((file-descriptor libc:file-descriptor
+                                   (descriptor:open name constants:O-RDONLY 0)))
+              (match file-descriptor
+                (-1 (do
+                     (stdio:perror name)
+                     (process-inputs argc
+                                     argv
+                                     next-index
+                                     selected
+                                     total
+                                     (%+-primitive-i32 input-count 1)
+                                     true)))
+                (_ (process-open-file argc
+                                      argv
+                                      next-index
+                                      selected
+                                      name
+                                      file-descriptor
+                                      total
+                                      input-count
+                                      failed))))))))))
 
 (base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
-  (count-standard-input 0 0 0 false))
+  (let ((parsed parsed-options
+                     (parse-options argc argv 1 (selection false false false) false)))
+    (match (field parsed valid)
+      (true
+       (match (%>=-primitive-i32 (field parsed first-input) argc)
+         (true
+          (let ((result count-result
+                       (count-stream constants:STDIN-FILENO 0 0 0 false)))
+            (match (field result complete)
+              (true (do
+                     (write-counts (field result value) (field parsed selected) "" false)
+                     0))
+              (false (do
+                      (stdio:perror "wc")
+                      1)))))
+         (false (process-inputs argc
+                                argv
+                                (field parsed first-input)
+                                (field parsed selected)
+                                (counts 0 0 0)
+                                0
+                                false))))
+      (false (do
+              (stdio:puts "usage: wc [-l|--lines] [-w|--words] [-c|--bytes] [file ...]")
+              2)))))
