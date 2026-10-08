@@ -235,6 +235,10 @@ distinct CHAR type later."
                     ((string-equal text "space") #\Space)
                     ((string-equal text "newline") #\Newline)
                     ((string-equal text "tab") #\Tab)
+    ((string-equal text "vertical_tab")
+     (code-char 11))
+    ((string-equal text "form_feed")
+     (code-char 12))
                     ((string-equal text "return") #\Return)
                     (t (reader-fail state
                                     "character literal must name exactly one character"

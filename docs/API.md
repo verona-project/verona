@@ -263,8 +263,9 @@ string or character literal remains literal data.
 String literals use double quotes and accept ASCII only; they support `\\n`, `\\t`,
 `\\"`, and `\\\\`. Unicode strings will use a separate `#ustring"..."` spelling.
 Character literals use Common Lisp spelling: `#\\a`, `#\\space`, `#\\newline`,
-`#\\tab`, and `#\\return`. A character literal denotes exactly one ASCII character;
-the named spellings are case-insensitive. A `char` automatically widens to an
+`#\\tab`, `#\\vertical_tab`, `#\\form_feed`, and `#\\return`. A character literal
+denotes exactly one ASCII character; the named spellings are case-insensitive.
+A `char` automatically widens to an
 integer when an integer is expected, which makes character literals and values
 usable with C APIs such as `putchar`; integer-to-`char` conversion remains
 explicit. Unicode characters are not supported yet.

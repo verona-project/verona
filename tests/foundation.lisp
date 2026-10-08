@@ -252,12 +252,14 @@ baz"))
     (is (char= #\; (syntax-datum (second forms))))))
 
 (test reads-common-lisp-style-character-literals
-  (let ((forms (read-source (make-source "characters.vrn" "#\\a #\\space #\\newline #\\)"))))
-    (is (= 4 (length forms)))
+  (let ((forms (read-source (make-source "characters.vrn" "#\\a #\\space #\\newline #\\vertical_tab #\\form_feed #\\)"))))
+    (is (= 6 (length forms)))
     (is (char= #\a (syntax-datum (first forms))))
     (is (char= #\Space (syntax-datum (second forms))))
     (is (char= #\Newline (syntax-datum (third forms))))
-    (is (char= #\) (syntax-datum (fourth forms)))))
+    (is (= 11 (char-code (syntax-datum (fourth forms)))))
+    (is (= 12 (char-code (syntax-datum (fifth forms)))))
+    (is (char= #\) (syntax-datum (sixth forms)))))
   (signals verona-read-error
     (read-source (make-source "characters.vrn" "#\\ab")))
   (signals verona-read-error
