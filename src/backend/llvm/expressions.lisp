@@ -540,14 +540,25 @@ compare the LLVM ABI directly instead of relying on frontend object identity."
                                  verona:semantic-protocol-operation-implementation
                                  verona:semantic-generic-implementation))
                      (verona:semantic-reference-binding callee)))
-              (call (llvm:build-call
-                     (llvm-backend-builder backend)
-                     (if direct-declaration
-                         (backend-binding backend direct-declaration)
-                         (emit-value backend callee))
-                     (mapcar (lambda (argument) (emit-value backend argument))
-                             (verona:semantic-call-arguments expression))
-                     "call")))
+              (arguments (mapcar (lambda (argument) (emit-value backend argument))
+                                 (verona:semantic-call-arguments expression)))
+              (call
+                (if direct-declaration
+                    (llvm:build-call (llvm-backend-builder backend)
+                                     (backend-binding backend direct-declaration)
+                                     arguments "call")
+                    (progn
+                      ;; LLVM's opaque pointers do not retain a pointee
+                      ;; function type. CL-LLVM's public BUILD-CALL recovers
+                      ;; that type only from global declarations, so indirect
+                      ;; calls use LLVMBuildCall2 with the semantic callback
+                      ;; signature explicitly supplied.
+                      (unless (typep callback-type 'verona:function-type)
+                        (backend-fail "indirect call has no function pointer type"))
+                      (llvm::%build-call
+                       (llvm-backend-builder backend)
+                       (lower-type backend callback-type)
+                       (emit-value backend callee) arguments (length arguments) "call")))))
          (when (typep callback-type 'verona:function-type)
            (add-c-abi-boolean-call-attributes
             backend call (verona:function-type-parameters callback-type)

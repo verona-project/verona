@@ -290,18 +290,34 @@ the semantic type of a unit expression remains UnitType."
                         :reader generic-implementation-primitive-operation)
    (source :initarg :source :initform nil :reader generic-implementation-source)))
 
-(defun generic-find-implementation (generic parameter-types)
-  (cdr (assoc parameter-types (generic-implementations generic) :test #'equal)))
+(defun generic-find-implementations (generic parameter-types)
+  "Return every implementation matching PARAMETER-TYPES.
+
+Most generics have one result for a parameter tuple. Result-directed generics
+such as CONVERT deliberately have several, so callers with an expected type
+select one of these candidates later."
+  (loop for (types . implementation) in (generic-implementations generic)
+        when (equal types parameter-types)
+          collect implementation))
+
+(defun generic-find-implementation (generic parameter-types &optional result-type)
+  "Find one generic implementation, optionally requiring RESULT-TYPE."
+  (let ((candidates (generic-find-implementations generic parameter-types)))
+    (if result-type
+        (find result-type candidates
+              :key #'generic-implementation-result-type :test #'same-type-p)
+        (first candidates))))
 
 (defun generic-add-implementation (generic implementation &optional syntax)
-  (let ((key (generic-implementation-parameter-types implementation)))
-    (when (generic-find-implementation generic key)
+  (let ((key (generic-implementation-parameter-types implementation))
+        (result-type (generic-implementation-result-type implementation)))
+    (when (generic-find-implementation generic key result-type)
       (error 'duplicate-generic-implementation-error :syntax syntax
              :generic generic :parameter-types key
-             :original (generic-find-implementation generic key)
+             :original (generic-find-implementation generic key result-type)
              :duplicate implementation
              :original-source (generic-implementation-source
-                               (generic-find-implementation generic key))
+                               (generic-find-implementation generic key result-type))
              :duplicate-source syntax))
     (push (cons key implementation) (generic-implementations generic))
     implementation))
@@ -418,6 +434,17 @@ the semantic type of a unit expression remains UnitType."
 ;; PROGRAM is the multi-module semantic root.  It remains a SemanticProgram so
 ;; existing lowering clients continue to accept the returned object.
 (defclass program (semantic-program) ())
+
+;; Name and type declaration resolution establish the semantic environment.
+;; The type checker then consumes that completed environment to analyze every
+;; executable body bidirectionally: infer when no type is known and check when
+;; a declaration or enclosing expression supplies an expected type.
+(defclass type-checker ()
+  ((program :initarg :program :reader type-checker-program)))
+
+(defun make-type-checker (program)
+  (check-type program semantic-program)
+  (make-instance 'type-checker :program program))
 
 (defclass native-export-binding ()
   ((function :initarg :function :reader native-export-binding-function)
@@ -747,7 +774,12 @@ than recovered later through ad-hoc string comparisons."
 	    (dolist (destination-signed '(t nil))
 	      (dolist (destination-width '(8 16 32 64))
 		(let ((destination (type-context-integer-type type-context destination-signed destination-width)))
-		  (cond ((< source-width destination-width)
+		  (cond ((and (= source-width destination-width)
+			      (not (eq source-signed destination-signed)))
+			 (bind (format nil "%reinterpret-primitive-~A-~A"
+				       (integer-name source) (integer-name destination))
+			       (list source) destination :integer-reinterpret))
+			((< source-width destination-width)
 			 (bind (format nil "%~A-primitive-~A-~A"
 				       (if source-signed "sext" "zext")
 				       (integer-name source) (integer-name destination))
@@ -857,6 +889,7 @@ than recovered later through ad-hoc string comparisons."
 (defun imported-binding (program imported declaration)
   (let ((semantic (semantic-program-declaration program declaration)))
     (if (or (typep semantic 'semantic-generic-declaration)
+            (typep semantic 'semantic-protocol-declaration)
             (typep semantic 'semantic-type-alias-declaration))
         (let ((scope (semantic-program-module-scope-for program imported)))
           (semantic-scope-lookup scope (declaration-name declaration)))
@@ -1872,6 +1905,12 @@ type checker."
                    :reader no-generic-implementation-error-argument-types))
   (:default-initargs :message "NoGenericImplementation"))
 
+(define-condition ambiguous-generic-implementation-error (semantic-error)
+  ((generic :initarg :generic :reader ambiguous-generic-implementation-error-generic)
+   (argument-types :initarg :argument-types
+                   :reader ambiguous-generic-implementation-error-argument-types))
+  (:default-initargs :message "AmbiguousGenericImplementation"))
+
 (define-condition not-addressable-error (semantic-error) ())
 (define-condition not-writable-error (semantic-error) ())
 (define-condition invalid-expression-error (semantic-error) ())
@@ -2365,19 +2404,22 @@ LET bindings are addressable but remain immutable through their source name."
                            :arguments arguments :operation operation :constraint constraint
                            :type result-type))))))
 
-(defun infer-call-expression (syntax scope)
+(defun infer-call-expression (syntax scope &optional expected-type)
   (let* ((elements (verona-list-elements (syntax-datum syntax)))
 	 (head (first elements))
 	 (product-type (product-constructor-type scope head)))
     (when (typep product-type 'product-type)
       (return-from infer-call-expression
         (infer-construct-expression syntax scope product-type (rest elements))))
-    ;; An unconstrained operation name remains an ordinary unresolved name.
-    ;; Only when no lexical binding exists may protocol evidence supply it.
+    ;; Protocol evidence wins over the built-in generic fallback, so a
+    ;; constrained function can define the meaning of operators such as +
+    ;; and = through its protocol. Lexical names still take precedence.
     (when (verona-name-p (syntax-datum head))
       (multiple-value-bind (binding foundp)
           (semantic-scope-find scope (syntax-datum head))
-        (when (or (not foundp) (typep binding 'protocol-binding))
+        (when (or (not foundp)
+                  (typep binding 'protocol-binding)
+                  (typep binding 'generic-binding))
           (multiple-value-bind (operation constraint)
               (find-constrained-protocol-operation scope (syntax-datum head))
             (when operation
@@ -2399,7 +2441,40 @@ LET bindings are addressable but remain immutable through their source name."
                                           (infer-value-expression argument scope))
                                         argument-syntax))
                      (argument-types (mapcar #'expression-type arguments))
-                     (implementation (generic-find-implementation generic argument-types)))
+                     (candidates (generic-find-implementations generic argument-types))
+                     (implementation
+                       (or (cond ((null (cdr candidates))
+                                  (first candidates))
+                                 (expected-type
+                                  (generic-find-implementation generic argument-types expected-type))
+                                 (t (error 'ambiguous-generic-implementation-error :syntax syntax
+                                           :generic generic :argument-types argument-types)))
+                           ;; Pointer equality compares identity. It requires
+                           ;; exactly matching pointer types, without an
+                           ;; implicit void-pointer conversion.
+                           (when (and (= (length argument-types) 2)
+                                      (member (verona-name-value
+                                               (semantic-binding-name head-binding))
+                                              '("==" "!=") :test #'string=)
+                                      (every (lambda (type) (typep type 'pointer-type))
+                                             argument-types)
+                                      (same-type-p (first argument-types)
+                                                   (second argument-types)))
+                             (let* ((operator (verona-name-value
+                                               (semantic-binding-name head-binding)))
+                                    (result-type (type-context-boolean-type
+                                                  (semantic-scope-owning-type-context scope))))
+                               (make-instance
+                                'generic-implementation :generic generic
+                                :parameter-types argument-types :result-type result-type
+                                :primitive-operation
+                                (make-instance 'primitive-operation
+                                               :name (make-verona-name operator)
+                                               :parameter-types argument-types
+                                               :result-type result-type
+                                               :kind (if (string= operator "==")
+                                                         :pointer-equal
+                                                         :pointer-not-equal))))))))
                 (unless implementation
                   (error 'no-generic-implementation-error :syntax syntax
                          :generic generic :argument-types argument-types))
@@ -2481,7 +2556,11 @@ LET bindings are addressable but remain immutable through their source name."
                   (make-instance 'polymorphic-call :syntax syntax :callee callee
 	                                 :arguments arguments :function specialization
                                  :substitution substitution :type result-type)))))))))
-    (let* ((callee (infer-expression head scope))
+    ;; A callback parameter is an addressable pointer value, so use the
+    ;; ordinary value path here. Named declarations remain references while
+    ;; pointer-valued places become explicit LOAD nodes before indirect call
+    ;; lowering.
+    (let* ((callee (infer-value-expression head scope))
 	 (callee-type (expression-type callee))
          (callable-type (if (and (typep callee-type 'pointer-type)
                                  (typep (pointer-type-pointee callee-type) 'function-type))
@@ -2503,7 +2582,7 @@ LET bindings are addressable but remain immutable through their source name."
 	(if (typep binding 'primitive-binding)
 	    (let* ((operation (primitive-binding-operation binding))
 		   (kind (primitive-operation-kind operation))
-		   (conversion-p (member kind '(:integer-sign-extend :integer-zero-extend
+		   (conversion-p (member kind '(:integer-reinterpret :integer-sign-extend :integer-zero-extend
 						 :integer-truncate :signed-integer-to-float
 						 :unsigned-integer-to-float :float-to-signed-integer
 						 :float-to-unsigned-integer :float-extend
@@ -2908,9 +2987,9 @@ therefore visible, while the binding being built cannot see itself."
     (error 'not-addressable-error :syntax syntax :message "load requires an addressable place"))
   (make-instance 'load-expression :syntax syntax :place place :type (expression-type place)))
 
-(defun infer-value-expression (syntax scope)
+(defun infer-value-expression (syntax scope &optional expected-type)
   "Infer SYNTAX in a value context, preserving reads as explicit LOAD nodes."
-  (let ((expression (infer-expression syntax scope)))
+  (let ((expression (infer-expression syntax scope expected-type)))
     (if (and (typep expression 'place-expression)
 	     (place-expression-addressable-p expression))
 	(load-place-expression syntax expression)
@@ -2946,7 +3025,7 @@ expression position."
         (expand syntax (module-environment module))
         syntax)))
 
-(defun infer-expression (syntax scope)
+(defun infer-expression (syntax scope &optional expected-type)
   "Analyze SYNTAX in SCOPE and return a fully typed semantic expression."
   (check-type syntax syntax)
   (check-type scope semantic-scope)
@@ -3031,7 +3110,7 @@ expression position."
 		      (infer-pointer-cast-expression syntax scope))
 		     ((and special (string= special "pointer-offset"))
 		      (infer-pointer-offset-expression syntax scope))
-		     (t (infer-call-expression syntax scope))))))
+		     (t (infer-call-expression syntax scope expected-type))))))
 	  (t (error 'invalid-expression-error :syntax syntax
 					      :message "unsupported expression")))))
 
@@ -3071,7 +3150,7 @@ expression position."
 	       ;; integer width, so contextual C integer positions need no separate
 	       ;; source-level conversion form.
 	       (make-instance 'character-literal :syntax syntax :value datum :type expected-type))
-	      (t (let ((expression (infer-value-expression syntax scope)))
+	      (t (let ((expression (infer-value-expression syntax scope expected-type)))
 	       (cond ((and (typep expected-type 'pointer-type)
 	                   (typep (pointer-type-pointee expected-type) 'function-type)
 	                   (typep (expression-type expression) 'function-type)
@@ -3115,6 +3194,8 @@ expression position."
 (defmethod diagnostic-code-for ((condition generic-arity-mismatch-error))
   (declare (ignore condition)) "E0501")
 (defmethod diagnostic-code-for ((condition no-generic-implementation-error))
+  (declare (ignore condition)) "E0501")
+(defmethod diagnostic-code-for ((condition ambiguous-generic-implementation-error))
   (declare (ignore condition)) "E0501")
 (defmethod diagnostic-code-for ((condition not-addressable-error))
   (declare (ignore condition)) "E0701")
@@ -3419,18 +3500,23 @@ byte value; text literals are NUL-terminated pointers to U8."
 	 (backend-validation-fail expression "external call result has the wrong Verona type"))))
     ((typep expression 'semantic-call)
      (validate-expression-for-backend (semantic-call-callee expression))
-     (let ((callee-type (expression-type (semantic-call-callee expression))))
-       (unless (typep callee-type 'function-type)
+     (let* ((callee-type (expression-type (semantic-call-callee expression)))
+            (callable-type
+              (if (and (typep callee-type 'pointer-type)
+                       (typep (pointer-type-pointee callee-type) 'function-type))
+                  (pointer-type-pointee callee-type)
+                  callee-type)))
+       (unless (typep callable-type 'function-type)
 	 (backend-validation-fail expression "call target is not callable"))
        (unless (= (length (semantic-call-arguments expression))
-		  (length (function-type-parameters callee-type)))
+		  (length (function-type-parameters callable-type)))
 	 (backend-validation-fail expression "call has an invalid argument count"))
        (loop for argument in (semantic-call-arguments expression)
-	     for parameter in (function-type-parameters callee-type)
+	     for parameter in (function-type-parameters callable-type)
 	     do (validate-expression-for-backend argument)
 		(unless (compatible-p (expression-type argument) parameter)
 		  (backend-validation-fail expression "call has an incompatible argument type")))
-       (unless (same-type-p (expression-type expression) (function-type-result callee-type))
+       (unless (same-type-p (expression-type expression) (function-type-result callable-type))
 	 (backend-validation-fail expression "call result type disagrees with callee type"))))))
 
 (defun validate-concrete-function-for-backend (declaration)
@@ -3564,17 +3650,23 @@ byte value; text literals are NUL-terminated pointers to U8."
 	  (validate-concrete-function-for-backend specialization)))
   program))
 
-(defun resolve-declaration-body (program semantic-declaration)
-  (let ((declaration (semantic-declaration-source-declaration semantic-declaration)))
+(defun type-check-expression (checker syntax scope expected-type)
+  "Check SYNTAX against EXPECTED-TYPE in CHECKER's resolved program."
+  (check-type checker type-checker)
+  (check-expression syntax scope expected-type))
+
+(defun type-check-declaration-body (checker semantic-declaration)
+  (let ((program (type-checker-program checker))
+        (declaration (semantic-declaration-source-declaration semantic-declaration)))
     (cond ((typep semantic-declaration 'semantic-function-declaration)
 	   (setf (semantic-function-declaration-body semantic-declaration)
-		 (check-expression
+		 (type-check-expression checker
 		  (function-declaration-body declaration)
 		  (semantic-function-declaration-scope semantic-declaration)
 		  (semantic-function-declaration-return-type semantic-declaration))))
 	  ((typep semantic-declaration 'semantic-generic-implementation)
            (setf (generic-implementation-body semantic-declaration)
-                 (check-expression
+                 (type-check-expression checker
                   (implementation-declaration-body declaration)
                   (semantic-generic-implementation-scope semantic-declaration)
                   (generic-implementation-result-type semantic-declaration))))
@@ -3583,23 +3675,30 @@ byte value; text literals are NUL-terminated pointers to U8."
                            (semantic-protocol-implementation-implementation semantic-declaration)))
              (let ((operation-function (cdr entry)))
                (setf (semantic-function-declaration-body operation-function)
-                     (check-expression
+                     (type-check-expression checker
                       (function-declaration-body
                        (semantic-declaration-source-declaration operation-function))
                       (semantic-function-declaration-scope operation-function)
                       (semantic-function-declaration-return-type operation-function))))))
 	  ((typep semantic-declaration 'semantic-constant-declaration)
 	   (setf (semantic-constant-declaration-initializer semantic-declaration)
-		 (check-expression
+		 (type-check-expression checker
 		  (constant-declaration-value declaration)
 		  (semantic-program-module-scope-for program (declaration-module declaration))
 		  (semantic-constant-declaration-type semantic-declaration))))
 	  ((typep semantic-declaration 'semantic-variable-declaration)
 	   (setf (semantic-variable-declaration-initializer semantic-declaration)
-		 (check-expression
+		 (type-check-expression checker
 		  (variable-declaration-initializer declaration)
 		  (semantic-program-module-scope-for program (declaration-module declaration))
 		  (semantic-variable-declaration-type semantic-declaration)))))))
+
+(defun type-check-program (program)
+  "Type-check every executable declaration after signatures are resolved."
+  (let ((checker (make-type-checker program)))
+    (dolist (entry (semantic-program-declarations program))
+      (type-check-declaration-body checker (cdr entry)))
+    program))
 
 (defun resolve-program (entry-module modules &key target (pointer-width 64))
   "Resolve a graph of already-loaded modules into one semantic Program.
@@ -3663,11 +3762,18 @@ ready for lowering as one LLVM module."
                                                    :semantic-declaration semantic-declaration)))
               ((not (typep declaration 'implementation-declaration))
                (semantic-scope-bind module-scope (declaration-name declaration) declaration)))))
+    ;; Protocol constraints in a library may refer to a protocol imported
+    ;; through another library. Resolve every protocol signature first, so its
+    ;; type-parameter identity is available independently of module traversal
+    ;; order before functions and implementations consume that evidence.
     (dolist (entry (semantic-program-declarations program))
-      (resolve-declaration-signature program (cdr entry)))
+      (when (typep (cdr entry) 'semantic-protocol-declaration)
+        (resolve-declaration-signature program (cdr entry))))
+    (dolist (entry (semantic-program-declarations program))
+      (unless (typep (cdr entry) 'semantic-protocol-declaration)
+        (resolve-declaration-signature program (cdr entry))))
     (resolve-types program)
-    (dolist (entry (semantic-program-declarations program))
-      (resolve-declaration-body program (cdr entry)))
+    (type-check-program program)
     (resolve-native-exports program modules)
     (validate-for-backend program)
     (dolist (module modules)

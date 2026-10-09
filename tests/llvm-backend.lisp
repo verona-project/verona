@@ -197,6 +197,17 @@
              (let ((phrase (pointer u8) \"a quick fox\"))
                (%trunc-primitive-u64-i32 (strlen phrase))))"))))
 
+(test compares-exact-pointer-identities
+  (is (= 0
+         (compile-and-run-native
+          "(function main () exit-code
+             (let ((value (pointer u8) \"pointer\"))
+               (match (== value value)
+                 (true (match (!= value value)
+                         (true 1)
+                         (false 0)))
+                 (false 1))))"))))
+
 (test lowers-external-c-declarations-with-explicit-linker-names
   (let* ((unit (compile-string
                 (make-compiler)
@@ -254,6 +265,33 @@
            (function main () exit-code
              (apply increment 41))"
           (list (namestring (native-c-fixture "tests/native/c/abi_values.c")))))))
+
+(test calls-verona-functions-through-function-pointers
+  ;; A function name decays to the parameter's pointer-to-function type. The
+  ;; callee then invokes that parameter indirectly, entirely within Verona.
+  (is (= 42
+         (compile-and-run-native
+          "(function increment ((value i32)) i32 (+ value 1))
+           (function apply ((callback (pointer (function (i32) i32))) (value i32)) i32
+             (callback value))
+           (function main () exit-code
+             (apply increment 41))"))))
+
+(test stores-and-executes-function-pointers-in-fixed-arrays
+  ;; ARRAY-OF contextually decays both declarations to the same function
+  ;; pointer type. INDEX then loads an element before the indirect call.
+  (is (= 42
+         (compile-and-run-native
+          "(function add-one ((value i32)) i32 (+ value 1))
+           (function double ((value i32)) i32 (* value 2))
+           (function apply-both
+             ((callbacks (array (pointer (function (i32) i32)) 2)) (value i32))
+             i32
+             (let ((first (pointer (function (i32) i32)) (index callbacks 0))
+                   (second (pointer (function (i32) i32)) (index callbacks 1)))
+               (second (first value))))
+           (function main () exit-code
+             (apply-both (array-of add-one double) 20))"))))
 
 (test calls-a-private-c-struct-through-an-opaque-handle
   ;; The fixture's struct definition is private to C.  Verona observes only

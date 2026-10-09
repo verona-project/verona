@@ -30,6 +30,8 @@
         (:boolean-or (binary #'llvm:build-or))
         (:boolean-equal (compare :=))
         (:boolean-not-equal (compare :/=))
+        (:pointer-equal (compare :=))
+        (:pointer-not-equal (compare :/=))
         (:signed-integer-equal (compare :=))
         (:unsigned-integer-equal (compare :=))
         (:signed-integer-not-equal (compare :/=))
@@ -46,9 +48,13 @@
         (:float-ordered-not-equal (float-compare :/=))
         (:float-ordered-less-than (float-compare :<))
         (:float-ordered-less-than-or-equal (float-compare :<=))
-        (:float-ordered-greater-than (float-compare :>))
-        (:float-ordered-greater-than-or-equal (float-compare :>=))
-        (:integer-sign-extend (cast #'llvm:build-s-ext))
+		(:float-ordered-greater-than (float-compare :>))
+		(:float-ordered-greater-than-or-equal (float-compare :>=))
+		;; Signedness affects Verona's type system but not an LLVM integer's
+		;; representation.  A same-width signed/unsigned conversion therefore
+		;; emits no instruction and simply preserves the SSA value.
+		(:integer-reinterpret (first arguments))
+		(:integer-sign-extend (cast #'llvm:build-s-ext))
         (:integer-zero-extend (cast #'llvm:build-z-ext))
         (:integer-truncate (cast #'llvm:build-trunc))
         (:signed-integer-to-float (cast #'llvm:build-si-to-fp))

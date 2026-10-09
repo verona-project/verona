@@ -556,6 +556,11 @@
    #:expected-type-error-binding
    #:resolve-type
    #:resolve-types
+   #:type-checker
+   #:make-type-checker
+   #:type-checker-program
+   #:type-check-expression
+   #:type-check-program
    #:infer-expression
    #:check-expression
    #:same-type-p
@@ -586,6 +591,9 @@
    #:no-generic-implementation-error
    #:no-generic-implementation-error-generic
    #:no-generic-implementation-error-argument-types
+   #:ambiguous-generic-implementation-error
+   #:ambiguous-generic-implementation-error-generic
+   #:ambiguous-generic-implementation-error-argument-types
    #:semantic-not-callable-error
    #:wrong-argument-count-error
    #:wrong-argument-count-error-expected
