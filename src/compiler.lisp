@@ -1040,6 +1040,16 @@ or inventing attributes that its own surface language does not define."
         ((proper-s-expression-list-p value) (length value))
         (t (error "length requires a string or proper list, received ~S" value))))
 
+(defun compile-time-fold-left (head initial values)
+  "Build nested calls to HEAD by folding INITIAL over the S-expression VALUES."
+  (unless (or (verona-name-p head) (qualified-name-p head))
+    (error "compiler:fold-left requires a callable name, received ~S" head))
+  (unless (macro-s-expression-p initial)
+    (error "compiler:fold-left requires an S-expression initial value, received ~S" initial))
+  (reduce (lambda (accumulator value)
+            (list head accumulator value))
+          (compile-time-list values) :initial-value initial))
+
 (defun make-compilation-environment ()
   "Create the compile-time environment used while constructing one unit."
   (let ((environment (make-bootstrap-environment)))
@@ -1064,6 +1074,10 @@ or inventing attributes that its own surface language does not define."
       (lambda (primitive-name arguments)
         (make-primitive-definition-s-expression primitive-name arguments
                                                 *macro-expansion-syntax*))))
+    ;; Fold a compile-time list into nested calls.  Macro libraries use this
+    ;; to turn an arbitrary number of forms into a fixed-arity runtime tree.
+    (environment-bind environment (make-verona-name "compiler:fold-left")
+                      (make-verona-function #'compile-time-fold-left))
     ;; These are compile-time constructors.  They return ordinary identifier
     ;; values; expansion reattaches source syntax only after a macro returns.
     (environment-bind environment (make-verona-name "keyword")
