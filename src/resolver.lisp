@@ -2216,6 +2216,13 @@ LET bindings are addressable but remain immutable through their source name."
 	(t (values nil nil))))
 
 (defun infer-reference-expression (syntax scope)
+  ;; `_` is a match-only discard spelling, never a runtime value.  Check it
+  ;; before normal lookup so a binding in an enclosing scope cannot make a
+  ;; discarded match value observable from a case body.
+  (when (and (verona-name-p (syntax-datum syntax))
+             (string= (verona-name-value (syntax-datum syntax)) "_"))
+    (error 'invalid-expression-error :syntax syntax
+           :message "_ is a discarded value and cannot be referenced"))
   (let* ((untyped (resolve-name scope syntax))
 	 (binding (semantic-reference-binding untyped)))
     (multiple-value-bind (addressable writable) (binding-place-properties binding)

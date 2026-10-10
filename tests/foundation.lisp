@@ -297,6 +297,16 @@ baz"))
     (is (typep input-pattern 'integer-pattern))
     (is (eq program (validate-for-backend program)))))
 
+
+(test rejects-references-to-discarded-match-values
+  ;; Even an outer binding named `_` must not make a wildcard pattern's
+  ;; discarded value observable from its match case.
+  (signals verona:invalid-expression-error
+    (compile-string
+     (make-compiler)
+     "(function invalid ((_ i32) (value i32)) i32
+        (match value
+          (_ _)))")))
 (test reads-nested-lists-with-spans
   (let* ((source (make-source "nested.vrn" (format nil "(foo~%  (bar 10)~%  baz)")))
 	 (form (first (read-source source)))
