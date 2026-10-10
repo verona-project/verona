@@ -1,0 +1,69 @@
+(import base)
+(import libc.process :as process)
+(import libc.stdio :as stdio)
+
+(base:function environment-variable-defined ((name (pointer u8))) bool
+  ;; An empty name cannot name an environment variable, so getenv("") is the
+  ;; null pointer used to distinguish an undefined name from a defined one.
+  (match (== (process:getenv name) (process:getenv ""))
+    (true false)
+    (false true)))
+
+(base:function print-source-directory-status ((defined bool)) unit
+  (match defined
+    (true (do
+           (stdio:puts "VERONA_SOURCE_DIR is defined.")
+           unit))
+    (false (do
+            (stdio:puts "VERONA_SOURCE_DIR is not defined.")
+            unit))))
+
+(base:function print-library-directory-status ((defined bool)) unit
+  (match defined
+    (true (do
+           (stdio:puts "VERONA_LIBRARY_DIR is defined.")
+           unit))
+    (false (do
+            (stdio:puts "VERONA_LIBRARY_DIR is not defined.")
+            unit))))
+
+(base:function print-setup-instructions () unit
+  (do
+   (stdio:puts "")
+   (stdio:puts "Create the missing variables in Bash with:")
+   (stdio:puts "")
+   (stdio:puts "  export VERONA_SOURCE_DIR=\"$HOME/.local/src/verona\"")
+   (stdio:puts "  export VERONA_LIBRARY_DIR=\"$HOME/.local/lib/verona\"")
+   (stdio:puts "")
+   (stdio:puts "Run those commands in your current shell. Add them to ~/.bashrc for future Bash sessions.")
+   unit))
+
+(base:function print-links () unit
+  (do
+   (stdio:puts "")
+   (stdio:puts "Learn more:")
+   (stdio:puts "  Website: https://verona-project.github.io/")
+   (stdio:puts "  GitHub:  https://github.com/diasbruno/verona")
+   unit))
+
+(base:function main () exit-code
+  (let ((source-directory-defined bool
+                                 (environment-variable-defined "VERONA_SOURCE_DIR"))
+        (library-directory-defined bool
+                                  (environment-variable-defined "VERONA_LIBRARY_DIR")))
+    (do
+     (print-source-directory-status source-directory-defined)
+     (print-library-directory-status library-directory-defined)
+     (match source-directory-defined
+       (true (match library-directory-defined
+               (true (do
+                      (stdio:puts "Your Verona package environment is ready.")
+                      unit))
+               (false (print-setup-instructions))))
+       (false (print-setup-instructions)))
+     (print-links)
+     (match source-directory-defined
+       (true (match library-directory-defined
+               (true 0)
+               (false 1)))
+       (false 1)))))

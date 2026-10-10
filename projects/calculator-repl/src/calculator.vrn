@@ -47,19 +47,27 @@
       (write-standard-output (cast (pointer void) (& buffer)) 3)
       unit)))
 
+(base:function apply-operator
+  (for (a)
+    ((base:numeric a)
+     (base:equality a)))
+  ((left a) (operator i32) (right a))
+  a
+  (match operator
+    (#\+ (+ left right))
+    (#\- (- left right))
+    (#\* (* left right))
+    (#\/ (match (= right (- right right))
+           (true (- left left))
+           (false (/ left right))))
+    (_ (- left left))))
+
 (base:function evaluate ((left-character i32) (operator i32)
                     (right-character i32) (buffer (array u8 3))) unit
   (let ((left i32 (%--primitive-i32 left-character 48))
         (right i32 (%--primitive-i32 right-character 48)))
     (write-result
-     (match operator
-       (#\+ (%+-primitive-i32 left right))
-       (#\- (%--primitive-i32 left right))
-       (#\* (%*-primitive-i32 left right))
-       (#\/ (match right
-             (0 0)
-             (_ (%/-primitive-i32 left right))))
-       (_ 0))
+     (apply-operator left operator right)
      buffer)))
 
 (base:function repl ((buffer (array u8 3))) exit-code

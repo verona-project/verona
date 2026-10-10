@@ -5,7 +5,9 @@
 Verona is a statically typed systems programming language with an S-expression
 syntax. It compiles ahead of time through LLVM and supports product and sum
 types, pattern matching, generic dispatch, protocols, compile-time macros, and
-native-library output.
+native-library output. The bundled `base` library supplies numeric, equality,
+ordering, and result-directed conversion protocols; the bundled `testing`
+library supports Verona-native assertions, fixtures, and runners.
 
 ## About
 
@@ -86,10 +88,10 @@ Verona source
 
 The front end keeps source forms and expanded syntax attached to declarations.
 It processes top-level forms in order, so a macro can affect later forms, then
-resolves the complete declaration set before lowering. The LLVM backend turns
-the resolved program into target-specific IR. Finally, the compiler driver
-selects a target, emits an object, and asks the host toolchain to create the
-requested native artifact.
+resolves declaration signatures and type-checks executable bodies before
+lowering. The LLVM backend turns the resolved program into target-specific IR.
+Finally, the compiler driver selects a target, emits an object, and asks the
+host toolchain to create the requested native artifact.
 
 The `verona` executable is deliberately a small wrapper around the reusable
 `verona.compiler:compiler-driver` API. This keeps source analysis independent
@@ -166,6 +168,23 @@ Top-level `static-library` and `shared-library` declarations use the same
 options. Build files may also declare target triples, native library paths,
 and Darwin frameworks. Relative module and library paths are resolved from the
 directory containing `verona.build`.
+
+## Bundled tutorials and libraries
+
+Run the package-environment tutorial from the repository root with:
+
+```sh
+make bootstrap
+```
+
+It checks `VERONA_SOURCE_DIR` and `VERONA_LIBRARY_DIR`, explains the required
+Bash `export` commands, and prints the Verona website and repository links.
+For Verona programs, import [`base/`](base/) instead of using compiler-internal
+`%` operations directly. Its `numeric`, `equality`, and `ordering` protocols
+provide `+`, `-`, `*`, `/`, `=`, `<`, `<=`, `>`, and `>=`; `base:convert`
+performs an explicit numeric conversion whose destination type is inferred from
+context. The [`projects/testing/`](projects/testing/) package adds assertions,
+named tests, runners, fixtures, and typed function-pointer test callbacks.
 
 For the complete source-language, Common Lisp, LLVM, compiler-driver, and
 declarative-build reference, see [the API documentation](docs/API.md).

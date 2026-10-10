@@ -3,30 +3,219 @@
 ; this module's own MACRO macro and can therefore be replaced by an importer.
 
 (macro macro (&rest arguments)
-  (compiler:definition "%macro" arguments))
+  (cons '%macro arguments))
 
 (macro type (&rest arguments)
-  (compiler:definition "%type" arguments))
+  (cons '%type arguments))
 
 (macro function (&rest arguments)
-  (compiler:definition "%function" arguments))
+  (cons '%function arguments))
 
 (macro external-function (&rest arguments)
-  (compiler:definition "%external-function" arguments))
+  (cons '%external-function arguments))
 
 (macro constant (&rest arguments)
-  (compiler:definition "%constant" arguments))
+  (cons '%constant arguments))
 
 (macro variable (&rest arguments)
-  (compiler:definition "%variable" arguments))
+  (cons '%variable arguments))
 
 (macro generic (&rest arguments)
-  (compiler:definition "%generic" arguments))
+  (cons '%generic arguments))
 
 (macro protocol (&rest arguments)
-  (compiler:definition "%protocol" arguments))
+  (cons '%protocol arguments))
 
 (macro implementation (&rest arguments)
-  (compiler:definition "%implementation" arguments))
+  (cons '%implementation arguments))
 
-(export macro type function external-function constant variable generic protocol implementation)
+;; Conversion dispatch is result-directed: the expected type surrounding a
+;; call to CONVERT selects one implementation for the source value type.
+(generic convert (value))
+
+;; Numeric conversions mirror the complete LLVM conversion surface.  The
+;; operation is explicit in this implementation layer; callers only select
+;; their desired destination type through the surrounding context.
+(macro implement-convert (source destination primitive)
+  `(implementation convert ((value ,source)) ,destination
+     (,primitive value)))
+
+(macro implement-identity-convert (type)
+  `(implementation convert ((value ,type)) ,type value))
+
+(implement-identity-convert i8)
+(implement-identity-convert i16)
+(implement-identity-convert i32)
+(implement-identity-convert i64)
+(implement-identity-convert u8)
+(implement-identity-convert u16)
+(implement-identity-convert u32)
+(implement-identity-convert u64)
+(implement-identity-convert f32)
+(implement-identity-convert f64)
+
+;; Signed integers.
+(implement-convert i8 i16 %sext-primitive-i8-i16)
+(implement-convert i8 i32 %sext-primitive-i8-i32)
+(implement-convert i8 i64 %sext-primitive-i8-i64)
+(implement-convert i8 u8 %reinterpret-primitive-i8-u8)
+(implement-convert i8 u16 %sext-primitive-i8-u16)
+(implement-convert i8 u32 %sext-primitive-i8-u32)
+(implement-convert i8 u64 %sext-primitive-i8-u64)
+(implement-convert i8 f32 %sitofp-primitive-i8-f32)
+(implement-convert i8 f64 %sitofp-primitive-i8-f64)
+
+(implement-convert i16 i8 %trunc-primitive-i16-i8)
+(implement-convert i16 i32 %sext-primitive-i16-i32)
+(implement-convert i16 i64 %sext-primitive-i16-i64)
+(implement-convert i16 u8 %trunc-primitive-i16-u8)
+(implement-convert i16 u16 %reinterpret-primitive-i16-u16)
+(implement-convert i16 u32 %sext-primitive-i16-u32)
+(implement-convert i16 u64 %sext-primitive-i16-u64)
+(implement-convert i16 f32 %sitofp-primitive-i16-f32)
+(implement-convert i16 f64 %sitofp-primitive-i16-f64)
+
+(implement-convert i32 i8 %trunc-primitive-i32-i8)
+(implement-convert i32 i16 %trunc-primitive-i32-i16)
+(implement-convert i32 i64 %sext-primitive-i32-i64)
+(implement-convert i32 u8 %trunc-primitive-i32-u8)
+(implement-convert i32 u16 %trunc-primitive-i32-u16)
+(implement-convert i32 u32 %reinterpret-primitive-i32-u32)
+(implement-convert i32 u64 %sext-primitive-i32-u64)
+(implement-convert i32 f32 %sitofp-primitive-i32-f32)
+(implement-convert i32 f64 %sitofp-primitive-i32-f64)
+
+(implement-convert i64 i8 %trunc-primitive-i64-i8)
+(implement-convert i64 i16 %trunc-primitive-i64-i16)
+(implement-convert i64 i32 %trunc-primitive-i64-i32)
+(implement-convert i64 u8 %trunc-primitive-i64-u8)
+(implement-convert i64 u16 %trunc-primitive-i64-u16)
+(implement-convert i64 u32 %trunc-primitive-i64-u32)
+(implement-convert i64 u64 %reinterpret-primitive-i64-u64)
+(implement-convert i64 f32 %sitofp-primitive-i64-f32)
+(implement-convert i64 f64 %sitofp-primitive-i64-f64)
+
+;; Unsigned integers.
+(implement-convert u8 i8 %reinterpret-primitive-u8-i8)
+(implement-convert u8 i16 %zext-primitive-u8-i16)
+(implement-convert u8 i32 %zext-primitive-u8-i32)
+(implement-convert u8 i64 %zext-primitive-u8-i64)
+(implement-convert u8 u16 %zext-primitive-u8-u16)
+(implement-convert u8 u32 %zext-primitive-u8-u32)
+(implement-convert u8 u64 %zext-primitive-u8-u64)
+(implement-convert u8 f32 %uitofp-primitive-u8-f32)
+(implement-convert u8 f64 %uitofp-primitive-u8-f64)
+
+(implement-convert u16 i8 %trunc-primitive-u16-i8)
+(implement-convert u16 i16 %reinterpret-primitive-u16-i16)
+(implement-convert u16 i32 %zext-primitive-u16-i32)
+(implement-convert u16 i64 %zext-primitive-u16-i64)
+(implement-convert u16 u8 %trunc-primitive-u16-u8)
+(implement-convert u16 u32 %zext-primitive-u16-u32)
+(implement-convert u16 u64 %zext-primitive-u16-u64)
+(implement-convert u16 f32 %uitofp-primitive-u16-f32)
+(implement-convert u16 f64 %uitofp-primitive-u16-f64)
+
+(implement-convert u32 i8 %trunc-primitive-u32-i8)
+(implement-convert u32 i16 %trunc-primitive-u32-i16)
+(implement-convert u32 i32 %reinterpret-primitive-u32-i32)
+(implement-convert u32 i64 %zext-primitive-u32-i64)
+(implement-convert u32 u8 %trunc-primitive-u32-u8)
+(implement-convert u32 u16 %trunc-primitive-u32-u16)
+(implement-convert u32 u64 %zext-primitive-u32-u64)
+(implement-convert u32 f32 %uitofp-primitive-u32-f32)
+(implement-convert u32 f64 %uitofp-primitive-u32-f64)
+
+(implement-convert u64 i8 %trunc-primitive-u64-i8)
+(implement-convert u64 i16 %trunc-primitive-u64-i16)
+(implement-convert u64 i32 %trunc-primitive-u64-i32)
+(implement-convert u64 i64 %reinterpret-primitive-u64-i64)
+(implement-convert u64 u8 %trunc-primitive-u64-u8)
+(implement-convert u64 u16 %trunc-primitive-u64-u16)
+(implement-convert u64 u32 %trunc-primitive-u64-u32)
+(implement-convert u64 f32 %uitofp-primitive-u64-f32)
+(implement-convert u64 f64 %uitofp-primitive-u64-f64)
+
+;; Floating-point conversions.
+(implement-convert f32 i8 %fptosi-primitive-f32-i8)
+(implement-convert f32 i16 %fptosi-primitive-f32-i16)
+(implement-convert f32 i32 %fptosi-primitive-f32-i32)
+(implement-convert f32 i64 %fptosi-primitive-f32-i64)
+(implement-convert f32 u8 %fptoui-primitive-f32-u8)
+(implement-convert f32 u16 %fptoui-primitive-f32-u16)
+(implement-convert f32 u32 %fptoui-primitive-f32-u32)
+(implement-convert f32 u64 %fptoui-primitive-f32-u64)
+(implement-convert f32 f64 %fext-primitive-f32-f64)
+
+(implement-convert f64 i8 %fptosi-primitive-f64-i8)
+(implement-convert f64 i16 %fptosi-primitive-f64-i16)
+(implement-convert f64 i32 %fptosi-primitive-f64-i32)
+(implement-convert f64 i64 %fptosi-primitive-f64-i64)
+(implement-convert f64 u8 %fptoui-primitive-f64-u8)
+(implement-convert f64 u16 %fptoui-primitive-f64-u16)
+(implement-convert f64 u32 %fptoui-primitive-f64-u32)
+(implement-convert f64 u64 %fptoui-primitive-f64-u64)
+(implement-convert f64 f32 %ftrunc-primitive-f64-f32)
+
+;; Core type-class protocols. Client code can constrain a type parameter with
+;; (numeric a), (equality a), or (ordering a) and use the corresponding
+;; operator symbols.
+(protocol numeric (a)
+  (+ ((left a) (right a)) a)
+  (- ((left a) (right a)) a)
+  (* ((left a) (right a)) a)
+  (/ ((left a) (right a)) a))
+
+(protocol equality (a)
+  (= ((left a) (right a)) bool))
+
+(protocol ordering (a)
+  (< ((left a) (right a)) bool)
+  (<= ((left a) (right a)) bool)
+  (> ((left a) (right a)) bool)
+  (>= ((left a) (right a)) bool))
+
+;; Keep implementations generated from one definition so each primitive type
+;; has the same numeric, equality, and ordering surface.
+(macro implement-numeric (type)
+  (definitions
+    `(implementation (numeric ,type)
+      (function + ((left ,type) (right ,type)) ,type
+        (,(symbol-concat "%+-primitive-" type) left right))
+      (function - ((left ,type) (right ,type)) ,type
+        (,(symbol-concat "%--primitive-" type) left right))
+      (function * ((left ,type) (right ,type)) ,type
+        (,(symbol-concat "%*-primitive-" type) left right))
+      (function / ((left ,type) (right ,type)) ,type
+        (,(symbol-concat "%/-primitive-" type) left right)))
+    `(implementation (equality ,type)
+      (function = ((left ,type) (right ,type)) bool
+        (,(symbol-concat "%=-primitive-" type) left right)))
+    `(implementation (ordering ,type)
+      (function < ((left ,type) (right ,type)) bool
+        (,(symbol-concat "%<-primitive-" type) left right))
+      (function <= ((left ,type) (right ,type)) bool
+        (,(symbol-concat "%<=-primitive-" type) left right))
+      (function > ((left ,type) (right ,type)) bool
+        (,(symbol-concat "%>-primitive-" type) left right))
+      (function >= ((left ,type) (right ,type)) bool
+        (,(symbol-concat "%>=-primitive-" type) left right)))))
+
+(implement-numeric i8)
+(implement-numeric i16)
+(implement-numeric i32)
+(implement-numeric i64)
+(implement-numeric u8)
+(implement-numeric u16)
+(implement-numeric u32)
+(implement-numeric u64)
+(implement-numeric f32)
+(implement-numeric f64)
+
+(implementation (equality bool)
+  (function = ((left bool) (right bool)) bool
+    (%=-primitive-bool left right)))
+
+(export
+ macro type function external-function constant variable generic protocol implementation
+ convert numeric equality ordering)

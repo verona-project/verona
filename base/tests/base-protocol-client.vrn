@@ -1,0 +1,56 @@
+(import base)
+
+(base:function total
+  (for (a)
+    ((base:numeric a)))
+  ((left a) (right a))
+  a
+  (+ left right))
+
+(base:function same
+  (for (a)
+    ((base:equality a)))
+  ((left a) (right a))
+  bool
+  (= left right))
+
+(base:function less
+  (for (a)
+    ((base:ordering a)))
+  ((left a) (right a))
+  bool
+  (< left right))
+
+(base:function less-or-equal
+  (for (a)
+    ((base:ordering a)))
+  ((left a) (right a))
+  bool
+  (<= left right))
+
+(base:function greater
+  (for (a)
+    ((base:ordering a)))
+  ((left a) (right a))
+  bool
+  (> left right))
+
+(base:function greater-or-equal
+  (for (a)
+    ((base:ordering a)))
+  ((left a) (right a))
+  bool
+  (>= left right))
+
+(base:function main () exit-code
+  (match (same (total 20 22) 42)
+    (true (match (less 42 43)
+            (true (match (less-or-equal 42 42)
+                    (true (match (greater 43 42)
+                            (true (match (greater-or-equal 43 43)
+                                    (true 0)
+                                    (false 1)))
+                            (false 1)))
+                    (false 1)))
+            (false 1)))
+    (false 1)))

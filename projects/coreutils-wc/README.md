@@ -28,5 +28,5 @@ prints all three. Options precede file operands; `--` ends option parsing, and
 final `total` line. Combined short options such as `-lwc` are not supported.
 
 This is still a useful compiler stress test: C ABI calls, product values,
-pattern matching, recursive tail calls, arithmetic and narrowing conversions,
-and unbuffered terminal output all appear in one compact project.
+pattern matching, recursive stream walking, arithmetic and narrowing
+conversions, and unbuffered terminal output all appear in one compact project.

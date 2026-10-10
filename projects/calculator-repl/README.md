@@ -2,7 +2,9 @@
 
 A compact interactive calculator implemented in Verona. It uses the separate
 [`libc`](../libc/) project for its POSIX `getchar`, `write`, and `memset`
-bindings.
+bindings. Its reusable evaluator is constrained by `base:numeric` and
+`base:equality`, so the `+`, `-`, `*`, `/`, and `=` operators resolve through
+the base protocol layer.
 
 Build it from this directory:
 

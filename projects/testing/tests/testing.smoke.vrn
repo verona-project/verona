@@ -1,0 +1,53 @@
+(import base)
+(import testing)
+
+(base:function make-fixture-value () i32 42)
+
+(base:variable fixture-released bool false)
+
+(base:function release-fixture-value ((value i32)) unit
+  (do (assign fixture-released true) unit))
+
+;; This is a Verona test suite: named tests aggregate assertions, and RUNNER
+;; returns the aggregate failure count as the process exit status.
+(testing:test numeric-conversions
+  ;; This chain visits every LLVM numeric type and exercises the conversion
+  ;; families: extension, truncation, signedness reinterpretation, integer to
+  ;; float, float extension, and float to integer.
+  (let ((source i8 42)
+        (i16-value i16 (base:convert source))
+        (i32-value i32 (base:convert i16-value))
+        (i64-value i64 (base:convert i32-value))
+        (u64-value u64 (base:convert i64-value))
+        (u32-value u32 (base:convert u64-value))
+        (u16-value u16 (base:convert u32-value))
+        (u8-value u8 (base:convert u16-value))
+        (f32-value f32 (base:convert u8-value))
+        (f64-value f64 (base:convert f32-value))
+        (returned i8 (base:convert f64-value))
+        (number i32 (base:convert returned)))
+    (testing:assert-equal number 42)))
+
+(testing:test comparisons
+  (testing:assert-not-equal 42 43)
+  (testing:assert-less-than 41 42)
+  (testing:assert-less-or-equal 42 42)
+  (testing:assert-greater-than 43 42)
+  (testing:assert-greater-or-equal 43 43))
+
+(testing:test scoped-fixture
+  (testing:with-fixture (value i32 (make-fixture-value) release-fixture-value)
+    (testing:assert-equal value 42)))
+
+(testing:test callback-test
+  (testing:assert-equal 42 42))
+
+(testing:test verifies-fixture-teardown
+  (testing:assert-equal fixture-released true))
+
+(testing:runner main
+  (numeric-conversions)
+  (comparisons)
+  (scoped-fixture)
+  (testing:execute callback-test)
+  (verifies-fixture-teardown))

@@ -1,0 +1,6 @@
+(import base)
+
+(base:function main () exit-code
+  (let ((byte u8 (base:convert 42))
+        (number i32 (base:convert byte)))
+    number))

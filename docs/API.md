@@ -6,7 +6,9 @@ driver.  Names in the `verona` package are available as `verona:name`; driver
 and backend names use `verona.compiler:name` and
 `verona.backend.llvm:name` respectively.
 
-The compiler exposes source-aware and semantic objects deliberately.  The
+The compiler exposes source-aware and semantic objects deliberately. The
+front-end first resolves module names and declaration signatures, then runs a
+bidirectional type-checking phase over executable bodies. The public
 front-end functions below are suitable for tools, tests, and embeddings; the
 semantic and LLVM layers are advanced APIs for analyzers and alternate
 backends.
@@ -108,36 +110,124 @@ module and invoke its exported macros with the module qualifier:
   (+ left right))
 ```
 
-Projects can replace a surface convention locally.  For example, this installs
-an unqualified `function` macro that delegates to the compiler's current
-definition constructor:
+Projects can replace a surface convention locally. For example, this installs
+an unqualified `function` macro by placing the primitive definition name ahead
+of the original arguments:
 
 ```lisp
 (import base)
 
 (base:macro fn (&rest arguments)
-  (compiler:definition "%function" arguments))
+  (cons '%function arguments))
 
 (fn main () exit-code 0)
 ```
 
 `base` exports `macro`, `type`, `function`, `external-function`, `constant`,
-`variable`, `generic`, `protocol`, and `implementation`.  It does not add
-documentation or other attributes not defined by the calling macro.
+`variable`, `generic`, `protocol`, and `implementation`. It also supplies three
+protocols for ordinary parametric code:
 
-### Compile-time S-expression construction
+```lisp
+(base:function total
+  (for (a)
+    ((base:numeric a)))
+  ((left a) (right a))
+  a
+  (+ left right))
 
-Macro bodies evaluate at compile time and return ordinary S-expressions.  The
-compiler retains source-aware syntax privately, restoring invocation provenance
-only after macro expansion.  This is the complete function surface available
-to a source-defined macro.  `base` macros are separately imported language
-forms, not implicit evaluator functions.
+(base:function same
+  (for (a)
+    ((base:equality a)))
+  ((left a) (right a))
+  bool
+  (= left right))
+
+(base:function before
+  (for (a)
+    ((base:ordering a)))
+  ((left a) (right a))
+  bool
+  (< left right))
+```
+
+`base:numeric` provides `+`, `-`, `*`, and `/` to a function constrained by
+that protocol; `base:equality` provides `=` in the same way. Both are
+implemented for `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f32`,
+and `f64`; `base:equality` is also implemented for `bool`. `base:ordering`
+provides `<`, `<=`, `>`, and `>=` for those numeric types. Each numeric-family
+implementation calls its corresponding concrete primitive operation.
+
+`base:convert` is a result-directed generic. Its source type comes from the
+argument and its target type comes from the surrounding context:
+
+```lisp
+(base:function byte ((value i32)) u8
+  (base:convert value))
+
+(base:function code ((value u8)) i32
+  (base:convert value))
+```
+
+Every pair of numeric types is supported: `i8`, `i16`, `i32`, `i64`, `u8`,
+`u16`, `u32`, `u64`, `f32`, and `f64`. Integer widening preserves the source
+signedness; narrowing discards high bits; same-width signed/unsigned
+conversions preserve the underlying bits. An uncontextualized conversion is
+rejected because its target type is unknown.
+
+### Testing library
+
+The bundled `projects/testing/` package provides Verona-native test results
+and generic assertions. Add `projects/testing/src` and `base/src` to a test
+target's module paths, declare named tests, then list their calls in a runner:
+
+```lisp
+(import base)
+(import testing)
+
+(testing:test arithmetic
+  (testing:assert-equal 40 40)
+  (testing:assert-less-than 40 42))
+
+(testing:runner main
+  (arithmetic))
+```
+
+`testing:test` combines all checks in a named zero-argument function.
+`testing:runner` executes its explicit list of test calls and makes the
+process exit code equal the total number of failures. `testing:check` wraps a
+boolean condition; `assert-equal` and `assert-not-equal` require
+`base:equality`; the four ordering assertions require `base:ordering`.
+
+`testing:with-fixture` scopes a resource around checks using
+`(name type setup-expression teardown-function)`. It invokes teardown after
+the checks have been aggregated. `testing:test-function` is a typed pointer to
+a zero-argument test; pass one to `testing:execute` when a test should be run
+through a function pointer or stored alongside same-signature tests.
+
+### Metaprogramming and compilation layers
+
+Verona has two cooperating compilation layers. In the metaprogramming layer,
+macro bodies evaluate at compile time and manipulate ordinary S-expressions:
+they inspect, construct, combine, and generate syntax for the compiler. In the
+top-level-form compiler, the expanded forms are collected as declarations,
+their signatures are resolved, executable bodies are type-checked, and the
+resulting program is lowered to LLVM. A macro therefore creates program forms;
+it does not turn a declaration into a runtime value.
+
+The compiler retains source-aware syntax privately, restoring invocation
+provenance only after macro expansion. `base` macros are separately imported
+language forms, not implicit evaluator functions. A macro can emit any `%…`
+definition form itself; it needs no compiler-only definition constructor.
 
 | Function | Signature | Result / notes |
 | --- | --- | --- |
 | `+` | `(+ NUMBER...)` | Bootstrap arithmetic binding. It exists for evaluator tests and simple bootstrap macros; it is not a stable general-purpose macro library. |
 | `definitions` | `(definitions FORM...)` | Returns zero or more top-level S-expression forms from one macro expansion. Each argument must be an S-expression. |
-| `compiler:definition` | `(compiler:definition PRIMITIVE ARGUMENTS)` | Builds a primitive definition S-expression from the established positional contract. `PRIMITIVE` is one of the compiler `%...` definition names and `ARGUMENTS` is a list of S-expressions. This is the bridge used by the bundled `base` macros. |
+| `compiler:call` | `(compiler:call HEAD FORM...)` | Constructs a call S-expression headed by the identifier `HEAD`. |
+| `compiler:map` | `(compiler:map HEAD LIST...)` | Constructs one call to `HEAD` per parallel set of elements. Lists must be proper and equally long. |
+| `compiler:reduce` | `(compiler:reduce HEAD INITIAL FORMS)` | Builds left-associated binary calls to `HEAD`, reducing `INITIAL` over `FORMS`. |
+| `compiler:reduce-right` | `(compiler:reduce-right HEAD INITIAL FORMS)` | Builds right-associated binary calls to `HEAD`, reducing `FORMS` into `INITIAL`. |
+| `compiler:reverse` | `(compiler:reverse LIST)` | Returns a proper macro list in reverse order. |
 
 ### Identifier functions
 
@@ -201,9 +291,9 @@ At the top level, a macro may return any ordinary top-level form, including
 `base:implementation`; expansion then continues normally and the resulting
 form is compiled as though it had appeared in the source. In an executable
 expression position, it returns exactly one expression form, which expands
-before resolution and type checking. `compiler:definition` remains available
-for a macro that needs to delegate one of the base positional definition
-contracts directly to the compiler.
+before resolution and type checking. A declaration wrapper can preserve its
+arguments with `(cons '%function arguments)` (or the appropriate `%…` name),
+so declaration syntax remains entirely expressible as a macro.
 
 ### Primitive definition API
 
@@ -281,16 +371,18 @@ explicit. Unicode characters are not supported yet.
 | `(pointer-offset pointer integer)` | Advance a pointer by an element count. The pointer must target a complete type; callers are responsible for bounds and lifetime. |
 | `(assign place value)`, `(store place value)` | Write a writable place. |
 | `(cast Type value)` | Explicit pointer cast. |
-| `+`, `-`, `*`, `/` | Generic arithmetic for every signed/unsigned integer type and for `f32`/`f64`; operands must have the same type. |
-| `==`, `!=`, `<`, `<=`, `>`, `>=` | Generic comparison for the same numeric type families; result is `bool`. Float comparisons are ordered, so a NaN operand makes the comparison false. |
+| Function pointers | Write `(pointer (function (ParameterType...) ResultType))`. A named function automatically decays to that type when it is expected, including as an element of a fixed array. A function-pointer value, including an indexed array element, can be called with ordinary call syntax. |
+| Numeric and comparison operators | Import `base` for the public protocol operations: `+`, `-`, `*`, `/`, `=`, `<`, `<=`, `>`, and `>=`. `base:numeric`, `base:equality`, and `base:ordering` provide them for constrained parametric code. |
 
 Addressable places are read implicitly wherever a value is required. For
 example, `(deref pointer)` reads the pointed-to value when it appears as a
 function argument, initializer, return value, or arithmetic operand; it remains
 a place when used with `&`, `assign`, or `store`.
 
-The compiler also exposes concrete bootstrap primitives.  They are useful for
-compiler tests and generated code, not typical `.vrn` programs:
+The compiler also exposes concrete bootstrap primitives. They are for compiler
+tests and generated library code; ordinary `.vrn` programs must use operations
+exported by a module such as `base`, rather than calling the internal `%…`
+primitives directly:
 
 | Primitive family | Available names |
 | --- | --- |
@@ -299,6 +391,7 @@ compiler tests and generated code, not typical `.vrn` programs:
 | Float arithmetic and comparison | The same arithmetic and comparison spellings with `-primitive-f32` and `-primitive-f64`. |
 | Boolean operations | `%not-primitive-bool`, `%and-primitive-bool`, `%or-primitive-bool`, `%=-primitive-bool`, and `%/=-primitive-bool`. |
 | Integer width conversion | `%sext-primitive-S-D`, `%zext-primitive-S-D`, and `%trunc-primitive-S-D`, for valid widening, zero/sign-extending, and narrowing integer pairs. |
+| Same-width signedness conversion | `%reinterpret-primitive-S-D`, for signed/unsigned integer types of the same width. It preserves the bit pattern. |
 | Integer/float conversion | `%sitofp-primitive-I-F`, `%uitofp-primitive-U-F`, `%fptosi-primitive-F-I`, `%fptoui-primitive-F-U`, `%fext-primitive-f32-f64`, and `%ftrunc-primitive-f64-f32`. |
 
 ## Common Lisp front-end API
@@ -395,12 +488,16 @@ requiring slot access:
 | Semantic declarations | `semantic-declaration-source-declaration`; accessors prefixed `semantic-type-declaration-`, `semantic-type-alias-declaration-`, `semantic-constant-declaration-`, `semantic-variable-declaration-`, `semantic-function-declaration-`, `semantic-external-function-declaration-`, and `semantic-generic-implementation-`. |
 | Expressions and patterns | `semantic-expression-syntax`, `semantic-expression-type`, `expression-syntax`, `expression-source`, `expression-type`; accessors prefixed `semantic-reference-`, `semantic-call-`, `external-call-expression-`, `primitive-call-`, `conversion-expression-`, `pointer-cast-expression-`, `construct-expression-`, `sum-construct-expression-`, `field-expression-`, `sequence-expression-`, `let-expression-`, `address-expression-`, `dereference-expression-`, `load-expression-`, `assignment-expression-`, `store-expression-`, `return-expression-`, `pattern-`, `literal-pattern-`, `binding-pattern-`, `constructor-pattern-`, `match-case-`, and `match-expression-`. |
 
-The analysis functions are `resolve-type`, `resolve-types`, `infer-expression`,
-`check-expression`, `build-semantic-expression`, `resolve-compilation-unit`,
-`resolve-program`, `same-type-p`, `compatible-p`, `validate-for-backend`,
-`backend-representable-type-p`, and `verona-type-name`.  They operate on the
-advanced semantic representation and may signal the exported semantic error
-conditions.
+The analysis functions are `resolve-type`, `resolve-types`,
+`make-type-checker`, `type-check-expression`, `type-check-program`,
+`infer-expression`, `check-expression`, `build-semantic-expression`,
+`resolve-compilation-unit`, `resolve-program`, `same-type-p`, `compatible-p`,
+`validate-for-backend`, `backend-representable-type-p`, and `verona-type-name`.
+`type-check-program` validates executable bodies after declaration signatures
+are known. Generic dispatch uses argument types and, for result-directed
+generics such as `base:convert`, the expected result type. These functions
+operate on the advanced semantic representation and may signal the exported
+semantic error conditions.
 
 Advanced declaration-pipeline functions are `definition-form-p`,
 `expand-top-level`, `process-definition`, `make-top-level-expansion-result`,

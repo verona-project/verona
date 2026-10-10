@@ -1,0 +1,11 @@
+(import testing)
+
+(testing:test equality
+  (testing:assert-equal 42 42))
+
+(testing:test ordering
+  (testing:assert-greater-than 43 42))
+
+(testing:runner main
+  (equality)
+  (ordering))

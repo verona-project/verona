@@ -1,0 +1,7 @@
+(executable bootstrap
+  (root bootstrap)
+  (module-path "src")
+  (module-path "../libc/src")
+  (module-path "../../base/src")
+  (target native)
+  (optimize 0))

@@ -170,13 +170,13 @@
                next-bytes
                false))
              (false
-              (match inside-word
-                (true (count-stream file-descriptor lines words next-bytes true))
-                (false (count-stream file-descriptor
-                                     lines
-                                     (%+-primitive-u64 words 1)
-                                     next-bytes
-                                     true)))))))
+              (count-stream file-descriptor
+                            lines
+                            (match inside-word
+                              (true words)
+                              (false (%+-primitive-u64 words 1)))
+                            next-bytes
+                            true)))))
       (_ (count-result (counts lines words bytes) false)))))
 
 (base:function process-stream
@@ -184,38 +184,29 @@
    (selected selection) (name (pointer u8)) (result count-result)
    (total counts) (input-count i32) (failed bool))
   exit-code
-  (match (field result complete)
-    (true
-     (let ((value counts (field result value)))
+  (let ((next-input-count i32 (%+-primitive-i32 input-count 1)))
+    (match (field result complete)
+      (true
+       (let ((value counts (field result value)))
+         (do
+          (write-counts value selected name true)
+          (process-inputs argc
+                          argv
+                          next-index
+                          selected
+                          (add-counts total value)
+                          next-input-count
+                          failed))))
+      (false
        (do
-        (write-counts value selected name true)
+        (stdio:perror name)
         (process-inputs argc
                         argv
                         next-index
                         selected
-                        (add-counts total value)
-                        (%+-primitive-i32 input-count 1)
-                        failed))))
-    (false
-     (do
-      (stdio:perror name)
-      (process-inputs argc
-                      argv
-                      next-index
-                      selected
-                      total
-                      (%+-primitive-i32 input-count 1)
-                      true)))))
-
-(base:function process-open-file
-  ((argc i32) (argv (pointer (pointer u8))) (next-index i32)
-   (selected selection) (name (pointer u8)) (file-descriptor libc:file-descriptor)
-   (total counts) (input-count i32) (failed bool))
-  exit-code
-  (let ((result count-result (count-stream file-descriptor 0 0 0 false)))
-    (do
-     (descriptor:close file-descriptor)
-     (process-stream argc argv next-index selected name result total input-count failed))))
+                        total
+                        next-input-count
+                        true))))))
 
 (base:function process-inputs
   ((argc i32) (argv (pointer (pointer u8))) (index i32) (selected selection)
@@ -255,15 +246,19 @@
                                      total
                                      (%+-primitive-i32 input-count 1)
                                      true)))
-                (_ (process-open-file argc
+                (_ (let ((result count-result
+                                       (count-stream file-descriptor 0 0 0 false)))
+                     (do
+                      (descriptor:close file-descriptor)
+                      (process-stream argc
                                       argv
                                       next-index
                                       selected
                                       name
-                                      file-descriptor
+                                      result
                                       total
                                       input-count
-                                      failed))))))))))
+                                      failed))))))))))))
 
 (base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (let ((parsed parsed-options

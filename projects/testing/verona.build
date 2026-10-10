@@ -1,0 +1,15 @@
+(static-library testing
+  (version "0.1.0")
+  (root testing)
+  (module-path "src")
+  (module-path "../../base/src")
+  (target native)
+  (optimize 0))
+
+(executable testing-smoke
+  (root testing.smoke)
+  (module-path "src")
+  (module-path "tests")
+  (module-path "../../base/src")
+  (target native)
+  (optimize 0))

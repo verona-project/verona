@@ -1,0 +1,119 @@
+(import base)
+
+;; Test results are values so a test program can combine checks without a
+;; runtime registry.
+(base:type result (product (passed i32) (failed i32)))
+
+;; Tests are ordinary zero-argument functions. Giving that shape a public
+;; name lets callers store and invoke tests through typed function pointers.
+(base:type test-function (pointer (function () result)))
+
+;; An empty aggregate has no passing or failing checks.  It gives TEST and
+;; RUNNER a neutral value when folding any number of result expressions.
+(base:function empty () result
+  (result 0 0))
+
+(base:function pass () result
+  (result 1 0))
+
+(base:function fail () result
+  (result 0 1))
+
+(base:function check ((condition bool)) result
+  (match condition
+    (true (pass))
+    (false (fail))))
+
+(base:function combine ((left result) (right result)) result
+  (result (+ (field left passed) (field right passed))
+          (+ (field left failed) (field right failed))))
+
+;; Execute one named test through its function pointer. RUNNER accepts result
+;; expressions, so callers can use this to include callback-style tests.
+(base:function execute ((test-case test-function)) result
+  (test-case))
+
+;; Declare a named, zero-argument test. Each body form returns RESULT; their
+;; outcomes are combined so one test can contain any number of checks.
+(base:macro test (name &rest checks)
+  (cons '%function
+    (list name '() 'testing:result
+          (compiler:reduce 'testing:combine '(testing:empty) checks))))
+
+;; Declare the executable entry point for an explicit list of test calls.
+;; Function values and a global runtime registry are not needed: the macro
+;; builds the fixed-arity COMBINE tree at compile time.
+(base:macro runner (name &rest tests)
+  (cons '%function
+    (list name '() 'exit-code
+          (list 'testing:exit-status
+                (compiler:reduce 'testing:combine '(testing:empty) tests)))))
+
+;; Run CHECKS with one resource alive. BINDING has the shape
+;; (name type setup-expression teardown-function). The teardown function is
+;; called after checks have produced their aggregate result, including when
+;; one or more assertions fail.
+(base:macro with-fixture (binding &rest checks)
+  `(let ((,(car binding)
+          ,(car (cdr binding))
+          ,(car (cdr (cdr binding)))))
+     (let ((testing-fixture-result testing:result
+                                   ,(compiler:reduce 'testing:combine
+                                                     '(testing:empty) checks)))
+       (do (,(car (cdr (cdr (cdr binding)))) ,(car binding))
+           testing-fixture-result))))
+
+;; A test executable should return this value from MAIN. Zero denotes a
+;; passing suite; a non-zero value reports the number of failed checks.
+(base:function exit-status ((value result)) exit-code
+  (field value failed))
+
+(base:function assert-equal
+  (for (a)
+    ((base:equality a)))
+  ((actual a) (expected a))
+  result
+  (check (= actual expected)))
+
+(base:function assert-not-equal
+  (for (a)
+    ((base:equality a)))
+  ((actual a) (expected a))
+  result
+  (match (= actual expected)
+    (true (fail))
+    (false (pass))))
+
+(base:function assert-less-than
+  (for (a)
+    ((base:ordering a)))
+  ((left a) (right a))
+  result
+  (check (< left right)))
+
+(base:function assert-less-or-equal
+  (for (a)
+    ((base:ordering a)))
+  ((left a) (right a))
+  result
+  (check (<= left right)))
+
+(base:function assert-greater-than
+  (for (a)
+    ((base:ordering a)))
+  ((left a) (right a))
+  result
+  (check (> left right)))
+
+(base:function assert-greater-or-equal
+  (for (a)
+    ((base:ordering a)))
+  ((left a) (right a))
+  result
+  (check (>= left right)))
+
+(export
+ result test-function empty pass fail check combine execute exit-status test runner with-fixture
+ assert-equal assert-not-equal
+ assert-less-than assert-less-or-equal
+ assert-greater-than assert-greater-or-equal)

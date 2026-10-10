@@ -932,15 +932,6 @@ or inventing attributes that its own surface language does not define."
   (bootstrap-definition-expansion source primitive-name
                                   (verona-list-elements (syntax-datum arguments))))
 
-(defun make-primitive-definition-s-expression (primitive-name arguments source)
-  "Return a primitive definition S-expression for macro-facing ARGUMENTS."
-  (unless (proper-s-expression-list-p arguments)
-    (error "primitive definition arguments must be an S-expression list"))
-  (syntax->macro-s-expression
-   (make-primitive-definition primitive-name
-                              (macro-s-expression->syntax arguments source)
-                              source)))
-
 (defun compile-time-name-component (value)
   "Extract one identifier spelling from a compile-time VALUE."
   (cond ((stringp value) value)
@@ -1040,15 +1031,53 @@ or inventing attributes that its own surface language does not define."
         ((proper-s-expression-list-p value) (length value))
         (t (error "length requires a string or proper list, received ~S" value))))
 
-(defun compile-time-fold-left (head initial values)
-  "Build nested calls to HEAD by folding INITIAL over the S-expression VALUES."
+(defun compile-time-call-head (operation head)
+  "Validate HEAD as the name of a call constructed by OPERATION."
   (unless (or (verona-name-p head) (qualified-name-p head))
-    (error "compiler:fold-left requires a callable name, received ~S" head))
+    (error "~A requires a callable name, received ~S" operation head))
+  head)
+
+(defun compile-time-call (head &rest arguments)
+  "Construct an S-expression call headed by HEAD."
+  (compile-time-call-head "compiler:call" head)
+  (dolist (argument arguments)
+    (unless (macro-s-expression-p argument)
+      (error "compiler:call requires S-expression arguments, received ~S" argument)))
+  (cons head arguments))
+
+(defun compile-time-map (head &rest lists)
+  "Construct one call to HEAD for every parallel element of LISTS."
+  (compile-time-call-head "compiler:map" head)
+  (when (null lists)
+    (error "compiler:map requires at least one proper list"))
+  (let ((lists (mapcar #'compile-time-list lists)))
+    (unless (apply #'= (mapcar #'length lists))
+      (error "compiler:map requires lists of equal length"))
+    (apply #'mapcar (lambda (&rest arguments)
+                      (apply #'compile-time-call head arguments))
+           lists)))
+
+(defun compile-time-reduce (head initial values)
+  "Build left-associated calls to HEAD, reducing INITIAL over VALUES."
+  (compile-time-call-head "compiler:reduce" head)
   (unless (macro-s-expression-p initial)
-    (error "compiler:fold-left requires an S-expression initial value, received ~S" initial))
+    (error "compiler:reduce requires an S-expression initial value, received ~S" initial))
   (reduce (lambda (accumulator value)
-            (list head accumulator value))
+            (compile-time-call head accumulator value))
           (compile-time-list values) :initial-value initial))
+
+(defun compile-time-reduce-right (head initial values)
+  "Build right-associated calls to HEAD, reducing VALUES into INITIAL."
+  (compile-time-call-head "compiler:reduce-right" head)
+  (unless (macro-s-expression-p initial)
+    (error "compiler:reduce-right requires an S-expression initial value, received ~S" initial))
+  (let ((accumulator initial))
+    (dolist (value (reverse (compile-time-list values)) accumulator)
+      (setf accumulator (compile-time-call head value accumulator)))))
+
+(defun compile-time-reverse (values)
+  "Return VALUES in reverse order."
+  (reverse (compile-time-list values)))
 
 (defun make-compilation-environment ()
   "Create the compile-time environment used while constructing one unit."
@@ -1064,20 +1093,18 @@ or inventing attributes that its own surface language does not define."
           (unless (macro-s-expression-p definition)
             (error "definitions requires S-expression forms, received ~S" definition)))
         (make-top-level-expansion-result definitions))))
-    ;; BASE is an ordinary, explicitly imported Verona module.  Its macros
-    ;; delegate only their positional-to-named syntax conversion through this
-    ;; small compiler API; the module remains free to replace the surface
-    ;; conventions without changing declaration collection.
-    (environment-bind
-     environment (make-verona-name "compiler:definition")
-     (make-verona-function
-      (lambda (primitive-name arguments)
-        (make-primitive-definition-s-expression primitive-name arguments
-                                                *macro-expansion-syntax*))))
-    ;; Fold a compile-time list into nested calls.  Macro libraries use this
-    ;; to turn an arbitrary number of forms into a fixed-arity runtime tree.
-    (environment-bind environment (make-verona-name "compiler:fold-left")
-                      (make-verona-function #'compile-time-fold-left))
+    ;; Compiler-facing syntax constructors let macro libraries traverse a
+    ;; variable number of forms without depending on declaration internals.
+    (environment-bind environment (make-verona-name "compiler:call")
+                      (make-verona-function #'compile-time-call))
+    (environment-bind environment (make-verona-name "compiler:map")
+                      (make-verona-function #'compile-time-map))
+    (environment-bind environment (make-verona-name "compiler:reduce")
+                      (make-verona-function #'compile-time-reduce))
+    (environment-bind environment (make-verona-name "compiler:reduce-right")
+                      (make-verona-function #'compile-time-reduce-right))
+    (environment-bind environment (make-verona-name "compiler:reverse")
+                      (make-verona-function #'compile-time-reverse))
     ;; These are compile-time constructors.  They return ordinary identifier
     ;; values; expansion reattaches source syntax only after a macro returns.
     (environment-bind environment (make-verona-name "keyword")

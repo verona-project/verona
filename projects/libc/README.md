@@ -28,11 +28,12 @@ aggregator; clients import the category they use. The modules are
 contains only C ABI declarations; applications own their convenience
 functions while the Verona surface is still evolving.
 
-Some declarations are intentionally low-level placeholders: functions with
-variadic arguments, structs, or callbacks need additional Verona ABI support
-before they can be called safely. In particular, use `execv`/`execve`/`execvp`
-instead of variadic `execl*`; do not call `qsort`, `bsearch`, or
-`pthread-create` until function pointers and C-layout storage are supported.
+Some declarations are intentionally low-level placeholders: variadic functions
+and APIs that require C-layout storage still need additional ABI support before
+they can be called safely. Verona supports typed function pointers and can call
+them, but `qsort`, `bsearch`, and `pthread-create` still need bindings with
+their exact callback signatures and C-layout argument storage. Use
+`execv`/`execve`/`execvp` instead of variadic `execl*`.
 
 ## Exported test API
 

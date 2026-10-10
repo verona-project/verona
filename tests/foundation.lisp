@@ -98,7 +98,7 @@
 		#:duplicate-alternative-error
 		#:field-access-requires-product-error #:wrong-argument-count-error
 		#:generic-arity-mismatch-error #:duplicate-generic-implementation-error
-		#:no-generic-implementation-error
+		#:no-generic-implementation-error #:ambiguous-generic-implementation-error
 		#:validate-for-backend))
 
 (in-package #:verona/tests)
@@ -418,6 +418,40 @@ baz"))
     (is (equal '("first" "second" "third")
                (mapcar #'verona-name-value joined)))))
 
+(test traverses-compile-time-lists-while-constructing-syntax
+  (let* ((environment (verona::make-compilation-environment))
+         (forms (read-source
+                 (make-source
+                  "list-traversal.vrn"
+                  "(compiler:call 'wrap '(value))
+                   (compiler:map 'wrap '((first) (second)))
+                   (compiler:map 'pair '(first second) '(left right))
+                   (compiler:reduce 'combine '(empty) '((first) (second)))
+                   (compiler:reduce-right 'combine '(empty) '((first) (second)))
+                   (compiler:reverse '(first second third))")))
+         (results (mapcar (lambda (form) (evaluate form environment)) forms)))
+    (labels ((names (value)
+               (if (listp value)
+                   (mapcar #'names value)
+                   (if (verona-name-p value)
+                       (verona-name-value value)
+                       value))))
+      (is (equal '("wrap" ("value")) (names (first results))))
+      (is (equal '(("wrap" ("first")) ("wrap" ("second")))
+                 (names (second results))))
+      (is (equal '(("pair" "first" "left") ("pair" "second" "right"))
+                 (names (third results))))
+      (is (equal '("combine" ("combine" ("empty") ("first")) ("second"))
+                 (names (fourth results))))
+      (is (equal '("combine" ("first") ("combine" ("second") ("empty")))
+                 (names (fifth results))))
+      (is (equal '("third" "second" "first") (names (sixth results)))))))
+
+(test does-not-expose-the-compiler-definition-macro-bridge
+  (signals unbound-name-error
+    (environment-lookup (verona::make-compilation-environment)
+                        (make-verona-name "compiler:definition"))))
+
 (test expands-macros-with-unevaluated-syntax-and-recursion
   (let* ((environment (make-environment))
 	 (received nil)
@@ -582,6 +616,64 @@ baz"))
                  (verona-name-value (declaration-name function))))
     (is (typep constant 'constant-declaration))
     (is (string= "answer" (verona-name-value (declaration-name constant))))))
+
+(test imports-base-numeric-equality-and-ordering-protocols
+  (let* ((unit (compile-file
+                (make-compiler :search-paths (list #P"base/src/"))
+                #P"base/tests/base-protocol-client.vrn"))
+         (program (compilation-unit-semantic-program unit))
+         (main (semantic-program-declaration program (car (last (unit-declarations unit)))))
+         (body (semantic-function-declaration-body main))
+         (primitive-kinds '()))
+    (is (typep body 'match-expression))
+    (is (typep (match-expression-value body) 'verona:polymorphic-call))
+    (dolist (specialization (verona:semantic-program-function-specializations program))
+      (let ((operation-call (semantic-function-declaration-body specialization)))
+        (when (typep operation-call 'semantic-call)
+          (let ((implementation (semantic-reference-binding
+                                 (semantic-call-callee operation-call))))
+            (when (typep implementation 'verona:semantic-protocol-operation-implementation)
+              (let ((primitive-body (semantic-function-declaration-body implementation)))
+                (is (typep primitive-body 'primitive-call))
+                (push (primitive-operation-kind (primitive-call-operation primitive-body))
+                      primitive-kinds)))))))
+    (is (= 1 (count :integer-add primitive-kinds)))
+    (is (= 1 (count :signed-integer-equal primitive-kinds)))
+    (is (= 1 (count :signed-integer-less-than primitive-kinds)))
+    (is (= 1 (count :signed-integer-less-than-or-equal primitive-kinds)))
+    (is (= 1 (count :signed-integer-greater-than primitive-kinds)))
+    (is (= 1 (count :signed-integer-greater-than-or-equal primitive-kinds)))))
+
+(test imports-the-base-convert-generic
+  (let* ((unit (compile-file
+                (make-compiler :search-paths (list #P"base/src/"))
+                #P"base/tests/base-convert-client.vrn"))
+         (program (compilation-unit-semantic-program unit))
+         (base-module (find "base" (program-modules program)
+                            :key (lambda (module)
+                                   (module-name-string (module-name module)))
+                            :test #'string=))
+         (convert-declaration
+           (verona:module-find-export base-module (make-verona-name "convert")))
+         (convert (semantic-generic-declaration-generic
+                   (semantic-program-declaration program convert-declaration)))
+         (main (semantic-program-declaration program (first (unit-declarations unit))))
+         (body (semantic-function-declaration-body main)))
+    ;; Ten numeric types, each convertible to every numeric destination.
+    (is (= 100 (length (generic-implementations convert))))
+    (is (typep body 'let-expression))
+    (is (= 32 (integer-type-width (semantic-expression-type body))))))
+
+(test imports-the-verona-testing-library
+  (let* ((unit (compile-file
+                (make-compiler :search-paths (list #P"projects/testing/src/"
+                                                   #P"base/src/"))
+                #P"projects/testing/tests/testing-client.vrn"))
+         (program (compilation-unit-semantic-program unit))
+         (main (semantic-program-declaration program (car (last (unit-declarations unit)))))
+         (body (semantic-function-declaration-body main)))
+    (is (typep body 'semantic-call))
+    (is (typep (semantic-call-callee body) 'semantic-reference))))
 
 (test registers-macros-sequentially-in-the-compile-time-environment
   ;; X evaluates to the original, unevaluated syntax argument, making this a
@@ -1524,6 +1616,38 @@ baz"))
                     "(generic foo (x))
                      (implementation foo ((x i64)) i64 x)
                      (implementation foo ((value i64)) i64 value)")))
+
+(test generic-dispatch-can-use-an-expected-result-type
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(generic convert (value))
+                 (implementation convert ((value i32)) u8
+                   (%trunc-primitive-i32-u8 value))
+                 (implementation convert ((value i32)) i64
+                   (%sext-primitive-i32-i64 value))
+                 (function narrow ((value i32)) u8 (convert value))
+                 (function widen ((value i32)) i64 (convert value))"))
+         (program (compilation-unit-semantic-program unit))
+         (narrow (semantic-program-declaration program (fourth (unit-declarations unit))))
+         (widen (semantic-program-declaration program (fifth (unit-declarations unit))))
+         (narrow-body (semantic-function-declaration-body narrow))
+         (widen-body (semantic-function-declaration-body widen)))
+    (is (typep narrow-body 'semantic-call))
+    (is (= 8 (integer-type-width (semantic-expression-type narrow-body))))
+    (is (typep widen-body 'semantic-call))
+    (is (= 64 (integer-type-width (semantic-expression-type widen-body))))))
+
+(test result-directed-generics-require-an-expected-result-type
+  (signals ambiguous-generic-implementation-error
+    (compile-string
+     (make-compiler)
+     "(generic convert (value))
+      (implementation convert ((value i32)) u8
+        (%trunc-primitive-i32-u8 value))
+      (implementation convert ((value i32)) i64
+        (%sext-primitive-i32-i64 value))
+      (function main ((value i32)) i32
+        (do (convert value) 0))")))
 
 (test generic-dispatch-uses-nominal-product-identities
   (let ((unit (compile-string
