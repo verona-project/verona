@@ -69,6 +69,23 @@
     (is (search "add i64" ir))
     (is (search "call i64 @__verona_000061000064000064(i64 20, i64 22)" ir))))
 
+(test lowers-structural-tuple-signatures
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(function identity ((value (tuple i64 bool))) (tuple i64 bool) value)"))
+         (backend (verona.backend.llvm:generate-llvm
+                   (compilation-unit-semantic-program unit))))
+    (is (eq backend (verona.backend.llvm:verify-llvm-module backend)))))
+
+(test executes-tuple-access-and-match
+  (is (= 42
+         (compile-and-run-native
+          "(function choose ((items (tuple i32 i32))) i32
+              (match items
+                ((tuple first _) first)))
+            (function main () exit-code
+              (choose (tuple 42 0)))"))))
+
 (test marks-calls-in-tail-position
   (let* ((unit (compile-string
                 (make-compiler)

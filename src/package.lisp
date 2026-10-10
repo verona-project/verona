@@ -374,6 +374,11 @@
    #:sum-construct-expression-arguments
    #:array-construct-expression
    #:array-construct-expression-elements
+   #:tuple-construct-expression
+   #:tuple-construct-expression-elements
+   #:tuple-element-expression
+   #:tuple-element-expression-value
+   #:tuple-element-expression-position
    #:index-expression
    #:index-expression-base
    #:index-expression-index
@@ -414,6 +419,8 @@
    #:constructor-pattern
    #:constructor-pattern-alternative
    #:constructor-pattern-payload-patterns
+   #:tuple-pattern
+   #:tuple-pattern-elements
    #:match-case
    #:match-case-syntax
    #:match-case-pattern
@@ -432,6 +439,8 @@
    #:semantic-array-type-syntax
    #:semantic-array-type-syntax-element-type
    #:semantic-array-type-syntax-length
+   #:semantic-tuple-type-syntax
+   #:semantic-tuple-type-syntax-element-types
    #:semantic-function-type-syntax
    #:semantic-function-type-syntax-parameters
    #:semantic-function-type-syntax-result
@@ -492,6 +501,8 @@
    #:array-type
    #:array-type-element-type
    #:array-type-length
+   #:tuple-type
+   #:tuple-type-element-types
    #:function-type
    #:function-type-parameters
    #:function-type-result
@@ -531,6 +542,7 @@
    #:type-context-float-type
    #:type-context-pointer-type
    #:type-context-array-type
+   #:type-context-tuple-type
    #:type-context-function-type
    #:type-context-defined-type
    #:type-context-opaque-type

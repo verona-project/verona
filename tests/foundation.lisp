@@ -1458,6 +1458,48 @@ baz"))
                'verona:array-type))
     (is (eq program (validate-for-backend program)))))
 
+(test resolves-structural-tuples-with-two-through-four-elements
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(function pair ((value (tuple i32 bool))) (tuple i32 bool) value)
+                 (function quartet ((value (tuple i8 i16 i32 i64)))
+                   (tuple i8 i16 i32 i64) value)"))
+         (program (compilation-unit-semantic-program unit))
+         (pair (semantic-program-declaration program (first (unit-declarations unit))))
+         (tuple (parameter-binding-type
+                 (first (semantic-function-declaration-parameters pair))))
+         (context (semantic-program-type-context program)))
+    (is (typep tuple 'verona:tuple-type))
+    (is (= 2 (length (verona:tuple-type-element-types tuple))))
+    (is (eq tuple
+            (verona:type-context-tuple-type context
+                                            (verona:tuple-type-element-types tuple))))
+    (is (eq program (validate-for-backend program))))
+  (signals verona:semantic-error
+    (compile-string (make-compiler) "(function invalid ((value (tuple i32))) i32 0)"))
+  (signals verona:semantic-error
+    (compile-string (make-compiler)
+                    "(function invalid ((value (tuple i8 i16 i32 i64 u8))) i32 0)")))
+
+(test constructs-accesses-and-matches-tuples
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(function first ((items (tuple i8 i32))) i8 (tuple-get items 0))
+                 (function choose ((items (tuple i8 i32))) i8
+                   (match items
+                     ((tuple first _) first)))
+                 (function make-pair () (tuple i8 i32) (tuple 42 1000))"))
+         (program (compilation-unit-semantic-program unit))
+         (first (semantic-program-declaration program (first (unit-declarations unit))))
+         (choose (semantic-program-declaration program (second (unit-declarations unit)))))
+    (is (typep (semantic-function-declaration-body first)
+               'verona:tuple-element-expression))
+    (is (typep (semantic-function-declaration-body choose) 'match-expression))
+    (is (typep (match-case-pattern
+                (first (match-expression-cases (semantic-function-declaration-body choose))))
+               'verona:tuple-pattern))
+    (is (eq program (validate-for-backend program)))))
+
 (test contextually-constructs-arrays-in-products-sums-and-nested-results
   (let* ((unit (compile-string
                 (make-compiler)

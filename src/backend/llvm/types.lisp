@@ -73,6 +73,11 @@ whose members are the alternative payload structs."
                (llvm:array-type
                 (lower-type backend (verona:array-type-element-type type))
                 (verona:array-type-length type)))
+              ((typep type 'verona:tuple-type)
+               (llvm:struct-type
+                (mapcar (lambda (element-type) (lower-type backend element-type))
+                        (verona:tuple-type-element-types type))
+                nil :context (llvm-backend-context backend)))
               ((typep type 'verona:function-type)
                (llvm:function-type
                 (lower-type backend (verona:function-type-result type))

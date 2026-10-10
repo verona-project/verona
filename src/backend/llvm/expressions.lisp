@@ -143,6 +143,42 @@
 	                          (llvm:build-extract-value (llvm-backend-builder backend)
 	                                                    payload index "sum.binding")))))))))
 
+;; Tuple patterns bind positions directly from the aggregate value.
+(defun emit-tuple-pattern-bindings (backend scrutinee pattern)
+  (loop for element-pattern in (verona:tuple-pattern-elements pattern)
+        for index from 0
+        do (when (typep element-pattern 'verona:binding-pattern)
+             (setf (backend-binding backend
+                                    (verona:binding-pattern-binding element-pattern))
+                   (llvm:build-extract-value (llvm-backend-builder backend)
+                                             scrutinee index "tuple.binding")))))
+
+(defun emit-tuple-match-dispatch (backend scrutinee pattern target fallback function)
+  (let* ((builder (llvm-backend-builder backend))
+         (literal-patterns
+           (loop for element-pattern in (verona:tuple-pattern-elements pattern)
+                 for index from 0
+                 unless (or (typep element-pattern 'verona:wildcard-pattern)
+                            (typep element-pattern 'verona:binding-pattern))
+                   collect (cons index element-pattern))))
+    (if (null literal-patterns)
+        (llvm:build-br builder target)
+        (loop for remaining on literal-patterns
+              for entry = (car remaining)
+              for next = (if (cdr remaining)
+                             (llvm:append-basic-block function "tuple.element.test"
+                                                      :context (llvm-backend-context backend))
+                             target)
+              do (let ((matches (llvm:build-i-cmp
+                                 builder :=
+                                 (llvm:build-extract-value builder scrutinee (car entry)
+                                                           "tuple.element")
+                                 (match-pattern-constant backend (cdr entry))
+                                 "tuple.element.match")))
+                   (llvm:build-cond-br builder matches next fallback)
+                   (when (cdr remaining)
+                     (llvm:position-builder-at-end builder next)))))))
+
 (defun emit-match-dispatch (backend scrutinee pattern target fallback function)
   "Emit one ordered pattern test and leave the builder at FALLBACK."
   (let ((builder (llvm-backend-builder backend)))
@@ -150,6 +186,8 @@
       ((or (typep pattern 'verona:wildcard-pattern)
            (typep pattern 'verona:binding-pattern))
        (llvm:build-br builder target))
+      ((typep pattern 'verona:tuple-pattern)
+       (emit-tuple-match-dispatch backend scrutinee pattern target fallback function))
       ((typep pattern 'verona:constructor-pattern)
        (let* ((alternative (verona:constructor-pattern-alternative pattern))
               (tag (llvm:build-extract-value builder scrutinee 0 "sum.tag"))
@@ -239,7 +277,9 @@ immediately adjacent to its RET."
 	    for block in case-blocks
 	    do (llvm:position-builder-at-end builder block)
 	       (let ((pattern (verona:match-case-pattern case)))
-		 (emit-pattern-bindings backend scrutinee pattern))
+		 (if (typep pattern 'verona:tuple-pattern)
+		     (emit-tuple-pattern-bindings backend scrutinee pattern)
+		     (emit-pattern-bindings backend scrutinee pattern)))
 	       (let ((branch (verona:match-case-expression case)))
 		 (if tail-caller
 		     (emit-tail-return backend branch tail-caller)
@@ -434,6 +474,20 @@ compare the LLVM ABI directly instead of relying on frontend object identity."
                                                (emit-value backend value-expression)
                                                index "array.insert")))
        aggregate))
+    ((typep expression 'verona:tuple-construct-expression)
+     (let ((aggregate (llvm:undef (lower-type backend (verona:expression-type expression)))))
+       (loop for value-expression in (verona:tuple-construct-expression-elements expression)
+             for index from 0
+             do (setf aggregate
+                      (llvm:build-insert-value (llvm-backend-builder backend) aggregate
+                                               (emit-value backend value-expression)
+                                               index "tuple.insert")))
+       aggregate))
+    ((typep expression 'verona:tuple-element-expression)
+     (llvm:build-extract-value
+      (llvm-backend-builder backend)
+      (emit-value backend (verona:tuple-element-expression-value expression))
+      (verona:tuple-element-expression-position expression) "tuple.element"))
     ((typep expression 'verona:index-expression)
      (let ((address (emit-checked-array-element-address
                      backend (verona:expression-type (verona:index-expression-base expression))

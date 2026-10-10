@@ -34,6 +34,8 @@
 (defclass array-type (verona-type)
   ((element-type :initarg :element-type :reader array-type-element-type)
    (length :initarg :length :reader array-type-length)))
+(defclass tuple-type (verona-type)
+  ((element-types :initarg :element-types :reader tuple-type-element-types)))
 (defclass function-type (verona-type)
   ((parameters :initarg :parameters :reader function-type-parameters)
    (result :initarg :result :reader function-type-result)))
@@ -107,6 +109,7 @@
    (float-types :initform '() :accessor type-context-float-types)
    (pointer-types :initform '() :accessor type-context-pointer-types)
    (array-types :initform '() :accessor type-context-array-types)
+   (tuple-types :initform '() :accessor type-context-tuple-types)
    (function-types :initform '() :accessor type-context-function-types)
    ;; This association uses declaration object identity, never its spelling.
    (defined-types :initform '() :accessor type-context-defined-types)))
@@ -179,6 +182,16 @@ the semantic type of a unit expression remains UnitType."
         (let ((type (make-instance 'array-type :element-type element-type :length length)))
           (push (cons key type) (type-context-array-types context))
           type))))
+
+(defun type-context-tuple-type (context element-types)
+  "Return the canonical two- through four-element tuple type in CONTEXT."
+  (unless (and (<= 2 (length element-types) 4)
+               (every (lambda (type) (typep type 'verona-type)) element-types))
+    (error "tuple types require two through four Verona types, not ~S" element-types))
+  (or (cdr (assoc element-types (type-context-tuple-types context) :test #'equal))
+      (let ((type (make-instance 'tuple-type :element-types element-types)))
+        (push (cons element-types type) (type-context-tuple-types context))
+        type)))
 
 (defun type-context-function-type (context parameters result)
   "Return the canonical function type with PARAMETERS and RESULT in CONTEXT."
@@ -347,6 +360,8 @@ select one of these candidates later."
 (defclass semantic-array-type-syntax (semantic-type-syntax)
   ((element-type :initarg :element-type :reader semantic-array-type-syntax-element-type)
    (length :initarg :length :reader semantic-array-type-syntax-length)))
+(defclass semantic-tuple-type-syntax (semantic-type-syntax)
+  ((element-types :initarg :element-types :reader semantic-tuple-type-syntax-element-types)))
 (defclass semantic-function-type-syntax (semantic-type-syntax)
   ((parameters :initarg :parameters :reader semantic-function-type-syntax-parameters)
    (result :initarg :result :reader semantic-function-type-syntax-result)))
@@ -628,6 +643,11 @@ select one of these candidates later."
    (arguments :initarg :arguments :reader sum-construct-expression-arguments)))
 (defclass array-construct-expression (semantic-expression)
   ((elements :initarg :elements :reader array-construct-expression-elements)))
+(defclass tuple-construct-expression (semantic-expression)
+  ((elements :initarg :elements :reader tuple-construct-expression-elements)))
+(defclass tuple-element-expression (semantic-expression)
+  ((value :initarg :value :reader tuple-element-expression-value)
+   (position :initarg :position :reader tuple-element-expression-position)))
 (defclass index-expression (semantic-expression)
   ((base :initarg :base :reader index-expression-base)
    (index :initarg :index :reader index-expression-index)
@@ -671,6 +691,8 @@ select one of these candidates later."
   ((alternative :initarg :alternative :reader constructor-pattern-alternative)
    (payload-patterns :initarg :payload-patterns
                      :reader constructor-pattern-payload-patterns)))
+(defclass tuple-pattern (pattern)
+  ((elements :initarg :elements :reader tuple-pattern-elements)))
 (defclass match-case ()
   ((syntax :initarg :syntax :reader match-case-syntax)
    (pattern :initarg :pattern :reader match-case-pattern)
@@ -997,9 +1019,18 @@ the following type pass can turn it into canonical VERONA-TYPE objects."
 	          (unless (and (integerp length) (<= 0 length))
 	            (error 'semantic-error :syntax (third elements)
 	                   :message "array length must be a non-negative integer"))
-	          (make-instance 'semantic-array-type-syntax :syntax syntax
-	                         :element-type (resolve-type-syntax scope (second elements))
-	                         :length length)))
+	        (make-instance 'semantic-array-type-syntax :syntax syntax
+	                       :element-type (resolve-type-syntax scope (second elements))
+	                       :length length)))
+               ((string= (verona-name-value head) "tuple")
+                (unless (<= 3 (length elements) 5)
+                  (error 'semantic-error :syntax syntax
+                         :message "tuple requires between two and four element types"))
+                (make-instance 'semantic-tuple-type-syntax :syntax syntax
+                               :element-types
+                               (mapcar (lambda (element)
+                                         (resolve-type-syntax scope element))
+                                       (rest elements))))
 	       ((string= (verona-name-value head) "function")
 	        (unless (= (length elements) 3)
 	          (error 'semantic-error :syntax syntax
@@ -1103,6 +1134,15 @@ the following type pass can turn it into canonical VERONA-TYPE objects."
 	            :message "array element type must be sized"))
 	   (type-context-array-type type-context element-type
 	                            (semantic-array-type-syntax-length resolved-type-syntax))))
+	((typep resolved-type-syntax 'semantic-tuple-type-syntax)
+	 (let ((element-types
+	         (mapcar (lambda (element-type)
+	                   (resolve-type type-context element-type program))
+	                 (semantic-tuple-type-syntax-element-types resolved-type-syntax))))
+	   (unless (every #'sized-type-p element-types)
+	     (error 'semantic-error :syntax (semantic-type-syntax-syntax resolved-type-syntax)
+	            :message "tuple element type must be sized"))
+	   (type-context-tuple-type type-context element-types)))
 	((typep resolved-type-syntax 'semantic-function-type-syntax)
 	 (type-context-function-type
 	  type-context
@@ -1422,13 +1462,15 @@ the following type pass can turn it into canonical VERONA-TYPE objects."
                                            (resolve-type-syntax scope (parameter-binding-type-syntax parameter))
                                            (parameter-binding-type parameter)
                                            (resolve-type (semantic-program-type-context program)
-                                                         (parameter-binding-type-reference parameter)))
+                                                         (parameter-binding-type-reference parameter)
+                                                         program))
                                      parameter))
                                  (verona-list-elements (syntax-datum (second elements))))))
                    (make-instance 'protocol-operation :protocol protocol :name name
                                   :parameters parameters
                                   :result-type (resolve-type (semantic-program-type-context program)
-                                                             (resolve-type-syntax scope (third elements)))
+                                                             (resolve-type-syntax scope (third elements))
+                                                             program)
                                   :source operation-syntax)))))
            (protocol-declaration-operations declaration)))
     protocol))
@@ -1609,7 +1651,11 @@ shape, so accepting field-list shorthand would make declarations ambiguous."
              (ensure-type-is-complete program pointee syntax seen-aliases))))
         ((typep resolved-type-syntax 'semantic-array-type-syntax)
          (ensure-type-is-complete
-          program (semantic-array-type-syntax-element-type resolved-type-syntax) syntax seen-aliases))))
+          program (semantic-array-type-syntax-element-type resolved-type-syntax) syntax seen-aliases))
+        ((typep resolved-type-syntax 'semantic-tuple-type-syntax)
+         (dolist (element-type (semantic-tuple-type-syntax-element-types resolved-type-syntax))
+           (ensure-type-is-complete program element-type syntax seen-aliases)))))
+
 
 (defun resolve-product-type-declaration (program semantic-declaration)
   (let* ((declaration (semantic-declaration-source-declaration semantic-declaration))
@@ -1937,6 +1983,8 @@ type checker."
 	((typep type 'array-type)
 	 (format nil "(array ~A ~D)" (verona-type-name (array-type-element-type type))
 		 (array-type-length type)))
+	((typep type 'tuple-type)
+	 (format nil "(tuple ~{~A~^ ~})" (mapcar #'verona-type-name (tuple-type-element-types type))))
 	((typep type 'function-type) "function")
 	((typep type 'defined-type)
 	 (verona-name-value (declaration-name (defined-type-declaration type))))
@@ -1959,6 +2007,12 @@ type checker."
                                   (apply-type-substitution context
                                                            (array-type-element-type type) substitution)
                                   (array-type-length type)))
+	((typep type 'tuple-type)
+	 (type-context-tuple-type
+	  context
+	  (mapcar (lambda (element-type)
+	            (apply-type-substitution context element-type substitution))
+	          (tuple-type-element-types type))))
         ((typep type 'function-type)
          (type-context-function-type context
                                      (mapcar (lambda (parameter)
@@ -1980,6 +2034,12 @@ type checker."
         ((and (typep expected 'array-type) (typep actual 'array-type)
               (= (array-type-length expected) (array-type-length actual)))
          (unify-types (array-type-element-type expected) (array-type-element-type actual) substitution))
+	((and (typep expected 'tuple-type) (typep actual 'tuple-type)
+	      (= (length (tuple-type-element-types expected))
+	         (length (tuple-type-element-types actual))))
+	 (every (lambda (expected-element actual-element)
+	          (unify-types expected-element actual-element substitution))
+	        (tuple-type-element-types expected) (tuple-type-element-types actual)))
         (t (same-type-p expected actual))))
 
 (define-condition recursive-specialization-error (semantic-error) ()
@@ -2304,6 +2364,53 @@ LET bindings are addressable but remain immutable through their source name."
               (type (type-context-array-type (semantic-scope-owning-type-context scope)
                                              element-type length)))
          (make-instance 'array-construct-expression :syntax syntax :elements elements :type type))))))
+
+(defun infer-tuple-construct-expression (syntax scope argument-syntax &optional expected-type)
+  "Resolve TUPLE in synthesis mode or against an expected TupleType."
+  (unless (<= 2 (length argument-syntax) 4)
+    (error 'invalid-expression-error :syntax syntax
+           :message "tuple requires between two and four values"))
+  (cond
+    (expected-type
+     (unless (typep expected-type 'tuple-type)
+       (error 'semantic-error :syntax syntax :message "tuple requires an expected tuple type"))
+     (let ((element-types (tuple-type-element-types expected-type)))
+       (unless (= (length argument-syntax) (length element-types))
+         (error 'wrong-argument-count-error :syntax syntax
+                :expected (length element-types) :actual (length argument-syntax)))
+       (make-instance 'tuple-construct-expression :syntax syntax :type expected-type
+                      :elements (loop for argument in argument-syntax
+                                      for element-type in element-types
+                                      collect (check-expression argument scope element-type)))))
+    (t
+     (let ((elements (mapcar (lambda (argument)
+                               (infer-value-expression argument scope))
+                             argument-syntax)))
+       (make-instance 'tuple-construct-expression :syntax syntax :elements elements
+                      :type (type-context-tuple-type
+                             (semantic-scope-owning-type-context scope)
+                             (mapcar #'expression-type elements)))))))
+
+(defun infer-tuple-element-expression (syntax scope)
+  (let ((arguments (rest (verona-list-elements (syntax-datum syntax)))))
+    (unless (= (length arguments) 2)
+      (error 'invalid-expression-error :syntax syntax
+             :message "tuple-get requires a tuple and a position"))
+    (let* ((value (infer-value-expression (first arguments) scope))
+           (tuple-type (expression-type value))
+           (position (syntax-datum (second arguments))))
+      (unless (typep tuple-type 'tuple-type)
+        (error 'invalid-expression-error :syntax (first arguments)
+               :message "tuple-get requires a tuple"))
+      (unless (integerp position)
+        (error 'invalid-expression-error :syntax (second arguments)
+               :message "tuple-get position must be an integer literal"))
+      (let ((element-types (tuple-type-element-types tuple-type)))
+        (unless (<= 0 position (1- (length element-types)))
+          (error 'invalid-expression-error :syntax (second arguments)
+                 :message "tuple-get position is out of bounds"))
+        (make-instance 'tuple-element-expression :syntax syntax :value value :position position
+                       :type (nth position element-types))))))
 
 (defun constant-array-index-p (expression)
   (and (typep expression 'integer-literal) (integer-literal-value expression)))
@@ -2728,14 +2835,32 @@ therefore visible, while the binding being built cannot see itself."
   "Resolve one source pattern and install a binding in the case scope." 
   (let ((datum (syntax-datum syntax)))
     (cond ((verona-list-p datum)
-           (unless (typep scrutinee-type 'sum-type)
-             (error 'invalid-expression-error :syntax syntax
-                    :message "constructor patterns require a sum scrutinee"))
            (let ((elements (verona-list-elements datum)))
              (unless elements
                (error 'invalid-expression-error :syntax syntax
-                      :message "constructor pattern requires an alternative name"))
+                      :message "match pattern cannot be empty"))
              (let ((name (syntax-datum (first elements))))
+               (when (and (verona-name-p name) (string= (verona-name-value name) "tuple"))
+                 (unless (typep scrutinee-type 'tuple-type)
+                   (error 'invalid-expression-error :syntax syntax
+                          :message "tuple patterns require a tuple scrutinee"))
+                 (let ((element-syntaxes (rest elements))
+                       (element-types (tuple-type-element-types scrutinee-type)))
+                   (unless (= (length element-syntaxes) (length element-types))
+                     (error 'wrong-argument-count-error :syntax syntax
+                            :expected (length element-types) :actual (length element-syntaxes)))
+                   (return-from analyze-pattern
+                     (make-instance 'tuple-pattern :syntax syntax :type scrutinee-type
+                                    :elements
+                                    (loop for element-syntax in element-syntaxes
+                                          for element-type in element-types
+                                          do (when (verona-list-p (syntax-datum element-syntax))
+                                               (error 'invalid-expression-error :syntax element-syntax
+                                                      :message "nested tuple patterns are not supported yet"))
+                                          collect (analyze-pattern element-syntax scope element-type))))))
+               (unless (typep scrutinee-type 'sum-type)
+                 (error 'invalid-expression-error :syntax syntax
+                        :message "constructor patterns require a sum scrutinee"))
                (unless (verona-name-p name)
                  (error 'invalid-expression-error :syntax (first elements)
                         :message "constructor pattern name must be a Verona name"))
@@ -2802,6 +2927,10 @@ therefore visible, while the binding being built cannot see itself."
   (and (typep pattern 'constructor-pattern)
        (every #'pattern-catches-all-p (constructor-pattern-payload-patterns pattern))))
 
+(defun tuple-pattern-complete-p (pattern)
+  (and (typep pattern 'tuple-pattern)
+       (every #'pattern-catches-all-p (tuple-pattern-elements pattern))))
+
 (defun pattern-already-covered-p (pattern covered)
   (or (and (pattern-catches-all-p covered) t)
       (and (typep pattern 'constructor-pattern)
@@ -2809,6 +2938,9 @@ therefore visible, while the binding being built cannot see itself."
            (eq (constructor-pattern-alternative pattern)
                (constructor-pattern-alternative covered))
            (constructor-pattern-complete-p covered))
+	(and (typep pattern 'tuple-pattern)
+	     (typep covered 'tuple-pattern)
+	     (tuple-pattern-complete-p covered))
       (and (typep pattern 'boolean-pattern) (typep covered 'boolean-pattern)
 	   (eql (literal-pattern-value pattern) (literal-pattern-value covered)))
 	  (and (typep pattern 'character-pattern) (typep covered 'character-pattern)
@@ -2835,6 +2967,8 @@ therefore visible, while the binding being built cannot see itself."
                   (and (typep scrutinee-type 'sum-type)
                        (every #'complete-alternative-p
                               (sum-type-alternatives scrutinee-type)))
+		  (and (typep scrutinee-type 'tuple-type)
+		       (find-if #'tuple-pattern-complete-p covered))
                   (and (typep scrutinee-type 'boolean-type)
                        (find-if (lambda (p)
                                   (and (typep p 'boolean-pattern)
@@ -3084,6 +3218,10 @@ expression position."
 		      (infer-sequence-expression syntax scope))
 		     ((and special (string= special "array-of"))
 		      (infer-array-construct-expression syntax scope (rest elements)))
+		     ((and special (string= special "tuple"))
+		      (infer-tuple-construct-expression syntax scope (rest elements)))
+		     ((and special (string= special "tuple-get"))
+		      (infer-tuple-element-expression syntax scope))
 		     ((and special (string= special "index"))
 		      (infer-index-expression syntax scope))
 		     ((and special (string= special "field"))
@@ -3130,7 +3268,12 @@ expression position."
 		    (expression-special-form-name syntax)
 		    (string= (expression-special-form-name syntax) "array-of"))
 	       (infer-array-construct-expression syntax scope
-					 (rest (verona-list-elements datum)) expected-type))
+				 (rest (verona-list-elements datum)) expected-type))
+	      ((and (verona-list-p datum)
+		    (expression-special-form-name syntax)
+		    (string= (expression-special-form-name syntax) "tuple"))
+	       (infer-tuple-construct-expression syntax scope
+				 (rest (verona-list-elements datum)) expected-type))
 	      ((and (verona-list-p datum)
 		(expected-sum-constructor syntax expected-type))
 	   (multiple-value-bind (alternative foundp)
@@ -3237,6 +3380,8 @@ byte value; text literals are NUL-terminated pointers to U8."
 	 (and (integerp (array-type-length type)) (<= 0 (array-type-length type))
 	      (sized-type-p (array-type-element-type type))
 	      (backend-representable-type-p (array-type-element-type type))))
+	((typep type 'tuple-type)
+	 (every #'backend-representable-type-p (tuple-type-element-types type)))
 	((typep type 'function-type)
 	 (and (every #'backend-representable-type-p (function-type-parameters type))
 	      (backend-representable-type-p (function-type-result type))))
@@ -3288,6 +3433,29 @@ byte value; text literals are NUL-terminated pointers to U8."
          (validate-expression-for-backend element)
          (unless (compatible-p (expression-type element) (array-type-element-type type))
            (backend-validation-fail expression "array constructor has an incompatible element type")))))
+    ((typep expression 'tuple-construct-expression)
+     (let ((type (expression-type expression))
+           (elements (tuple-construct-expression-elements expression)))
+       (unless (and (typep type 'tuple-type)
+                    (= (length elements) (length (tuple-type-element-types type))))
+         (backend-validation-fail expression "tuple construction is incomplete"))
+       (loop for element in elements
+             for element-type in (tuple-type-element-types type)
+             do (validate-expression-for-backend element)
+                (unless (compatible-p (expression-type element) element-type)
+                  (backend-validation-fail expression
+                                           "tuple constructor has an incompatible element type")))))
+    ((typep expression 'tuple-element-expression)
+     (let* ((value (tuple-element-expression-value expression))
+            (tuple-type (expression-type value))
+            (position (tuple-element-expression-position expression)))
+       (validate-expression-for-backend value)
+       (unless (and (typep tuple-type 'tuple-type)
+                    (integerp position)
+                    (<= 0 position (1- (length (tuple-type-element-types tuple-type))))
+                    (same-type-p (expression-type expression)
+                                 (nth position (tuple-type-element-types tuple-type))))
+         (backend-validation-fail expression "tuple element access is not fully typed"))))
     ((typep expression 'index-expression)
      (let ((base (index-expression-base expression))
            (index (index-expression-index expression)))
@@ -3354,7 +3522,8 @@ byte value; text literals are NUL-terminated pointers to U8."
 	     (unless (or (typep (expression-type (match-expression-value expression)) 'boolean-type)
 		 (typep (expression-type (match-expression-value expression)) 'char-type)
 		 (typep (expression-type (match-expression-value expression)) 'integer-type)
-			 (typep (expression-type (match-expression-value expression)) 'sum-type))
+			 (typep (expression-type (match-expression-value expression)) 'sum-type)
+			 (typep (expression-type (match-expression-value expression)) 'tuple-type))
 	       (backend-validation-fail expression "match scrutinee has no LLVM comparison lowering"))
      (dolist (case (match-expression-cases expression))
        (let ((pattern (match-case-pattern case))
@@ -3381,6 +3550,16 @@ byte value; text literals are NUL-terminated pointers to U8."
 		     for payload-type in (sum-alternative-payload-types alternative)
 		     do (unless (same-type-p (pattern-type payload-pattern) payload-type)
 			  (backend-validation-fail expression "constructor payload pattern has the wrong type")))))
+	   (when (typep pattern 'tuple-pattern)
+	     (let ((tuple-type (expression-type (match-expression-value expression))))
+	       (unless (and (typep tuple-type 'tuple-type)
+			    (= (length (tuple-pattern-elements pattern))
+			       (length (tuple-type-element-types tuple-type))))
+		 (backend-validation-fail expression "tuple pattern is unresolved"))
+	       (loop for element-pattern in (tuple-pattern-elements pattern)
+		     for element-type in (tuple-type-element-types tuple-type)
+		     do (unless (same-type-p (pattern-type element-pattern) element-type)
+			  (backend-validation-fail expression "tuple pattern element has the wrong type")))))
 	   (validate-expression-for-backend branch)
 	   (unless (or (typep (expression-type branch) 'never-type)
 		       (same-type-p (expression-type branch) (expression-type expression)))
