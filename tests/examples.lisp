@@ -15,7 +15,15 @@
   (merge-pathnames (format nil "examples/~A" name)
                    (asdf:system-source-directory :verona)))
 
-(test compiles-current-examples
-  (dolist (name +current-example-files+)
-    (let ((unit (compile-file (make-compiler) (current-example-pathname name))))
-      (is (typep unit 'compilation-unit) name))))
+(defun assert-example-compiles (name)
+  (let ((unit (compile-file (make-compiler) (current-example-pathname name))))
+    (is (typep unit 'compilation-unit) name)))
+
+(test-cases compiles-current-examples
+  (arithmetic (assert-example-compiles "01-arithmetic.vrn"))
+  (let-bindings (assert-example-compiles "02-let-bindings.vrn"))
+  (match (assert-example-compiles "03-match.vrn"))
+  (products (assert-example-compiles "04-products.vrn"))
+  (sum-types (assert-example-compiles "05-sum-types.vrn"))
+  (generics (assert-example-compiles "06-generics.vrn"))
+  (polymorphism-protocols (assert-example-compiles "07-polymorphism-protocols.vrn")))

@@ -13,8 +13,9 @@
   (uiop:read-file-string
    (merge-pathnames relative-path (asdf:system-source-directory :verona))))
 
-(test diagnostics-have-stable-codes-and-source-ranges
-  (let ((diagnostic
+(test-cases diagnostics-have-stable-codes-and-source-ranges
+  (reader-error
+   (let ((diagnostic
           (captured-diagnostic
            (lambda ()
              (verona:read-source (verona:make-source "broken.verona" "("))))))
@@ -24,15 +25,16 @@
       (is (string= "broken.verona"
                    (verona:source-name (verona:source-location-source start))))
       (is (= 1 (verona:source-location-line start)))
-      (is (= 1 (verona:source-location-column start)))))
-  (let ((diagnostic
+      (is (= 1 (verona:source-location-column start))))))
+  (unresolved-name
+   (let ((diagnostic
           (captured-diagnostic
            (lambda ()
              (verona:compile-string
               (verona:make-compiler)
               "(function f () i32 missing)" :name "unknown.verona")))))
-    (is (string= "E0201" (verona:diagnostic-code diagnostic)))
-    (is (typep (verona:diagnostic-primary-location diagnostic) 'verona:source-range))))
+   (is (string= "E0201" (verona:diagnostic-code diagnostic)))
+    (is (typep (verona:diagnostic-primary-location diagnostic) 'verona:source-range)))))
 
 (test duplicate-diagnostics-preserve-both-declaration-locations
   (let ((diagnostic
@@ -58,7 +60,7 @@
     (is (getf (verona:diagnostic-data diagnostic) :expected-type))
     (is (getf (verona:diagnostic-data diagnostic) :actual-type))))
 
-(test macro-expansion-retains-provenance-and-has-a-limit
+(defun macro-expansion-test-fixture ()
   (let* ((source (verona:make-source "macro.verona" "(again)"))
          (form (first (verona:read-source source)))
          (environment (verona:make-environment)))
@@ -66,45 +68,60 @@
      environment (verona:make-verona-name "again")
      (verona:make-verona-macro (lambda (&rest arguments)
                                  (declare (ignore arguments)) form)))
-    (let ((verona:*macro-expansion-depth-limit* 2))
-      (signals verona:macro-expansion-limit-error
-        (verona:expand form environment)))
-    ;; A non-recursive expansion carries invocation provenance as a proper
-    ;; syntax chain, independently from the source span it reused.
     (verona:environment-bind
      environment (verona:make-verona-name "once")
      (verona:make-verona-macro
       (lambda (&rest arguments)
         (declare (ignore arguments))
         (verona:syntax-with-datum form (verona:make-verona-name "value")))))
-    (let* ((once (first (verona:read-source (verona:make-source "macro.verona" "(once)"))))
-           (expanded (verona:expand once environment))
-           (origin (verona:syntax-expansion-origin expanded)))
-      (is (not (null origin)))
-      (is (eq once (verona:expansion-origin-invocation origin))))))
+    (values form environment)))
 
-(test reader-and-compiler-observability-apis-are-independent
-  (let ((verona:*reader-nesting-depth-limit* 1))
+(test-cases macro-expansion-retains-provenance-and-has-a-limit
+  (depth-limit
+   (multiple-value-bind (form environment) (macro-expansion-test-fixture)
+     (let ((verona:*macro-expansion-depth-limit* 2))
+       (signals verona:macro-expansion-limit-error
+         (verona:expand form environment)))))
+  (provenance
+   ;; A non-recursive expansion carries invocation provenance as a proper
+   ;; syntax chain, independently from the source span it reused.
+   (multiple-value-bind (form environment) (macro-expansion-test-fixture)
+     (declare (ignore form))
+     (let* ((once (first (verona:read-source (verona:make-source "macro.verona" "(once)"))))
+            (expanded (verona:expand once environment))
+            (origin (verona:syntax-expansion-origin expanded)))
+       (is (not (null origin)))
+       (is (eq once (verona:expansion-origin-invocation origin)))))))
+
+(test-cases reader-and-compiler-observability-apis-are-independent
+  (reader-nesting-limit
+   (let ((verona:*reader-nesting-depth-limit* 1))
     (signals verona:verona-read-error
-      (verona:read-verona "((unit))")))
-  (let ((compiler (verona:make-compiler :phase-timing-p t)))
+      (verona:read-verona "((unit))"))))
+  (compiler-phase-timing
+   (let ((compiler (verona:make-compiler :phase-timing-p t)))
     (is (typep (verona:typecheck-verona "(function f () i32 1)")
                'verona:semantic-program))
     (verona:compile-string compiler "(function f () i32 1)")
     (is (equal '(:read :declarations :resolve-and-typecheck)
-               (mapcar #'car (verona:compiler-phase-timings compiler))))))
+               (mapcar #'car (verona:compiler-phase-timings compiler)))))))
 
-(test invalid-program-corpus-uses-real-verona-files
-  (dolist (fixture-and-code
-           '(("tests/invalid/reader/unclosed-list.verona" "E0001")
-             ("tests/invalid/names/unresolved-name.verona" "E0201")
-             ("tests/invalid/types/wrong-return.verona" "E0401")
-             ("tests/invalid/types/unknown-type.verona" "E0301")
-             ("tests/invalid/match/non-exhaustive-bool.verona" "E0601")))
-    (destructuring-bind (path expected-code) fixture-and-code
-      (let ((diagnostic
-              (captured-diagnostic
-               (lambda ()
-                 (verona:compile-string (verona:make-compiler)
-                                        (invalid-fixture path) :name path)))))
-        (is (string= expected-code (verona:diagnostic-code diagnostic)))))))
+(defun assert-invalid-fixture-code (path expected-code)
+  (let ((diagnostic
+          (captured-diagnostic
+           (lambda ()
+             (verona:compile-string (verona:make-compiler)
+                                    (invalid-fixture path) :name path)))))
+    (is (string= expected-code (verona:diagnostic-code diagnostic)))))
+
+(test-cases invalid-program-corpus-uses-real-verona-files
+  (unclosed-list
+   (assert-invalid-fixture-code "tests/invalid/reader/unclosed-list.verona" "E0001"))
+  (unresolved-name
+   (assert-invalid-fixture-code "tests/invalid/names/unresolved-name.verona" "E0201"))
+  (wrong-return
+   (assert-invalid-fixture-code "tests/invalid/types/wrong-return.verona" "E0401"))
+  (unknown-type
+   (assert-invalid-fixture-code "tests/invalid/types/unknown-type.verona" "E0301"))
+  (non-exhaustive-match
+   (assert-invalid-fixture-code "tests/invalid/match/non-exhaustive-bool.verona" "E0601")))

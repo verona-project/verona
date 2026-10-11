@@ -40,7 +40,19 @@
 (asdf:defsystem #:verona/tests
   :depends-on (#:verona #:fiveam)
   :serial t
-  :components ((:file "tests/foundation")
+  :components ((:file "tests/package")
+               (:file "tests/support")
+               (:file "tests/ffi-semantics")
+               (:file "tests/reader")
+               (:file "tests/compilation")
+               (:file "tests/evaluator")
+               (:file "tests/declarations")
+               (:file "tests/base-integration")
+               (:file "tests/macro-expansion")
+               (:file "tests/resolver-types")
+               (:file "tests/resolver-control-flow")
+               (:file "tests/resolver-data")
+               (:file "tests/resolver-generics")
                (:file "tests/hardening")
                (:file "tests/examples")
                (:file "tests/modules")))
@@ -49,12 +61,17 @@
   :description "FiveAM integration tests for the Verona LLVM backend"
   :depends-on (#:verona/tests #:verona/backend/llvm)
   :serial t
-  :components ((:file "tests/llvm-backend")
+  :components ((:file "tests/llvm-support")
+               (:file "tests/llvm-ir")
+               (:file "tests/llvm-abi")
+               (:file "tests/llvm-native")
                (:file "tests/examples-llvm")))
 
 (asdf:defsystem #:verona/compiler-tests
   :description "FiveAM tests for the Verona compiler driver"
   :depends-on (#:verona/llvm-tests #:verona/compiler)
   :serial t
-  :components ((:file "tests/compiler-driver")
-               (:file "tests/build")))
+  :components ((:file "tests/driver-target")
+               (:file "tests/driver-artifacts")
+               (:file "tests/build-parser")
+               (:file "tests/build-integration")))
