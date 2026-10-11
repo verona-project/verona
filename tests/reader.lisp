@@ -59,6 +59,19 @@ baz"))
    (signals verona-read-error
      (read-source (make-source "strings.vrn" "\"λ\"")))))
 
+(test-cases reads-and-rejects-string-literal-boundaries
+  (supported-escapes
+   (let* ((source (make-source "strings.vrn" "\"a\\nb\\tc\\\"d\\\\e\""))
+          (form (first (read-source source))))
+     (is (string= (format nil "a~%b~Cc\"d\\e" #\Tab)
+                  (syntax-datum form)))))
+  (unsupported-escape
+   (signals verona-read-error
+     (read-source (make-source "strings.vrn" "\"\\r\""))))
+  (unterminated-string
+   (signals verona-read-error
+     (read-source (make-source "strings.vrn" "\"unfinished")))))
+
 (test-cases resolves-character-and-string-literals
   (character-literal
    (let* ((unit (compile-string (make-compiler) "(function letter () char #\\a)"))
@@ -130,6 +143,27 @@ baz"))
    (signals verona-read-error
      (read-source (make-source "invalid.vrn" ".")))))
 
+(test-cases validates-numeric-and-qualified-atom-syntax
+  (signed-float
+   (let ((forms (read-source (make-source "numbers.vrn" "+1.5 -1.5"))))
+     (is (= 1.5d0 (syntax-datum (first forms))))
+     (is (= -1.5d0 (syntax-datum (second forms))))))
+  (trailing-decimal-point
+   (signals verona-read-error
+     (read-source (make-source "numbers.vrn" "1."))))
+  (multiple-decimal-points
+   (signals verona-read-error
+     (read-source (make-source "numbers.vrn" "1.2.3"))))
+  (missing-qualified-member
+   (signals verona-read-error
+     (read-source (make-source "qualified.vrn" "math:"))))
+  (multiple-qualified-separators
+   (signals verona-read-error
+     (read-source (make-source "qualified.vrn" "math:add:extra"))))
+  (qualified-member-with-dot
+   (signals verona-read-error
+     (read-source (make-source "qualified.vrn" "math:add.extra")))))
+
 (test includes-enabled-platform-feature-conditionals
   (let ((forms (read-source
                 (make-source "features.vrn"
@@ -159,3 +193,15 @@ baz"))
 (test rejects-feature-conditionals-without-a-name
   (signals verona-read-error
     (read-source (make-source "features.vrn" "#+ (function a () unit unit)"))))
+
+(test-cases validates-feature-conditional-boundaries
+  (unknown-dispatch-character
+   (signals verona-read-error
+     (read-source (make-source "features.vrn" "#?feature value"))))
+  (missing-controlled-form
+   (signals verona-read-error
+     (read-source (make-source "features.vrn" "#+feature"))))
+  (normalizes-symbol-features
+   (let ((forms (read-source (make-source "features.vrn" "#+Demo 42")
+                             :features '(:demo))))
+     (is (= 42 (syntax-datum (first forms)))))))

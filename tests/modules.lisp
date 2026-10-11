@@ -67,3 +67,33 @@
     (lambda (compiler)
       (signals verona:unknown-export
         (compile-module compiler "root"))))))
+
+(test-cases rejects-invalid-qualified-module-references
+  (unknown-module-qualifier
+   (call-with-module-fixture
+    '(("app.vrn" . "(function main () i32 (missing:value))"))
+    (lambda (compiler)
+      (signals verona:unknown-module-qualifier
+        (compile-module compiler "app")))))
+  (module-not-imported
+   (call-with-module-fixture
+    '(("app.vrn" . "(import bridge) (function main () i32 (library:value))")
+      ("bridge.vrn" . "(import library) (function bridge () i32 (library:value)) (export bridge)")
+      ("library.vrn" . "(function value () i32 1) (export value)"))
+    (lambda (compiler)
+      (signals verona:module-not-imported
+        (compile-module compiler "app")))))
+  (unknown-module-member
+   (call-with-module-fixture
+    '(("app.vrn" . "(import library) (function main () i32 (library:missing))")
+      ("library.vrn" . "(function value () i32 1) (export value)"))
+    (lambda (compiler)
+      (signals verona:unknown-module-member
+        (compile-module compiler "app")))))
+  (private-declaration-access
+   (call-with-module-fixture
+    '(("app.vrn" . "(import library) (function main () i32 (library:secret))")
+      ("library.vrn" . "(function secret () i32 1)"))
+    (lambda (compiler)
+      (signals verona:private-declaration-access
+        (compile-module compiler "app"))))))

@@ -212,3 +212,72 @@
                 (semantic-call-callee specialized-body))
                'verona:semantic-protocol-operation-implementation))))
 
+(test-cases rejects-invalid-parametric-and-protocol-semantics
+  (duplicate-type-parameter
+   (signals verona:duplicate-type-parameter-error
+     (compile-string
+      (make-compiler)
+      "(function invalid
+         (for (a a))
+         ((value a))
+         a
+         value)")))
+  (unknown-protocol
+   (signals verona:unknown-protocol-error
+     (compile-string
+      (make-compiler)
+      "(function invalid
+         (for (a) ((missing a)))
+         ((value a))
+         a
+         value)")))
+  (protocol-arity-mismatch
+   (signals verona:protocol-arity-mismatch-error
+     (compile-string
+      (make-compiler)
+      "(protocol display (a)
+          (display ((value a)) i32))
+       (function invalid
+         (for (a) ((display a a)))
+         ((value a))
+         a
+         value)")))
+  (invalid-protocol-constraint
+   (signals verona:invalid-protocol-constraint-error
+     (compile-string
+      (make-compiler)
+      "(function invalid
+         (for (a) (()))
+         ((value a))
+         a
+         value)")))
+  (cannot-infer-unused-type-parameter
+   (signals verona:cannot-infer-type-parameter-error
+     (compile-string
+      (make-compiler)
+      "(function ignore-type
+         (for (a))
+         ((value i32))
+         i32
+         value)
+       (function main () i32 (ignore-type 1))")))
+  (conflicting-type-inference
+   (signals verona:conflicting-type-inference-error
+     (compile-string
+      (make-compiler)
+      "(function select
+         (for (a))
+         ((left a) (right a))
+         a
+         left)
+       (function main () i32 (select 1 true))")))
+  (recursive-specialization
+   (signals verona:recursive-specialization-error
+     (compile-string
+      (make-compiler)
+      "(function expand
+         (for (a))
+         ((value a))
+         a
+         (expand (array-of value)))
+       (function main () i32 (expand 1))"))))

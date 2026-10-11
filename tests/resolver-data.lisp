@@ -152,7 +152,11 @@
   (void-elements
    (signals error
      (compile-string (make-compiler)
-                     "(function bad () (array void 1) (array-of unit))"))))
+                     "(function bad () (array void 1) (array-of unit))")))
+  (mixed-element-types
+   (signals verona:array-element-type-mismatch-error
+     (compile-string (make-compiler)
+                     "(function bad () unit (do (array-of 1 true) unit))"))))
 
 (test-cases rejects-invalid-product-definitions-construction-and-fields
   (duplicate-field

@@ -47,7 +47,8 @@
   :description "FiveAM tests for the Verona front end"
   :depends-on (#:verona/test-support)
   :serial t
-  :components ((:file "tests/ffi-semantics")
+  :components ((:file "tests/syntax")
+               (:file "tests/ffi-semantics")
                (:file "tests/reader")
                (:file "tests/compilation")
                (:file "tests/evaluator")

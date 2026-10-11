@@ -331,6 +331,32 @@
     (is (typep (semantic-function-declaration-body main) 'semantic-call))
     (is (eq program (validate-for-backend program)))))
 
+(test-cases rejects-invalid-call-and-type-syntax
+  (calling-a-value
+   (signals verona:semantic-not-callable-error
+     (compile-string
+      (make-compiler)
+      "(constant value i32 42) (function invalid () i32 (value))")))
+  (wrong-function-arity
+   (signals wrong-argument-count-error
+     (compile-string
+      (make-compiler)
+      "(function identity ((value i32)) i32 value)
+       (function main () i32 (identity))")))
+  (return-outside-a-function
+   (signals verona:return-outside-function-error
+     (compile-string (make-compiler) "(constant invalid i32 (return 1))")))
+  (pointer-without-a-pointee
+   (signals verona:semantic-error
+     (compile-string (make-compiler) "(function invalid ((value pointer)) i32 0)")))
+  (array-with-a-negative-length
+   (signals verona:semantic-error
+     (compile-string (make-compiler) "(function invalid ((value (array i32 -1))) i32 0)")))
+  (function-type-with-a-non-list-parameter-section
+   (signals verona:semantic-error
+     (compile-string (make-compiler)
+                     "(function invalid ((value (function i32 i32))) i32 0)"))))
+
 (test models-unit-as-a-distinct-singleton-with-pointer-width-representation
   (let ((context32 (make-type-context :pointer-width 32))
 	(context64 (make-type-context :pointer-width 64)))

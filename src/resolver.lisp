@@ -1209,7 +1209,10 @@ the following type pass can turn it into canonical VERONA-TYPE objects."
     (error 'invalid-protocol-constraint-error :syntax syntax))
   (let ((elements (verona-list-elements (syntax-datum syntax))))
     (unless elements (error 'invalid-protocol-constraint-error :syntax syntax))
-    (let* ((head (resolve-name scope (first elements)))
+    (let* ((head (handler-case
+                     (resolve-name scope (first elements))
+                   (unresolved-name-error ()
+                     (error 'unknown-protocol-error :syntax (first elements)))))
            (binding (semantic-reference-binding head)))
       (unless (typep binding 'protocol-binding)
         (error 'unknown-protocol-error :syntax (first elements)))
@@ -1315,7 +1318,11 @@ the following type pass can turn it into canonical VERONA-TYPE objects."
       (error 'semantic-error :syntax (declaration-source declaration)
              :message "InvalidProtocolImplementation"))
     (let* ((elements (verona-list-elements (syntax-datum application)))
-           (head (and elements (resolve-name scope (first elements))))
+           (head (and elements
+                      (handler-case
+                          (resolve-name scope (first elements))
+                        (unresolved-name-error ()
+                          (error 'unknown-protocol-error :syntax (first elements))))))
            (binding (and head (semantic-reference-binding head))))
       (unless (typep binding 'protocol-binding)
         (error 'unknown-protocol-error :syntax (first elements)))

@@ -47,6 +47,24 @@
          (program (compilation-unit-semantic-program unit)))
     (is (eq program (validate-for-backend program)))))
 
+(test-cases rejects-invalid-native-exports
+  (non-function-binding
+   (signals verona:invalid-native-export
+     (compile-string (make-compiler)
+                     "(constant value i32 1) (native-export value)")))
+  (duplicate-c-name
+   (signals verona:invalid-native-export
+     (compile-string
+      (make-compiler)
+      "(function first () i32 1)
+       (function second () i32 2)
+       (native-export first \"shared_name\")
+       (native-export second \"shared_name\")")))
+  (non-c-compatible-result
+   (signals verona:invalid-native-export
+     (compile-string (make-compiler)
+                     "(function no-value () unit unit) (native-export no-value)"))))
+
 (test rejects-void-pointer-dereference
   (signals verona:invalid-expression-error
     (compile-string

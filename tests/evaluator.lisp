@@ -110,3 +110,32 @@
       (is (string= "%test-definition"
 		   (verona-name-value (syntax-datum (first elements)))))
       (is (string= "foo" (verona-name-value (syntax-datum (second elements))))))))
+
+(test-cases evaluates-reader-sugar-and-macro-errors
+  (quote
+   (let* ((value (evaluate (first (read-source (make-source "quote.vrn" "'(first second)")))
+                           (make-bootstrap-environment))))
+     (is (equal '("first" "second") (mapcar #'verona-name-value value)))))
+  (quasiquote-with-unquote
+   (let* ((value (evaluate
+                  (first (read-source
+                          (make-source "quasiquote.vrn"
+                                       "(quasiquote (pair (unquote (quote answer))))")))
+                  (make-bootstrap-environment))))
+     (is (equal '("pair" "answer") (mapcar #'verona-name-value value)))))
+  (unquote-outside-quasiquote
+   (signals error
+     (evaluate (first (read-source (make-source "unquote.vrn" "(unquote value)")))
+               (make-bootstrap-environment))))
+  (non-callable-list-head
+   (signals verona:not-callable-error
+     (evaluate (first (read-source (make-source "call.vrn" "(42)")))
+               (make-bootstrap-environment))))
+  (invalid-macro-result
+   (let ((environment (make-environment)))
+     (environment-bind environment (make-verona-name "invalid")
+                       (make-verona-macro (lambda (&rest arguments)
+                                            (declare (ignore arguments))
+                                            (make-hash-table))))
+     (signals verona::invalid-macro-result-error
+       (expand (first (read-source (make-source "macro.vrn" "(invalid)"))) environment)))))
