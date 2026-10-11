@@ -15,3 +15,7 @@ their prefix so failures stay easy to locate."
 
 (defun run-tests ()
   (run! :verona))
+
+(defun current-example-pathname (name)
+  (merge-pathnames (format nil "examples/~A" name)
+                   (asdf:system-source-directory :verona)))

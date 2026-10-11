@@ -32,6 +32,18 @@
 (define-condition archiver-failure (toolchain-failure) ())
 (define-condition shared-library-link-failure (linker-failure) ())
 
+;; TOOLCHAIN-FAILURE preserves the earlier public naming while inheriting the
+;; transport fields from TOOL-FAILURE.  Keep concrete forwarding accessors so
+;; embedding callers do not need to know that implementation detail.
+(defun toolchain-failure-arguments (condition)
+  (tool-failure-arguments condition))
+(defun toolchain-failure-exit-status (condition)
+  (tool-failure-exit-status condition))
+(defun toolchain-failure-stdout (condition)
+  (tool-failure-stdout condition))
+(defun toolchain-failure-stderr (condition)
+  (tool-failure-stderr condition))
+
 (defun verona-version ()
   "Return the release version declared by the primary Verona ASDF system."
   (asdf:component-version (asdf:find-system :verona)))

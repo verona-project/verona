@@ -37,12 +37,17 @@
                (:file "src/driver/build")
                (:file "src/driver/cli")))
 
-(asdf:defsystem #:verona/tests
+(asdf:defsystem #:verona/test-support
   :depends-on (#:verona #:fiveam)
   :serial t
   :components ((:file "tests/package")
-               (:file "tests/support")
-               (:file "tests/ffi-semantics")
+               (:file "tests/support")))
+
+(asdf:defsystem #:verona/frontend-tests
+  :description "FiveAM tests for the Verona front end"
+  :depends-on (#:verona/test-support)
+  :serial t
+  :components ((:file "tests/ffi-semantics")
                (:file "tests/reader")
                (:file "tests/compilation")
                (:file "tests/evaluator")
@@ -57,21 +62,27 @@
                (:file "tests/examples")
                (:file "tests/modules")))
 
+;; Retain the original system name for callers that use the front-end suite.
+(asdf:defsystem #:verona/tests
+  :depends-on (#:verona/frontend-tests))
+
 (asdf:defsystem #:verona/llvm-tests
   :description "FiveAM integration tests for the Verona LLVM backend"
-  :depends-on (#:verona/tests #:verona/backend/llvm)
+  :depends-on (#:verona/test-support #:verona/backend/llvm)
   :serial t
   :components ((:file "tests/llvm-support")
                (:file "tests/llvm-ir")
                (:file "tests/llvm-abi")
+               (:file "tests/c-header")
                (:file "tests/llvm-native")
                (:file "tests/examples-llvm")))
 
 (asdf:defsystem #:verona/compiler-tests
   :description "FiveAM tests for the Verona compiler driver"
-  :depends-on (#:verona/llvm-tests #:verona/compiler)
+  :depends-on (#:verona/test-support #:verona/compiler)
   :serial t
   :components ((:file "tests/driver-target")
                (:file "tests/driver-artifacts")
+               (:file "tests/cli")
                (:file "tests/build-parser")
                (:file "tests/build-integration")))

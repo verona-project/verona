@@ -1,4 +1,4 @@
 (external-function allocate "malloc" (usize) (pointer void))
 (function main () i32
   (let ((memory (pointer void) (allocate 1)))
-    (load (deref memory))))
+    (deref memory)))

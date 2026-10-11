@@ -10,15 +10,23 @@
         ((string= value "shared-library") :shared-library)
         (t (cli-fail "unknown artifact kind ~A" value))))
 
-(defun main (&optional (arguments (uiop:command-line-arguments)))
-  "Command line entry point for `verona compile` and `verona build`."
-  (handler-case
-      (let ((command (pop arguments)))
+(defun run-cli (&optional (arguments (uiop:command-line-arguments))
+                &key (resolve-target-function #'resolve-compilation-target)
+                  (make-driver-function #'make-compiler-driver)
+                  (compile-function #'compile-root)
+                  (locate-build-function #'locate-build-file)
+                  (parse-build-function #'parse-build-file)
+                  (build-function #'execute-build))
+  "Run a CLI invocation without rendering errors or terminating the process.
+
+The injectable boundary functions make argument parsing independently testable
+while MAIN remains the process-oriented public entry point."
+  (let ((command (pop arguments)))
         (when (and command (or (string= command "--version") (string= command "-V")))
           (unless (null arguments)
             (cli-fail "--version does not accept arguments"))
           (format t "~A~%" (verona-version))
-          (return-from main (verona-version)))
+          (return-from run-cli (verona-version)))
         (when (and command (string= command "build"))
           (let ((target (pop arguments)) (output-directory (pop arguments))
                 (reader-features '()))
@@ -33,12 +41,14 @@
                                (cli-fail "--feature requires a non-empty feature name"))
                              (push feature reader-features)))
                           (t (cli-fail "usage: verona build TARGET OUTPUT-DIRECTORY [--feature NAME]"))))
-            (let ((artifact (execute-build (parse-build-file (locate-build-file))
+            (let ((artifact (funcall build-function
+                                      (funcall parse-build-function
+                                               (funcall locate-build-function))
                                            (make-build-invocation target output-directory
                                                                   :reader-features
                                                                   (nreverse reader-features)))))
               (format t "~A~%" (artifact-path artifact))
-              (return-from main artifact))))
+              (return-from run-cli artifact))))
         (unless (and command (string= command "compile"))
           (cli-fail "usage: verona compile SOURCE [-o OUTPUT] [--emit KIND] [--feature NAME]~%       verona build TARGET OUTPUT-DIRECTORY [--feature NAME]"))
         (let ((source (pop arguments)) (output nil) (kind :executable)
@@ -71,15 +81,21 @@
                          ((string= option "--framework")
                           (push (or (pop arguments) (cli-fail "--framework requires a name")) frameworks))
                          (t (cli-fail "unknown option ~A" option))))
-          (let* ((target (resolve-compilation-target :triple triple :cpu cpu :features features
-                                                      :reader-features (nreverse reader-features)))
-                 (driver (make-compiler-driver :target target))
-                 (artifact (compile-root driver source :artifact-kind kind :output output
-                                          :link-options (make-link-options :libraries (nreverse libraries)
-                                                                           :library-search-paths (nreverse paths)
-                                                                           :frameworks (nreverse frameworks)))))
+          (let* ((target (funcall resolve-target-function
+                                  :triple triple :cpu cpu :features features
+                                  :reader-features (nreverse reader-features)))
+                 (driver (funcall make-driver-function :target target))
+                 (artifact (funcall compile-function driver source :artifact-kind kind :output output
+                                    :link-options (make-link-options :libraries (nreverse libraries)
+                                                                     :library-search-paths (nreverse paths)
+                                                                     :frameworks (nreverse frameworks)))))
             (format t "~A~%" (artifact-path artifact))
-            artifact)))
+            artifact))))
+
+(defun main (&optional (arguments (uiop:command-line-arguments)))
+  "Command line entry point for `verona compile` and `verona build`."
+  (handler-case
+      (run-cli arguments)
     (error (condition)
       (let ((diagnostic (and (typep condition 'verona:user-compilation-error)
                              (verona:diagnostic-for-condition condition))))

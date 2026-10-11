@@ -31,7 +31,7 @@
    #:toolchain-emit-object #:toolchain-link-executable
    #:toolchain-archive-static-library #:toolchain-link-shared-library
    #:compile-root #:compile-file #:default-output-path
-   #:verona-version
+   #:verona-version #:run-cli
    #:compiler-driver-error #:unsupported-artifact #:unsupported-target
    #:llvm-verification-failure #:object-emission-failure #:invalid-entry-point
    #:tool-failure #:tool-failure-executable #:tool-failure-arguments

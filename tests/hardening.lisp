@@ -114,6 +114,26 @@
                                     (invalid-fixture path) :name path)))))
     (is (string= expected-code (verona:diagnostic-code diagnostic)))))
 
+(defun assert-invalid-fixture-expectation (path)
+  "Assert the code and optional `LINE COLUMN` contract beside PATH."
+  (let* ((expected-path (make-pathname :type "expected"
+                                       :defaults (merge-pathnames path
+                                                                  (asdf:system-source-directory :verona))))
+         (parts (uiop:split-string (string-trim '(#\Space #\Newline #\Tab)
+                                               (uiop:read-file-string expected-path))
+                                   :separator '(#\Space #\Newline #\Tab)))
+         (diagnostic
+           (captured-diagnostic
+            (lambda ()
+              (verona:compile-string (verona:make-compiler)
+                                     (invalid-fixture path) :name path)))))
+    (is (string= (first parts) (verona:diagnostic-code diagnostic)))
+    (when (third parts)
+      (let ((start (verona:source-range-start
+                    (verona:diagnostic-primary-location diagnostic))))
+        (is (= (parse-integer (second parts)) (verona:source-location-line start)))
+        (is (= (parse-integer (third parts)) (verona:source-location-column start)))))))
+
 (test-cases invalid-program-corpus-uses-real-verona-files
   (unclosed-list
    (assert-invalid-fixture-code "tests/invalid/reader/unclosed-list.verona" "E0001"))
@@ -124,4 +144,6 @@
   (unknown-type
    (assert-invalid-fixture-code "tests/invalid/types/unknown-type.verona" "E0301"))
   (non-exhaustive-match
-   (assert-invalid-fixture-code "tests/invalid/match/non-exhaustive-bool.verona" "E0601")))
+   (assert-invalid-fixture-code "tests/invalid/match/non-exhaustive-bool.verona" "E0601"))
+  (void-dereference
+   (assert-invalid-fixture-expectation "tests/invalid/memory/void-dereference.vrn")))

@@ -2,6 +2,69 @@
 
 (in-suite :verona)
 
+(defclass deterministic-failing-toolchain (verona.compiler:toolchain)
+  ((failure-kind :initarg :failure-kind :reader deterministic-failing-toolchain-kind)))
+
+(defmethod verona.compiler:toolchain-emit-object
+    ((toolchain deterministic-failing-toolchain) backend output)
+  (declare (ignore toolchain backend))
+  (with-open-file (stream output :direction :output :if-exists :supersede
+                                 :element-type '(unsigned-byte 8))
+    (write-byte 0 stream))
+  output)
+
+(defun signal-deterministic-tool-failure (class tool arguments)
+  (error class :message "intentional test tool failure" :tool tool :executable tool
+               :arguments arguments :exit-status 73
+               :stdout "fake standard output" :stderr "fake standard error"))
+
+(defmethod verona.compiler:toolchain-link-executable
+    ((toolchain deterministic-failing-toolchain) object output target options)
+  (declare (ignore object output target options))
+  (signal-deterministic-tool-failure 'verona.compiler:linker-failure "fake-linker"
+                                     (list "fake-object")))
+
+(defmethod verona.compiler:toolchain-archive-static-library
+    ((toolchain deterministic-failing-toolchain) object output target)
+  (declare (ignore object output target))
+  (signal-deterministic-tool-failure 'verona.compiler:archiver-failure "fake-archiver"
+                                     (list "rcs" "fake-library" "fake-object")))
+
+(defmethod verona.compiler:toolchain-link-shared-library
+    ((toolchain deterministic-failing-toolchain) object output target options)
+  (declare (ignore object output target options))
+  (signal-deterministic-tool-failure 'verona.compiler:shared-library-link-failure
+                                     "fake-linker" (list "-shared" "fake-object")))
+
+(defun assert-structured-tool-failure (class artifact-kind expected-tool)
+  (let* ((output (merge-pathnames (format nil "verona-fake-tool-~A" (gensym "TEST-"))
+                                  (uiop:temporary-directory)))
+         (toolchain (make-instance 'deterministic-failing-toolchain
+                                   :failure-kind artifact-kind))
+         (driver (verona.compiler:make-compiler-driver :toolchain toolchain))
+         (source (merge-pathnames "tests/compiler-driver-main.vrn"
+                                  (asdf:system-source-directory :verona))))
+    (unwind-protect
+         (handler-case
+             (progn
+               (verona.compiler:compile-root driver source :artifact-kind artifact-kind :output output)
+               (error "expected ~S" class))
+           (verona.compiler:toolchain-failure (condition)
+             (is (typep condition class))
+             (is (string= expected-tool (verona.compiler:toolchain-failure-tool condition)))
+             (is (= 73 (verona.compiler:toolchain-failure-exit-status condition)))
+             (is (string= "fake standard output"
+                          (verona.compiler:toolchain-failure-stdout condition)))
+             (is (string= "fake standard error"
+                          (verona.compiler:toolchain-failure-stderr condition)))))
+      (when (probe-file output) (delete-file output)))))
+
+(test-cases compiler-driver-reports-fake-toolchain-failures
+  (linker
+   (assert-structured-tool-failure 'verona.compiler:linker-failure :executable "fake-linker"))
+  (archiver
+   (assert-structured-tool-failure 'verona.compiler:archiver-failure :static-library "fake-archiver")))
+
 (test compiler-driver-produces-native-artifacts
   (let* ((source (merge-pathnames (format nil "verona-driver-~A.vrn" (gensym "TEST-"))
                                   (uiop:temporary-directory)))

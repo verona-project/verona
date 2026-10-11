@@ -11,10 +11,6 @@
     "06-generics.vrn"
     "07-polymorphism-protocols.vrn"))
 
-(defun current-example-pathname (name)
-  (merge-pathnames (format nil "examples/~A" name)
-                   (asdf:system-source-directory :verona)))
-
 (defun assert-example-compiles (name)
   (let ((unit (compile-file (make-compiler) (current-example-pathname name))))
     (is (typep unit 'compilation-unit) name)))

@@ -10,6 +10,6 @@
   (asdf:load-asd (merge-pathnames "llvm.asd"
                                  (uiop:ensure-directory-pathname cl-llvm-root)))
   (asdf:load-asd (merge-pathnames "verona.asd" root))
-  (asdf:load-system :verona/compiler-tests)
+  (asdf:load-system :verona/llvm-tests)
   (unless (uiop:symbol-call :verona/tests :run-tests)
     (uiop:quit 1)))
