@@ -1,4 +1,0 @@
-(function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
-  (let ((first i32 20)
-        (second i32 (+ first 22)))
-    second))

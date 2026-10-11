@@ -4,7 +4,7 @@
 
 (test imports-the-explicit-base-macro-module
   (let* ((unit (compile-file
-                (make-compiler :search-paths (list #P"base/src/"))
+                (make-compiler :search-paths (list #P"projects/base/src/"))
                 #P"tests/modules/base-client.vrn"))
          (function (second (unit-declarations unit))))
     (is (typep function 'function-declaration))
@@ -12,7 +12,7 @@
 
 (test expands-quasiquoted-base-macros-into-compilable-definitions
   (let* ((unit (compile-file
-                (make-compiler :search-paths (list #P"base/src/"))
+                (make-compiler :search-paths (list #P"projects/base/src/"))
                 #P"tests/modules/base-macro-client.vrn"))
          (function (second (unit-declarations unit)))
          (constant (fourth (unit-declarations unit))))
@@ -24,8 +24,8 @@
 
 (defun base-protocol-client-primitive-kinds ()
   (let* ((unit (compile-file
-                (make-compiler :search-paths (list #P"base/src/"))
-                #P"base/tests/base-protocol-client.vrn"))
+                (make-compiler :search-paths (list #P"projects/base/src/"))
+                #P"projects/base/tests/base-protocol-client.vrn"))
          (program (compilation-unit-semantic-program unit))
          (main (semantic-program-declaration program (car (last (unit-declarations unit)))))
          (body (semantic-function-declaration-body main))
@@ -61,8 +61,8 @@
 
 (test imports-base-core-protocols
   (let* ((unit (compile-file
-                (make-compiler :search-paths (list #P"base/src/"))
-                #P"base/tests/base-core-protocol-client.vrn"))
+                (make-compiler :search-paths (list #P"projects/base/src/"))
+                #P"projects/base/tests/base-core-protocol-client.vrn"))
          (program (compilation-unit-semantic-program unit)))
     ;; Each constrained function body resolves through its matching imported
     ;; base protocol.  No concrete instance is needed until a client calls
@@ -75,8 +75,8 @@
 
 (test imports-the-base-convert-generic
   (let* ((unit (compile-file
-                (make-compiler :search-paths (list #P"base/src/"))
-                #P"base/tests/base-convert-client.vrn"))
+                (make-compiler :search-paths (list #P"projects/base/src/"))
+                #P"projects/base/tests/base-convert-client.vrn"))
          (program (compilation-unit-semantic-program unit))
          (base-module (find "base" (program-modules program)
                             :key (lambda (module)
@@ -96,7 +96,7 @@
 (test imports-the-verona-testing-library
   (let* ((unit (compile-file
                 (make-compiler :search-paths (list #P"projects/testing/src/"
-                                                   #P"base/src/"))
+                                                   #P"projects/base/src/"))
                 #P"projects/testing/tests/testing-client.vrn"))
          (program (compilation-unit-semantic-program unit))
          (main (semantic-program-declaration program (car (last (unit-declarations unit)))))

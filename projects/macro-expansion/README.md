@@ -15,4 +15,4 @@ echo $? # 42
 ```
 
 The program exits with status 42. It imports the standalone
-[`base`](../../base/) module explicitly.
+[`base`](../base/) module explicitly.

@@ -58,7 +58,7 @@
 (test standard-library-is-a-base-module-project
   (let* ((root (asdf:system-source-directory :verona))
          (file (verona.compiler:parse-build-file
-                (merge-pathnames "base/verona.build" root)))
+                (merge-pathnames "projects/base/verona.build" root)))
          (base (verona.compiler:find-build-target file "base")))
     (is (typep base 'verona.compiler:static-library-target))
     (is (string= "base"

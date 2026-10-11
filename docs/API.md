@@ -99,8 +99,8 @@ exports, and native exports are only valid at the top level.
 ### Base macro module
 
 The bundled standard library is a standalone project at
-[`base/`](../base/), whose `verona.build` declares its `base` module.  Add
-`base/src` to a consuming project's module path, then explicitly import the
+[`projects/base/`](../projects/base/), whose `verona.build` declares its `base` module.  Add
+`projects/base/src` to a consuming project's module path, then explicitly import the
 module and invoke its exported macros with the module qualifier:
 
 ```lisp
@@ -177,7 +177,7 @@ rejected because its target type is unknown.
 ### Testing library
 
 The bundled `projects/testing/` package provides Verona-native test results
-and generic assertions. Add `projects/testing/src` and `base/src` to a test
+and generic assertions. Add `projects/testing/src` and `projects/base/src` to a test
 target's module paths, declare named tests, then list their calls in a runner:
 
 ```lisp

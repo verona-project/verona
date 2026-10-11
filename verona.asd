@@ -60,7 +60,6 @@
                (:file "tests/resolver-data")
                (:file "tests/resolver-generics")
                (:file "tests/hardening")
-               (:file "tests/examples")
                (:file "tests/modules")))
 
 ;; Retain the original system name for callers that use the front-end suite.
@@ -75,8 +74,7 @@
                (:file "tests/llvm-ir")
                (:file "tests/llvm-abi")
                (:file "tests/c-header")
-               (:file "tests/llvm-native")
-               (:file "tests/examples-llvm")))
+               (:file "tests/llvm-native")))
 
 (asdf:defsystem #:verona/compiler-tests
   :description "FiveAM tests for the Verona compiler driver"

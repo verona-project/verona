@@ -61,9 +61,8 @@ and a protocol constraint:
     (report (unwrap value))))
 ```
 
-The program returns `42`. For smaller runnable examples, including arithmetic,
-bindings, matching, products, sums, generics, and protocols, see
-[`examples/`](examples/) and [its guide](examples/README.md).
+The program returns `42`. For runnable applications and library packages, see
+[`projects/`](projects/).
 
 Text literals use familiar source syntax: `"hello"` has type `(pointer u8)`
 and is a NUL-terminated `char*`; `#\\a` is a one-byte `char` (with named forms
@@ -179,7 +178,7 @@ make bootstrap
 
 It checks `VERONA_SOURCE_DIR` and `VERONA_LIBRARY_DIR`, explains the required
 Bash `export` commands, and prints the Verona website and repository links.
-For Verona programs, import [`base/`](base/) instead of using compiler-internal
+For Verona programs, import [`projects/base/`](projects/base/) instead of using compiler-internal
 `%` operations directly. Its `numeric`, `equality`, and `ordering` protocols
 provide `+`, `-`, `*`, `/`, `=`, `<`, `<=`, `>`, and `>=`; `base:convert`
 performs an explicit numeric conversion whose destination type is inferred from
