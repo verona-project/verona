@@ -157,7 +157,8 @@
 (implement-convert f64 u64 %fptoui-primitive-f64-u64)
 (implement-convert f64 f32 %ftrunc-primitive-f64-f32)
 
-;; Core type-class protocols. Client code can constrain a type parameter with
+;; Core numeric, equality, and ordering protocols. Client code can constrain a
+;; type parameter with
 ;; (numeric a), (equality a), or (ordering a) and use the corresponding
 ;; operator symbols.
 (protocol numeric (a)
@@ -216,6 +217,59 @@
   (function = ((left bool) (right bool)) bool
     (%=-primitive-bool left right)))
 
+;; Core numeric protocols -------------------------------------------------------
+;;
+;; Verona has fixed-width scalar types rather than arbitrary-precision numeric
+;; values.  These aliases make that representation explicit.  `order` is a
+;; closed comparison result, not an integer alias.
+(type int i64)
+(type rational f64)
+(type order
+  (sum
+    (less)
+    (equal)
+    (greater)))
+
+(protocol enum (a)
+  (succ ((value a)) a)
+  (pred ((value a)) a)
+  (toEnum ((value int)) a)
+  (fromEnum ((value a)) int))
+
+(protocol num (a)
+  (+ ((left a) (right a)) a)
+  (- ((left a) (right a)) a)
+  (* ((left a) (right a)) a)
+  (negate ((value a)) a)
+  (abs ((value a)) a)
+  (signum ((value a)) a))
+
+;; Protocol superclasses are not yet modeled by the compiler, so callers state
+;; each required constraint explicitly.
+(protocol eq (a)
+  (= ((left a) (right a)) bool))
+
+(protocol ord (a)
+  (compare ((left a) (right a)) order)
+  (< ((left a) (right a)) bool)
+  (<= ((left a) (right a)) bool)
+  (> ((left a) (right a)) bool)
+  (>= ((left a) (right a)) bool)
+  (max ((left a) (right a)) a)
+  (min ((left a) (right a)) a))
+
+(protocol real (a)
+  (toRational ((value a)) rational))
+
+(protocol integral (a)
+  (quot ((left a) (right a)) a)
+  (rem ((left a) (right a)) a)
+  (div ((left a) (right a)) a)
+  (mod ((left a) (right a)) a)
+  (quotRem ((left a) (right a)) (tuple a a))
+  (divMod ((left a) (right a)) (tuple a a)))
+
 (export
  macro type function external-function constant variable generic protocol implementation
+ int rational order enum num eq ord real integral
  convert numeric equality ordering)

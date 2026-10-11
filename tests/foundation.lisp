@@ -654,6 +654,20 @@ baz"))
     (is (= 1 (count :signed-integer-greater-than primitive-kinds)))
     (is (= 1 (count :signed-integer-greater-than-or-equal primitive-kinds)))))
 
+(test imports-base-core-protocols
+  (let* ((unit (compile-file
+                (make-compiler :search-paths (list #P"base/src/"))
+                #P"base/tests/base-core-protocol-client.vrn"))
+         (program (compilation-unit-semantic-program unit)))
+    ;; Each constrained function body resolves through its matching imported
+    ;; base protocol.  No concrete instance is needed until a client calls
+    ;; one of these polymorphic functions with a particular type.
+    (dolist (declaration (unit-declarations unit))
+      (when (typep declaration 'function-declaration)
+        (is (typep (semantic-function-declaration-body
+                    (semantic-program-declaration program declaration))
+                   'verona:protocol-operation-call))))))
+
 (test imports-the-base-convert-generic
   (let* ((unit (compile-file
                 (make-compiler :search-paths (list #P"base/src/"))
@@ -1781,6 +1795,26 @@ baz"))
     (is (typep constraint 'verona:protocol-constraint))
     (is (eq (verona:protocol-constraint-protocol constraint)
             (verona:semantic-protocol-declaration-protocol protocol)))))
+
+(test resolves-protocol-results-as-sum-types
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(type order (sum (less) (equal) (greater)))
+                 (protocol comparable (a)
+                   (compare ((left a) (right a)) order))
+                 (implementation (comparable i32)
+                   (function compare ((left i32) (right i32)) order
+                     (less)))"))
+         (program (compilation-unit-semantic-program unit))
+         (order-declaration (first (unit-declarations unit)))
+         (protocol-declaration (second (unit-declarations unit)))
+         (protocol (semantic-program-declaration program protocol-declaration))
+         (operation (first (verona:protocol-operations
+                            (verona:semantic-protocol-declaration-protocol protocol))))
+         (order-type (verona:semantic-type-declaration-type
+                      (semantic-program-declaration program order-declaration))))
+    (is (typep order-type 'verona:sum-type))
+    (is (eq order-type (verona:protocol-operation-result-type operation)))))
 
 (test solves-concrete-protocol-constraints-at-parametric-calls
   (let* ((unit (compile-string

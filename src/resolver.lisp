@@ -435,6 +435,11 @@ select one of these candidates later."
    ;; Entries map source declarations to their resolved counterpart.  Macro
    ;; declarations deliberately have no entry: they belong to expansion.
    (declarations :initform '() :accessor semantic-program-declarations)
+   ;; Nominal layouts must exist before protocol signatures can name them.
+   ;; Record that this one-time pass has completed so alternative identities
+   ;; remain stable for the rest of semantic analysis.
+   (nominal-types-resolved-p :initform nil
+                             :accessor semantic-program-nominal-types-resolved-p)
    (entry-module :initarg :entry-module :initform nil :reader program-entry-module)
    (modules :initarg :modules :initform '() :reader program-modules)
    (module-graph :initarg :module-graph :initform nil :reader program-module-graph)
@@ -1867,13 +1872,11 @@ shape, so accepting field-list shorthand would make declarations ambiguous."
         (variable-declaration-type (semantic-declaration-source-declaration semantic-declaration))
         "variable declaration")))))
 
-(defun resolve-types (program)
-  "Run the type representation/resolution stage for PROGRAM.
-
-Expression bodies are intentionally untouched: this pass establishes only
-declaration signatures and nominal type identities for the later expression
-type checker."
+(defun resolve-nominal-types (program)
+  "Install complete nominal types before signatures need to reference them."
   (check-type program semantic-program)
+  (when (semantic-program-nominal-types-resolved-p program)
+    (return-from resolve-nominal-types program))
   ;; Resolve alias names first, without manufacturing types for a product or
   ;; sum whose layout has not been installed yet.  The references also let the
   ;; completeness pass look through an alias used in a member declaration.
@@ -1891,6 +1894,17 @@ type checker."
           (:product (resolve-product-type-declaration program declaration))
           (:sum (resolve-sum-type-declaration program declaration))
           (:opaque (resolve-opaque-type-declaration program declaration))))))
+  (setf (semantic-program-nominal-types-resolved-p program) t)
+  program)
+
+(defun resolve-types (program)
+  "Run the type representation/resolution stage for PROGRAM.
+
+Expression bodies are intentionally untouched: this pass establishes only
+declaration signatures and nominal type identities for the later expression
+type checker."
+  (check-type program semantic-program)
+  (resolve-nominal-types program)
   ;; Now all nominal layouts exist, so an alias to one receives its complete
   ;; canonical ProductType or SumType rather than a provisional DefinedType.
   (dolist (entry (semantic-program-declarations program))
@@ -3948,6 +3962,9 @@ ready for lowering as one LLVM module."
                                                    :semantic-declaration semantic-declaration)))
               ((not (typep declaration 'implementation-declaration))
                (semantic-scope-bind module-scope (declaration-name declaration) declaration)))))
+    ;; Protocol operations may return a nominal product or sum.  Install these
+    ;; layouts before protocol signatures resolve their concrete types.
+    (resolve-nominal-types program)
     ;; Protocol constraints in a library may refer to a protocol imported
     ;; through another library. Resolve every protocol signature first, so its
     ;; type-parameter identity is available independently of module traversal
