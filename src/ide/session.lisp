@@ -13,7 +13,7 @@
            #:begin-request #:cancel-request #:publish-result #:query-result
            #:request-status #:request-source-id #:request-source-revision
            #:request-text #:request-module #:request-configuration-revision #:request-session-id
-           #:source-state #:result-session-id
+           #:source-state #:module-state #:record-phase #:result-session-id
            #:result-value #:result-source-id #:result-source-revision #:result-module
            #:result-configuration-revision
            #:build-inputs))
@@ -69,7 +69,7 @@
 ;; Only an explicit evaluation retains its input while it is pending.
 ;; Results keep revision metadata, not previous source contents.
 (defstruct (request (:constructor %request))
-  session-id source-id source-revision module text
+  session-id source-id source-revision module module-key text
   configuration-revision generation (status :pending))
 (defstruct (result (:constructor %result))
   value source-id source-revision module configuration-revision generation session-id)
@@ -77,7 +77,6 @@
   id configuration (configuration-revision 1) (generation 0) (revision 0)
   (sources (make-hash-table :test 'equal))
   (submitted (make-hash-table :test 'equal))
-  (successful (make-hash-table :test 'equal))
   (build-sources (make-hash-table :test 'equal))
   (buffers (make-hash-table :test 'equal))
   (modules (make-hash-table :test 'equal))
@@ -141,6 +140,7 @@
       (unless (equal (configuration-key configuration)
                       (configuration-key (session-configuration s)))
         (invalidate-requests s)
+        (mark-modules-needing-evaluation s)
         (setf (session-configuration s) (configuration-value configuration))
         (incf (session-configuration-revision s)))
       (session-configuration-revision s))))
@@ -150,7 +150,7 @@
       (invalidate-requests s)
       (dolist (table (list (session-modules s) (session-dependencies s)
                           (session-environments s) (session-cache s)
-                          (session-submitted s) (session-successful s))) (clrhash table))
+                          (session-submitted s))) (clrhash table))
       (setf (session-requests s) nil) id)))
 (defun close-session (store id)
   (serialized (store)
@@ -240,52 +240,129 @@
       (remhash buffer (session-buffers s))
       (remhash (source-id old) (session-sources s)) t)))
 
+(defparameter +module-phases+
+  '(:reading :expansion :declarations :resolution :type-checking))
+(defparameter +phase-products+
+  '((:reading :syntax) (:expansion :expanded-forms :macros :bindings)
+    (:declarations :declarations :imports :exports)
+    (:resolution :resolved-definitions) (:type-checking :types)))
+
+(defstruct (module-evaluation (:constructor %module-evaluation))
+  identity source-id source-path source-revision configuration-revision
+  (status :pending) phase completed-phases failed-phase products diagnostics)
+
+(defun mark-modules-needing-evaluation (s)
+  ;; Conservatively include every other module until the dependency graph
+  ;; supplies selective invalidation. Never called by source editing operations.
+  (maphash (lambda (key state)
+             (declare (ignore key))
+             (setf (module-evaluation-status state) :needs-evaluation))
+           (session-modules s)))
+
 (defun begin-request (store id source)
-  "Begin an explicit user evaluation of the file or buffer's latest contents.
-Opening, editing, saving, renaming and closing sources never call this operation."
+  "Replace this module's current evaluation with an empty pending state."
   (serialized (store)
     (let ((s (require-session store id)))
       (unless (eq source (gethash (source-id source) (session-sources s)))
         (error "Evaluation requires a source owned by this session"))
-      ;; Until dependency tracking is implemented, evaluating any source makes
-      ;; earlier analysis stale. Merely editing that source does nothing.
       (invalidate-requests s)
-      (let ((r (%request :session-id id :source-id (source-id source)
-                        :source-revision (source-revision source)
-                        :module (source-module source) :text (source-text source)
-                        :configuration-revision (session-configuration-revision s)
-                        :generation (session-generation s))))
-        (setf (gethash (source-id source) (session-submitted s)) (source-revision source))
+      (mark-modules-needing-evaluation s)
+      (let* ((key (list (or (source-module source)
+                           (and (source-path source) (pathname-name (source-path source)))
+                           (source-id source))
+                       (source-id source)))
+             (r (%request :session-id id :source-id (source-id source)
+                          :source-revision (source-revision source)
+                          :module (source-module source) :module-key key
+                          :text (source-text source)
+                          :configuration-revision (session-configuration-revision s)
+                          :generation (session-generation s))))
+        ;; Drop the previous state's products and environments immediately.
+        (remhash (source-id source) (session-cache s))
+        (dolist (old (session-requests s))
+          (when (equal (request-source-id old) (source-id source))
+            (remhash (request-module-key old) (session-modules s))))
+        (setf (gethash key (session-modules s))
+              (%module-evaluation :identity (copy-value key)
+                                  :source-id (source-id source)
+                                  :source-path (source-path source)
+                                  :source-revision (source-revision source)
+                                  :configuration-revision (session-configuration-revision s))
+              (gethash (source-id source) (session-submitted s)) (source-revision source))
         (push r (session-requests s)) r))))
+
+(defun current-request-state (s request)
+  (unless (member request (session-requests s)) (error "Unknown request"))
+  (when (and (eq :pending (request-status request))
+             (= (request-generation request) (session-generation s)))
+    (gethash (request-module-key request) (session-modules s))))
+
+(defun record-phase (store id request phase &key (complete t) products diagnostics failed)
+  "Publish a phase's current products. PRODUCTS is a plist of phase-specific values.
+Partial products of a failed phase are retained and explicitly labelled incomplete."
+  (serialized (store)
+    (let* ((s (require-session store id)) (state (current-request-state s request)))
+      (unless state (return-from record-phase (request-status request)))
+      (unless (and (member phase +module-phases+)
+                   (eq phase (nth (length (module-evaluation-completed-phases state)) +module-phases+)))
+        (error "Phases must run in order, once each"))
+      (unless (and (listp products) (evenp (length products)))
+        (error "Products must be a property list"))
+      (loop for key in products by #'cddr do
+        (unless (member key (cdr (assoc phase +phase-products+)))
+          (error "Product ~S does not belong to ~S" key phase)))
+      (setf (module-evaluation-status state) :processing
+            (module-evaluation-phase state) phase)
+      (loop for (key value) on products by #'cddr do
+        (setf (getf (module-evaluation-products state) key)
+              (if (member key '(:macros :bindings))
+                  (list :module (copy-value (module-evaluation-identity state))
+                        :definitions (copy-value value))
+                  (copy-value value))))
+      (setf (module-evaluation-diagnostics state)
+            (append (module-evaluation-diagnostics state) (copy-value diagnostics)))
+      (cond (failed
+             (setf (module-evaluation-failed-phase state) phase
+                   (module-evaluation-status state) :failed
+                   (request-status request) :failed (request-text request) nil))
+            (complete
+             (setf (module-evaluation-completed-phases state)
+                   (append (module-evaluation-completed-phases state) (list phase)))))
+      (module-evaluation-status state))))
+
 (defun cancel-request (store id request)
   (serialized (store)
-    (unless (member request (session-requests (require-session store id))) (error "Unknown request"))
-    (when (eq :pending (request-status request))
-      (setf (request-status request) :cancelled (request-text request) nil))
+    (let ((state (current-request-state (require-session store id) request)))
+      (when state
+        (setf (module-evaluation-status state) :cancelled
+              (request-status request) :cancelled (request-text request) nil)))
     (request-status request)))
-(defun publish-result (store id request value &key failed)
+
+(defun publish-result (store id request value &key failed diagnostics)
   (serialized (store)
-    (let ((s (require-session store id)))
-      (unless (member request (session-requests s)) (error "Unknown request"))
-      (when (eq :pending (request-status request))
-        (cond ((/= (request-generation request) (session-generation s))
-               (setf (request-status request) :stale))
-              (failed (setf (request-status request) :failed))
-              (t (setf (gethash (request-source-id request) (session-cache s))
-                       (%result :session-id id :value value
-                                :source-id (copy-value (request-source-id request))
-                                :source-revision (request-source-revision request)
-                                :module (copy-value (request-module request))
-                                :configuration-revision (request-configuration-revision request)
-                                :generation (session-generation s))
-                       (gethash (request-source-id request) (session-successful s))
-                       (request-source-revision request)
-                       (request-status request) :complete)))
-        (setf (request-text request) nil))
+    (let* ((s (require-session store id)) (state (current-request-state s request)))
+      (when state
+        (when (and (not failed) (module-evaluation-phase state)
+                   (not (equal +module-phases+ (module-evaluation-completed-phases state))))
+          (error "Complete all reported phases before successful publication"))
+        (setf (gethash (request-source-id request) (session-cache s))
+              (%result :session-id id :value value
+                       :source-id (copy-value (request-source-id request))
+                       :source-revision (request-source-revision request)
+                       :module (copy-value (request-module request))
+                       :configuration-revision (request-configuration-revision request)
+                       :generation (session-generation s))
+              (module-evaluation-status state) (if failed :failed :complete)
+              (module-evaluation-failed-phase state)
+              (and failed (or (module-evaluation-phase state) :reading))
+              (module-evaluation-diagnostics state)
+              (append (module-evaluation-diagnostics state) (copy-value diagnostics))
+              (request-status request) (if failed :failed :complete)
+              (request-text request) nil))
       (request-status request))))
+
 (defun query-result (store id source-id)
-  "Return the last explicitly evaluated result and :CURRENT, :STALE, or :MISSING.
-CURRENT refers to evaluation state; intervening edits do not affect this state."
+  "Return only the current evaluation's result; never fall back to an older one."
   (serialized (store)
     (let* ((s (require-session store id)) (result (gethash source-id (session-cache s))))
       (values result
@@ -293,8 +370,29 @@ CURRENT refers to evaluation state; intervening edits do not affect this state."
                     ((and (= (result-generation result) (session-generation s))
                           (= (result-configuration-revision result) (session-configuration-revision s))) :current)
                     (t :stale))))))
+
+(defun module-state (store id source-id)
+  "Return a snapshot of the current module evaluation, including partial products."
+  (serialized (store)
+    (let* ((s (require-session store id))
+           (state (loop for state being the hash-values of (session-modules s)
+                        when (equal source-id (module-evaluation-source-id state)) return state)))
+      (when state
+        (copy-value
+         (list :identity (module-evaluation-identity state)
+               :source-id (module-evaluation-source-id state)
+               :source-path (module-evaluation-source-path state)
+               :source-revision (module-evaluation-source-revision state)
+               :configuration-revision (module-evaluation-configuration-revision state)
+               :status (module-evaluation-status state)
+               :phase (module-evaluation-phase state)
+               :completed-phases (module-evaluation-completed-phases state)
+               :failed-phase (module-evaluation-failed-phase state)
+               :products (module-evaluation-products state)
+               :diagnostics (module-evaluation-diagnostics state)))))))
+
 (defun source-state (store id source-id)
-  "Report latest contents and explicit evaluation revisions independently."
+  "Report latest contents and the single current evaluation revision."
   (serialized (store)
     (let* ((s (require-session store id))
            (current (gethash source-id (session-sources s)))
@@ -303,7 +401,6 @@ CURRENT refers to evaluation state; intervening edits do not affect this state."
             :module (and current (source-module current))
             :current-revision (and current (source-revision current))
             :submitted-revision (gethash source-id (session-submitted s))
-            :successful-revision (gethash source-id (session-successful s))
             :status (if latest (request-status latest) :unsubmitted)))))
 
 (defun build-inputs (store id &key (unsaved-buffers :reject) paths)

@@ -712,25 +712,66 @@ file or buffer contents, recording the session ID, source ID, module context,
 source revision and configuration revision. The request holds its input text
 only while pending; later edits do not alter that input or prevent publication.
 Completed, failed, cancelled and stale requests release their input text.
-`source-state` reports current, latest submitted and latest successfully
-evaluated revisions separately, alongside the latest evaluation status
-(`:unsubmitted` before the first evaluation).
+`source-state` reports the latest source revision and the single submitted
+evaluation revision, alongside the request status (`:unsubmitted` before the
+first evaluation). There is no retained successful revision or fallback result.
 
-`publish-result` returns `:complete`, `:failed`, `:cancelled` or `:stale`.
-`query-result` returns the retained successful result and `:current`, `:stale`
-or `:missing`. Current means current evaluation state, even if the buffer has
-since been edited. Results keep source IDs and revision metadata, not previous
-source text. Failed evaluations retain prior successful results. Explicitly
-evaluating a source conservatively makes earlier analysis stale, including
-importers; selective dependency invalidation is deferred. Merely editing an
-imported file does nothing to analysis. Configuration changes, reset and close
-are explicit state operations and can also invalidate pending evaluation.
+`begin-request` replaces the module's state immediately, clearing declarations,
+compile-time bindings, products, diagnostics and the previous query result.
+`publish-result` stores the current evaluation's value even when `:failed t`;
+`:diagnostics` adds current diagnostics. It returns `:complete`, `:failed`,
+`:cancelled` or `:stale`. `query-result` returns only this evaluation's result
+and `:current`, `:stale` or `:missing`. Current describes evaluation state even
+if the buffer has since been edited. While a replacement is pending, cancelled,
+or has failed through `record-phase`, there is no published aggregate result;
+partial products remain accessible through `module-state`.
 
-`reset-session` clears analysis state while preserving buffers and revisions.
-The session owns separate source, module, dependency, compile-time environment
-and analysis-cache registries. Detailed cache entries belong to later steps.
-State operations are serialized with a store mutex on SBCL; implementations
-without thread support require callers to serialize access.
+`module-state` takes a session and source ID and returns a snapshot plist:
+
+- `:identity`: the resolved module context and canonical source ID. Equal module
+  names at different paths are independent. Without an explicit module context,
+  the file basename (or unnamed buffer ID) supplies the provisional name.
+- `:source-id`, `:source-path`, `:source-revision`, `:configuration-revision`:
+  the input identity and revisions for the current evaluation.
+- `:status`: `:pending`, `:processing`, `:complete`, `:failed`,
+  `:needs-evaluation`, or `:cancelled`.
+- `:phase`, `:completed-phases`, `:failed-phase`: processing progress.
+- `:products`, `:diagnostics`: current products and source-linked diagnostic
+  data supplied by the analysis caller, including valid partial results.
+
+`record-phase` takes the session, request and next phase, in order: `:reading`,
+`:expansion`, `:declarations`, `:resolution`, `:type-checking`. Its `:products`
+plist accepts the following keys:
+
+| Phase | Products |
+| --- | --- |
+| `:reading` | `:syntax` (preserving source locations) |
+| `:expansion` | `:expanded-forms`, `:macros`, `:bindings` |
+| `:declarations` | `:declarations`, `:imports`, `:exports` |
+| `:resolution` | `:resolved-definitions` |
+| `:type-checking` | `:types` |
+
+Macro and binding values are returned as `(:module identity :definitions value)`
+so entries retain their originating module and caller-supplied definition data.
+Compile-time products are distinct from semantic products. No operation here
+executes application code. `:complete nil` records progress within a phase;
+the default completes it. `:failed t` terminates the request, identifies the
+failed phase and retains its partial products and `:diagnostics`. Consumers
+must check completed phases before treating a product as complete. Successful
+aggregate publication requires every phase to have completed when phases are
+reported; it also supports callers that do not yet report phases.
+The later incremental-analysis step will connect these operations to the
+compiler pipeline.
+
+Superseded, cancelled and terminal requests cannot publish products or replace
+the current state. Explicit evaluation conservatively marks other module states
+`:needs-evaluation` and their aggregate results stale, including importers;
+selective dependency invalidation is deferred to the dependency-graph step.
+Source edits alone never mark dependents or cancel pending requests.
+Configuration changes mark module states as needing evaluation and invalidate
+pending requests. `reset-session` clears analysis while preserving buffers and
+source revisions. State operations are serialized with a store mutex on SBCL;
+implementations without thread support require callers to serialize access.
 
 `build-inputs` is an explicit operation describing a disk build with the session
 ID, configuration revision and captured file contents, source IDs and revisions.
