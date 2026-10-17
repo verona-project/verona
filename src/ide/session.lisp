@@ -20,6 +20,8 @@
            #:module-relationships #:module-diagnostics
            #:list-definitions #:find-definitions #:inspect-definition
            #:definition-type-structure #:definition-relationships
+           #:position-context #:complete-names #:signature-help #:go-to-definition
+           #:find-references #:related-definitions
            #:evaluate-module #:evaluate-request #:build-inputs #:record-dependencies #:dependency-graph #:dependency-cycles))
 (in-package #:verona.ide)
 
@@ -259,7 +261,7 @@
 (defstruct (module-evaluation (:constructor %module-evaluation))
   identity source-id source-path source-revision configuration-revision generation dependency-environments
   (status :pending) phase completed-phases failed-phase products diagnostics diagnostic-phases reasons
-  definition-identities (dependencies-complete nil))
+  definition-identities navigation-contexts (dependencies-complete nil))
 
 (defun mark-modules-needing-evaluation (s)
   ;; Configuration changes affect every module. Explicit evaluations instead

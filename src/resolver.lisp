@@ -950,9 +950,11 @@ than recovered later through ad-hoc string comparisons."
                      :binding (imported-binding program imported declaration)))))
 
 (defvar *reference-observer* nil)
+(defvar *scope-observer* nil)
 
 (defun resolve-name (scope syntax)
   "Resolve local and qualified names through deliberately separate paths."
+  (when *scope-observer* (funcall *scope-observer* scope syntax))
   (when *reference-observer* (funcall *reference-observer* scope syntax))
   (let ((name (syntax-datum syntax)))
     (cond ((qualified-name-p name) (resolve-qualified-name scope syntax name))
@@ -971,6 +973,7 @@ and lists become calls.  Future expression forms can introduce child scopes
 without changing the scope or binding model established here."
   (check-type scope semantic-scope)
   (check-type syntax syntax)
+  (when *scope-observer* (funcall *scope-observer* scope syntax))
   (let ((datum (syntax-datum syntax)))
     (cond ((or (verona-name-p datum) (qualified-name-p datum)) (resolve-name scope syntax))
 	  ((verona-list-p datum)
@@ -2491,6 +2494,8 @@ LET bindings are addressable but remain immutable through their source name."
             when operation return (values operation constraint)))))
 
 (defun infer-protocol-operation-call (syntax scope operation constraint)
+  (when *reference-observer*
+    (funcall *reference-observer* scope (first (verona-list-elements (syntax-datum syntax)))))
   (let* ((elements (verona-list-elements (syntax-datum syntax)))
          (arguments-syntax (rest elements))
          (context (semantic-scope-owning-type-context scope))
@@ -3194,6 +3199,7 @@ expression position."
   "Analyze SYNTAX in SCOPE and return a fully typed semantic expression."
   (check-type syntax syntax)
   (check-type scope semantic-scope)
+  (when *scope-observer* (funcall *scope-observer* scope syntax))
   (let* ((syntax (expand-expression-macros syntax scope))
          (datum (syntax-datum syntax))
 	(context (semantic-scope-owning-type-context scope)))

@@ -1028,3 +1028,66 @@ reuse them across sessions. No query falls back to old declarations or semantics
 Declaration information remains available after body analysis fails. Collection
 responses include module summaries with revision and phase information and
 explicit availability, so an empty page does not imply that analysis is complete.
+
+### Completion and navigation
+
+The `verona.ide` API also exports these read-only queries:
+
+```lisp
+(position-context store session-id module-identity offset)
+(complete-names store session-id module-identity offset
+                :prefix nil :expected-type nil :limit 100)
+(signature-help store session-id module-identity offset)
+(go-to-definition store session-id module-identity offset)
+(find-references store session-id definition-id
+                 :include-declaration t :offset 0 :limit 100)
+(related-definitions store session-id definition-id :limit 100)
+```
+
+Position arguments are zero-based character offsets in the evaluated input,
+not byte offsets or offsets in a subsequently edited buffer. Results identify
+the module, evaluated and current source revisions, processing status, and
+analysis availability. Resolution and type availability are reported separately.
+They never read files, evaluate code, expand macros, or initiate analysis.
+
+`position-context` reports the symbol, enclosing definition, and visible scope.
+Lexical bindings are captured from the compiler's actual scopes during explicit
+analysis; inner bindings shadow outer bindings and module definitions. Failed
+analysis retains scopes visited before failure and current declarations. Scopes
+that the compiler has not reached are unavailable; queries do not reconstruct
+them from a previous evaluation.
+
+`complete-names` returns a bounded, deterministic page of case-sensitive prefix
+matches, including locals, module declarations, macros, import qualifiers,
+public qualified members, constrained protocol operations, and language forms
+appropriate to declaration or expression heads. Each candidate supplies
+`:insertion-text`, a half-open character `:replacement-range`, kind, identity
+where available, and structural type or signature data. `:prefix` overrides the
+prefix inferred from the token up to the cursor. Optional `:expected-type`
+compares structural type data for exact equality; candidates with unknown types
+remain visible with `:type-match :unknown`. This initial filter does not perform
+type inference or generic specialization during a query.
+
+`signature-help` returns a zero-based `:active-argument` and `:signatures`,
+including declared parameters, results, generic clauses, and available resolved
+data. Generic implementations are returned as separate possible signatures;
+queries do not select an overload by evaluating arguments. Missing signature
+information is explicit. `go-to-definition` returns `:found`, `:ambiguous`, or
+`:unresolved` and structured locations. Local identities are opaque values
+scoped to the current evaluation and can be passed to `find-references`.
+
+`find-references` distinguishes `:declaration` from `:use` sites, using current
+semantic/macro dependency edges and captured local scopes. Its `:coverage`
+describes every known module; `:complete-p` is false if any known module is
+unevaluated, partial, invalidated, or differs from its evaluated input. Coverage
+is limited to registered session modules, not undiscovered project files.
+`related-definitions` navigates both ways between a generic or protocol and
+its implementations and includes generated definitions' expansion origins.
+
+All locations describe evaluated input. `:exact-p` requires matching source
+and configuration revisions. When they differ, `:location` and completion
+replacement ranges are nil; historical coordinates remain available only as
+`:evaluated-location`. Each target checks its own module, so editing an imported
+module also suppresses its exact target locations. Edits leave semantic caches
+and identities intact; explicit reevaluation replaces them and invalidates old
+definition and local identifiers. Responses contain isolated portable data.

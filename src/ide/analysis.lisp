@@ -214,19 +214,30 @@ uses the compiler's reader and import-name parser, including reader features."
                                  (verona::module-name-string (verona::qualified-name-qualifier name))))))
            (target (if import (verona::import-module import) module))
            (member (if qualified (verona::qualified-name-name name) name))
-           (declaration (if import (verona::module-find-export target member)
+           (operation (and (not qualified) (verona::verona-name-p member)
+                           (verona::find-constrained-protocol-operation scope member)))
+           (declaration (if operation
+                            (verona::protocol-declaration (verona::protocol-operation-protocol operation))
+                            (if import (verona::module-find-export target member)
                             (and (verona::verona-name-p member)
-                                 (verona::find-declaration target member))))
+                                 (verona::find-declaration target member)))))
            (origin (originating-definition module syntax))
+           (binding (and (not qualified) (verona::verona-name-p member)
+                         (verona::semantic-scope-find scope member)))
            (found (and (not qualified) (verona::verona-name-p member)
                        (nth-value 1 (verona::semantic-scope-find scope member)))))
+      (when (typep binding '(or verona::parameter-binding verona::let-binding
+                               verona::pattern-binding verona::type-parameter))
+        (setf declaration nil))
       (when (or declaration qualified (and (verona::verona-name-p member) (not found)))
+        (when operation (setf target (verona::declaration-module declaration)))
         (record-dependencies
          (analysis-store loader) (analysis-id loader) request
          (list (list :kind (if (expanded-reference-p syntax origin) :expanded :semantic)
                      :target (analysis-module-key loader target)
                      :from (and origin (verona::verona-name-value (verona::declaration-name origin)))
-                     :to (and (verona::verona-name-p member) (verona::verona-name-value member))
+                     :to (if operation (verona::verona-name-value (verona::declaration-name declaration))
+                             (and (verona::verona-name-p member) (verona::verona-name-value member)))
                      :location syntax :unresolved (null declaration)
                      :lookup-context (analysis-module-key loader module))))))))
 
@@ -365,7 +376,22 @@ uses the compiler's reader and import-name parser, including reader features."
   (let* ((store (analysis-store loader)) (id (analysis-id loader))
          (modules (analysis-graph-order entry))
          (program nil) (phase :resolution))
-    (labels ((reference (scope syntax)
+    (labels ((scope-context (scope syntax)
+               (let* ((module (verona::semantic-scope-owning-module scope))
+                      (request (and module (analysis-module-request loader module))))
+                 (when request
+                   (serialized (store)
+                     (let ((state (current-request-state (require-session store id) request)))
+                       (when state
+                         (push (list syntax
+                                     (loop for current = scope then (verona::semantic-scope-parent current)
+                                           while current append (copy-list (verona::semantic-scope-bindings current)))
+                                     (let ((function (verona::semantic-scope-owning-function scope)))
+                                       (when (typep function 'verona::semantic-function-declaration)
+                                         (loop for constraint in (verona::semantic-function-declaration-constraints function)
+                                               append (verona::protocol-operations (verona::protocol-constraint-protocol constraint))))))
+                               (module-evaluation-navigation-contexts state))))))))
+             (reference (scope syntax)
                (let* ((module (verona::semantic-scope-owning-module scope))
                       (request (and module (analysis-module-request loader module))))
                  (when request (record-semantic-use loader request module scope syntax))))
@@ -391,6 +417,7 @@ uses the compiler's reader and import-name parser, including reader features."
           (progn
             (dolist (request (analysis-requests loader)) (record-analysis-environments loader request))
             (let ((verona::*reference-observer* #'reference)
+                  (verona::*scope-observer* #'scope-context)
                   (verona::*macro-observer* #'macro-use)
                   (verona::*analysis-observer* #'progress))
               (setf program

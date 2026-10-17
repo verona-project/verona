@@ -95,7 +95,8 @@
                (:file "src/ide/dependencies")
                (:file "src/ide/analysis")
                (:file "src/ide/queries")
-               (:file "src/ide/definitions")))
+               (:file "src/ide/definitions")
+               (:file "src/ide/navigation")))
 
 (asdf:defsystem #:verona/ide/project
   :depends-on (#:verona/ide #:verona/compiler)
