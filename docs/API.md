@@ -669,3 +669,75 @@ match/type/generic subtypes); LLVM errors (`llvm-backend-error`,
 condition's hyphenated prefix, for example `type-mismatch-error-actual`,
 `type-mismatch-error-expected`, `toolchain-failure-stderr`, and
 `build-error-message`.
+
+
+## IDE sessions
+
+Load `verona/ide` for the transport-independent `verona.ide` API. A session
+store belongs to the server, not an editor connection. `create-session` returns
+a stable store-local ID and reuses sessions with equal project configuration.
+Different canonical project roots and target configurations remain independent.
+`attach-session` and `detach-session` track opaque connection IDs; detaching
+preserves state. `expire-sessions` explicitly expires detached sessions after
+one day by default. `close-session` removes all store-owned session resources;
+subsequent operations on the ID signal an error.
+
+`make-configuration` accepts a project root, build file/target, ordered search
+paths, package locations, target descriptor and reader features. The default
+root is the current directory and the default search path is that root.
+Load `verona/ide/project` to use `discover-project-configuration`, which reuses
+the build parser, target resolver and package environment. A sole build target
+is selected automatically; multiple targets require a selection. Its
+`:overrides` keyword plist replaces individual discovered fields.
+`configure-session` increments the configuration revision when settings change;
+a session's project root, selected build target and target descriptor cannot
+change. Select or create a separate session when switching targets to retain
+their caches. Reconfiguration also rejects a configuration already owned by
+another session. Explicit `:search-paths nil` overrides the default root path.
+The store copies configurations on entry and inspection.
+
+`open-buffer` associates an editor buffer ID with a canonical file path or a
+separate unnamed source ID and an optional module context. Each source has one
+mutable `source-record`. `edit-buffer` overwrites its contents and advances its
+revision; the session does not retain previous versions of the source text.
+`read-source` prefers an open buffer and otherwise refreshes the stored contents
+from disk. `save-buffer` acknowledges an editor save after verifying disk
+contents; `rename-buffer` changes source identity after an editor rename.
+Neither writes files. `close-buffer` discards the overlay; the next file read
+uses disk contents. Opening, editing, saving, renaming, closing, and refreshing
+a source do not evaluate it, invalidate analysis, or cancel pending evaluation.
+
+`begin-request` is the explicit user evaluation boundary. It submits the latest
+file or buffer contents, recording the session ID, source ID, module context,
+source revision and configuration revision. The request holds its input text
+only while pending; later edits do not alter that input or prevent publication.
+Completed, failed, cancelled and stale requests release their input text.
+`source-state` reports current, latest submitted and latest successfully
+evaluated revisions separately, alongside the latest evaluation status
+(`:unsubmitted` before the first evaluation).
+
+`publish-result` returns `:complete`, `:failed`, `:cancelled` or `:stale`.
+`query-result` returns the retained successful result and `:current`, `:stale`
+or `:missing`. Current means current evaluation state, even if the buffer has
+since been edited. Results keep source IDs and revision metadata, not previous
+source text. Failed evaluations retain prior successful results. Explicitly
+evaluating a source conservatively makes earlier analysis stale, including
+importers; selective dependency invalidation is deferred. Merely editing an
+imported file does nothing to analysis. Configuration changes, reset and close
+are explicit state operations and can also invalidate pending evaluation.
+
+`reset-session` clears analysis state while preserving buffers and revisions.
+The session owns separate source, module, dependency, compile-time environment
+and analysis-cache registries. Detailed cache entries belong to later steps.
+State operations are serialized with a store mutex on SBCL; implementations
+without thread support require callers to serialize access.
+
+`build-inputs` is an explicit operation describing a disk build with the session
+ID, configuration revision and captured file contents, source IDs and revisions.
+Its `:paths` argument includes inputs not yet opened or read by the IDE. Repeated
+captures of unchanged files retain their revisions. Build inputs use a separate
+registry and never replace analysis overlays or trigger evaluation. Unsaved
+buffers are rejected unless the caller explicitly selects
+`:unsaved-buffers :ignore`. The later build integration must discover transitive
+inputs and compile these captured contents. IDE evaluation never runs
+application code or writes build artifacts; it may evaluate compile-time macros.

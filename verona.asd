@@ -45,7 +45,7 @@
 
 (asdf:defsystem #:verona/frontend-tests
   :description "FiveAM tests for the Verona front end"
-  :depends-on (#:verona/test-support)
+  :depends-on (#:verona/test-support #:verona/ide)
   :serial t
   :components ((:file "tests/syntax")
                (:file "tests/ffi-semantics")
@@ -60,7 +60,8 @@
                (:file "tests/resolver-data")
                (:file "tests/resolver-generics")
                (:file "tests/hardening")
-               (:file "tests/modules")))
+               (:file "tests/modules")
+               (:file "tests/ide-session")))
 
 ;; Retain the original system name for callers that use the front-end suite.
 (asdf:defsystem #:verona/tests
@@ -78,10 +79,20 @@
 
 (asdf:defsystem #:verona/compiler-tests
   :description "FiveAM tests for the Verona compiler driver"
-  :depends-on (#:verona/test-support #:verona/compiler)
+  :depends-on (#:verona/test-support #:verona/compiler #:verona/ide/project)
   :serial t
   :components ((:file "tests/driver-target")
                (:file "tests/driver-artifacts")
                (:file "tests/cli")
                (:file "tests/build-parser")
                (:file "tests/build-integration")))
+
+(asdf:defsystem #:verona/ide
+  :description "Transport-independent project analysis sessions"
+  :depends-on (#:verona)
+  :serial t
+  :components ((:file "src/ide/session")))
+
+(asdf:defsystem #:verona/ide/project
+  :depends-on (#:verona/ide #:verona/compiler)
+  :components ((:file "src/ide/project")))

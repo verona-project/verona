@@ -103,3 +103,46 @@
                 (namestring (verona.compiler:build-invocation-output-directory invocation))))
     (is (equal '("from-command-line")
                (verona.compiler:build-invocation-reader-features invocation)))))
+
+
+(test ide-discovers-build-configuration
+  (let* ((root (merge-pathnames "projects/base/" (asdf:system-source-directory :verona)))
+         (environment (verona.compiler:resolve-verona-environment
+                       :getenv (lambda (name) (declare (ignore name)) (namestring root))))
+         (config (verona.ide:discover-project-configuration root :environment environment))
+         (overridden (verona.ide:discover-project-configuration
+                      root :environment environment :overrides '(:reader-features ("editor")))))
+    (is (equal (truename root) (verona.ide:configuration-root config)))
+    (is (not (null (verona.ide:configuration-build-file config))))
+    (is (not (null (verona.ide:configuration-build-target config))))
+    (is (member (getf (verona.ide:configuration-target config) :pointer-width) '(32 64)))
+    (is (not (null (verona.ide:configuration-search-paths config))))
+    (is (equal '("editor") (verona.ide:configuration-reader-features overridden)))))
+
+
+(test ide-project-configuration-overrides
+  (let* ((root (merge-pathnames "projects/base/" (asdf:system-source-directory :verona)))
+         (environment (verona.compiler:resolve-verona-environment
+                       :getenv (lambda (name) (declare (ignore name)) (namestring root))))
+         (file (verona.compiler:parse-build-file (merge-pathnames "verona.build" root)))
+         (target (first (verona.compiler:build-file-targets file)))
+         (resolved (verona.compiler::resolve-build-target target))
+         (configuration (verona.ide:discover-project-configuration root :environment environment)))
+    (is (equal (mapcar #'truename (verona.compiler:build-target-module-paths target))
+               (verona.ide:configuration-search-paths configuration)))
+    (is (equal (verona:target-feature-names resolved)
+               (verona.ide:configuration-reader-features configuration)))
+    (is (equal (verona.compiler:compilation-target-platform resolved)
+               (getf (verona.ide:configuration-target configuration) :platform)))
+    (is (= (verona.compiler:compilation-target-pointer-width resolved)
+           (getf (verona.ide:configuration-target configuration) :pointer-width)))
+    (is (equal (list (verona.compiler:verona-environment-source-directory environment)
+                     (verona.compiler:verona-environment-library-directory environment))
+               (verona.ide:configuration-package-locations configuration)))
+    (is (null (verona.ide:configuration-search-paths
+               (verona.ide:discover-project-configuration
+                root :environment environment :overrides '(:search-paths nil)))))
+    (signals error (verona.ide:discover-project-configuration
+                    root :environment environment :overrides '(:root nil)))
+    (signals error (verona.ide:discover-project-configuration
+                    root :environment environment :build-target "missing"))))
