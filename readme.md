@@ -114,6 +114,10 @@ autoreconf -fi
 ./configure
 ```
 
+`configure` locates `clang` and `llvm-ar`. The Nix shell supplies both.
+Outside Nix, provide their locations with `--with-linker=PATH` and
+`--with-archiver=PATH`.
+
 Build the standalone command-line executable with SBCL's runtime bundled into
 the image:
 

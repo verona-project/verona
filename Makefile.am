@@ -1,4 +1,9 @@
 VERONA_EXECUTABLE = $(abs_top_builddir)/build/verona
+VERONA_LINKER = @VERONA_LINKER@
+VERONA_AR = @VERONA_AR@
+
+export VERONA_LINKER VERONA_AR
+
 verona_srcdir = $(shell cd $(top_srcdir) && pwd -P)
 verona_lisp_files = $(shell find $(verona_srcdir)/src -type f -name '*.lisp' -print)
 EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md \
