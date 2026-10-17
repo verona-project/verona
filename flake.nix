@@ -48,6 +48,8 @@
             in
             pkgs.mkShell {
               packages = [
+                pkgs.autoconf
+                pkgs.automake
                 pkgs.cmake
                 lisp
                 pkgs.llvmPackages_23.llvm

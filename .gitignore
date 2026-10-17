@@ -1,6 +1,13 @@
 build/
 CMakeUserPresets.json
 compile_flags.txt
+/aclocal.m4
+/autom4te.cache/
+/build-aux/
+/configure
+/configure~
+/Makefile
+/Makefile.in
 
 # Native shared libraries (macOS and Linux).
 *.dylib

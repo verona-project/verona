@@ -98,25 +98,41 @@ of linking policy and makes the front end suitable for embedding.
 
 ## Getting started
 
-Enter the Nix development shell, then run the test suite:
+Verona's LLVM bindings and native toolchain are supplied by its Nix development
+shell. Install [Nix](https://nixos.org/download/) with flakes enabled, then
+enter the shell from the repository root:
 
 ```sh
-make test
+nix develop
 ```
 
-Build the self-contained command-line executable with SBCL's runtime bundled
-into the image:
+From that shell, bootstrap and configure the Autotools build. This is required
+from a Git checkout because generated Autotools files are not committed:
+
+```sh
+autoreconf -fi
+./configure
+```
+
+Build the standalone command-line executable with SBCL's runtime bundled into
+the image:
 
 ```sh
 make build
 ```
 
-This creates `build/verona`. The build must run from the Verona development
-shell because it uses the configured LLVM bindings. You can then install it,
-for example:
+This creates `build/verona`. Run the full test suite with:
 
 ```sh
-install -m 755 build/verona /usr/local/bin/verona
+make test
+```
+
+To install the command, configure the desired prefix (default: `/usr/local`)
+and run `make install`:
+
+```sh
+./configure --prefix=/path
+make install
 ```
 
 Compile a program or produce a library with:

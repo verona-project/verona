@@ -40,6 +40,9 @@ Use the repository's Nix development shell when working on LLVM-backed builds
 or tests. It provides the pinned LLVM Common Lisp bindings and sets
 `VERONA_CL_LLVM` for the LLVM and compiler-driver test runners.
 
+Bootstrap the Autotools build once per checkout with `autoreconf -fi` followed
+by `./configure` before running the commands below.
+
 The frontend test runner loads FiveAM through Quicklisp and expects
 `~/quicklisp/setup.lisp` to exist. Do not change test setup to depend on a
 developer's unpinned local LLVM installation.
@@ -55,6 +58,7 @@ make test-llvm     # LLVM backend integration suite
 make test-compiler # Compiler-driver, CLI, and declarative-build suite
 make test-verona   # Build and run the Verona testing-library smoke project
 make build         # Build build/verona
+make install       # Install verona under the configured prefix
 make bootstrap     # Build and run the bootstrap tutorial
 ```
 
