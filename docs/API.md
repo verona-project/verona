@@ -684,7 +684,9 @@ subsequent operations on the ID signal an error.
 
 `make-configuration` accepts a project root, build file/target, ordered search
 paths, package locations, target descriptor and reader features. The default
-root is the current directory and the default search path is that root.
+root is the current directory and the default search path is that root. Reader
+features default to the compiler target features; explicit `:reader-features nil`
+selects an empty feature set.
 Load `verona/ide/project` to use `discover-project-configuration`, which reuses
 the build parser, target resolver and package environment. A sole build target
 is selected automatically; multiple targets require a selection. Its
@@ -736,8 +738,10 @@ partial products remain accessible through `module-state`.
 - `:status`: `:pending`, `:processing`, `:complete`, `:failed`,
   `:needs-evaluation`, or `:cancelled`.
 - `:phase`, `:completed-phases`, `:failed-phase`: processing progress.
-- `:products`, `:diagnostics`: current products and source-linked diagnostic
-  data supplied by the analysis caller, including valid partial results.
+- `:products`, `:diagnostics`: current compiler products and source-linked
+  diagnostics, including valid partial results.
+- `:dependency-environments`: module identities, source/configuration revisions
+  and evaluation generations in the shared semantic graph used for analysis.
 
 `record-phase` takes the session, request and next phase, in order: `:reading`,
 `:expansion`, `:declarations`, `:resolution`, `:type-checking`. Its `:products`
@@ -760,8 +764,55 @@ failed phase and retains its partial products and `:diagnostics`. Consumers
 must check completed phases before treating a product as complete. Successful
 aggregate publication requires every phase to have completed when phases are
 reported; it also supports callers that do not yet report phases.
-The later incremental-analysis step will connect these operations to the
-compiler pipeline.
+
+`evaluate-module` connects these operations to the compiler pipeline. It takes a
+store, session ID and session source record or file path, and returns a request.
+It always replaces the requested module, refreshes disk inputs, and prefers
+unsaved buffer overlays. It reads, expands, collects declarations, resolves and
+type-checks the required transitive module graph. It does not execute application
+bodies, lower LLVM, link, or emit artifacts. Inspect `request-status`,
+`module-state`, and `query-result` for the outcome; successful aggregate values
+are compiler module objects. Compiler products are read-only inspector objects;
+plist/list metadata is copied, while compiler objects retain their identities.
+
+Every explicit action captures buffer overlays and the required source closure
+before compiler callbacks run. Later edits, saves or closes do not change those
+inputs. Sources on disk are captured during closure discovery; this is not an
+atomic filesystem snapshot. Imports, reader conditionals, ordered macro
+expansion, declaration collection, resolution and type checking use the same
+implementations as project compilation. Expansion and declaration processing
+are interleaved in language order; their separate phase products describe the
+completed collection boundaries. Source locations and macro expansion origins
+remain attached to syntax and declarations.
+
+Every action walks all required imports, including imports of cached modules.
+Dependencies with matching source/configuration revisions, complete current
+state and unchanged imported module environments reuse their declarations and
+compile-time environments. Missing, edited, failed, cancelled or invalidated
+dependencies are collected again. The requested graph is resolved and checked
+in one shared semantic/type context, preserving compiler semantics for generics
+and protocols; semantic resolution is currently graph-wide. Successful new
+results publish in dependency order, with the requested module last.
+
+Missing prerequisites and forbidden import cycles fail the action. Current
+partial products and discovered edges remain visible; later phases stop.
+Diagnostics use the compiler diagnostic representation, with
+`:prerequisite-failures` in diagnostic `:data` when other modules failed.
+Unavailable imports retain candidate canonical identities and lookup context,
+so their arrival can mark users as needing evaluation. Queries never read or
+analyze prerequisites, and edits alone never change evaluation state.
+
+For queued or cancellable evaluation, call `begin-request`, then
+`evaluate-request`. Its optional `:progress` callback takes the current module
+request and phase; a phase may report incomplete progress more than once.
+Callbacks run outside the session mutex and can inspect, edit, cancel or submit
+another evaluation. `cancel-request` cancels all pending prerequisites in the
+same action. Cancellation is cooperative at compiler observation and phase
+boundaries. A new explicit evaluation supersedes the old action, including when
+it reevaluates one of its prerequisites; generation checks prevent stale
+products, diagnostics, edges and reusable environments from being published.
+Terminal requests release their pending source text and never restore old
+products.
 
 Superseded, cancelled and terminal requests cannot publish products or replace
 the current state. Explicit evaluation marks direct and transitive dependent module states
@@ -786,9 +837,10 @@ application code or writes build artifacts; it may evaluate compile-time macros.
 ### IDE dependency graph
 
 `record-dependencies` takes a store, session ID, current request and a list of
-edge plists. It records analysis discoveries; compiler integration belongs to
-the incremental-analysis step, just as for `record-phase` products. Recording
-`:imports` products alone does not infer edges from arbitrary caller data.
+edge plists. `evaluate-module` records imports, macro uses and semantic or
+expanded references during compiler traversal. Definition identities produced
+by this integration are identifier strings. Recording `:imports` products alone
+does not infer edges from arbitrary caller data.
 
 Each edge requires `:kind` (`:import`, `:semantic`, `:macro`, `:binding`, or
 `:expanded`) and `:target`, the full module identity returned by `module-state`
@@ -831,10 +883,28 @@ incomplete. Transitive queries include missing target modules in
 `:needs-evaluation-reasons`. Dependency reasons carry `:changed-module` and an
 edge `:path`; configuration invalidation has reason kind `:configuration`.
 
-`dependency-cycles` returns cycle snapshots with `:edges` and `:status`, at
-`:level :module` (default) or `:definition`. Unresolved edges do not establish
-cycles. The analysis caller supplies language legality using edge
-`:cycle-policy :allowed` (default) or `:forbidden`. A cycle containing a forbidden
-edge is `:invalid`; its edges retain source locations for diagnostics. This
-allows recursive relationships while reporting resolver-classified illegal
-cycles without embedding language rules in session storage.
+`dependency-cycles` returns one snapshot per cyclic strongly connected component,
+at `:level :module` (default) or `:definition`. Each component has `:nodes`,
+`:edges` and `:status`. Nodes are `(module-identity definition-identity)` pairs;
+the definition is `nil` at module level. Edges include all resolved relationships
+within the component, retaining source locations and parallel references. They
+are not an ordered path or an enumeration of every individual cycle. Self-loops
+are included, while acyclic singleton nodes are omitted.
+
+The analysis caller supplies language legality using edge `:cycle-policy
+:allowed` (default) or `:forbidden`. Any forbidden internal edge makes its
+component `:invalid`; otherwise it is `:allowed`. This classifies recorded
+relationships; compiler validation still determines whether definitions satisfy
+language rules. Unresolved edges do not establish cycles.
+
+A second return value is a plist with `:complete` and `:incomplete-modules`,
+covering every registered module and every referenced module in the snapshot.
+Pending, failed, cancelled or missing discovery and unresolved edges make it
+incomplete. An empty component list proves the evaluated graph acyclic only
+when `:complete` is true. Completeness describes recorded evaluation state;
+source edits alone do not refresh the graph.
+
+Cycle queries copy the graph and completeness under the session mutex, then
+perform iterative strongly connected component analysis outside the mutex.
+Traversal takes O(V + E) time and space and does not use the Lisp call stack
+for graph depth. Returned metadata cannot mutate session-owned graph data.

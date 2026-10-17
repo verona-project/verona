@@ -342,6 +342,8 @@ distinct CHAR type later."
                            :end (reader-location state))
             t)))
 
+(defvar *read-observer* nil)
+
 (defun read-source (source &key (features '()))
   "Read selected forms in SOURCE without interpreting any form head.
 
@@ -355,4 +357,5 @@ spelling is case-insensitive; ordinary Verona identifiers remain case-sensitive.
                 (return (nreverse forms)))
               (multiple-value-bind (form present-p) (read-form state)
                 (when present-p
-                  (push form forms))))))
+                  (push form forms)
+                  (when *read-observer* (funcall *read-observer* form)))))))

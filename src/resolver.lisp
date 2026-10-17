@@ -949,8 +949,11 @@ than recovered later through ad-hoc string comparisons."
       (make-instance 'semantic-reference :syntax syntax :name name
                      :binding (imported-binding program imported declaration)))))
 
+(defvar *reference-observer* nil)
+
 (defun resolve-name (scope syntax)
   "Resolve local and qualified names through deliberately separate paths."
+  (when *reference-observer* (funcall *reference-observer* scope syntax))
   (let ((name (syntax-datum syntax)))
     (cond ((qualified-name-p name) (resolve-qualified-name scope syntax name))
           ((verona-name-p name)
@@ -3907,12 +3910,15 @@ byte value; text literals are NUL-terminated pointers to U8."
       (type-check-declaration-body checker (cdr entry)))
     program))
 
-(defun resolve-program (entry-module modules &key target (pointer-width 64))
+(defvar *analysis-observer* nil)
+
+(defun resolve-program (entry-module modules &key target (pointer-width 64) (publish-modules t))
   "Resolve a graph of already-loaded modules into one semantic Program.
 
 Every module has an isolated semantic scope; only QualifiedName resolution
 crosses the import/export boundary.  The shared type context makes the result
-ready for lowering as one LLVM module."
+ready for lowering as one LLVM module. PUBLISH-MODULES attaches the resulting
+program to module objects; IDE callers defer attachment until guarded publication."
   (check-type entry-module module)
   (let* ((type-context (make-type-context :pointer-width pointer-width))
 	 (bootstrap (make-bootstrap-semantic-scope type-context))
@@ -3971,6 +3977,7 @@ ready for lowering as one LLVM module."
                (semantic-scope-bind module-scope (declaration-name declaration) declaration)))))
     ;; Protocol operations may return a nominal product or sum.  Install these
     ;; layouts before protocol signatures resolve their concrete types.
+    (when *analysis-observer* (funcall *analysis-observer* :resolution-start program))
     (resolve-nominal-types program)
     ;; Protocol constraints in a library may refer to a protocol imported
     ;; through another library. Resolve every protocol signature first, so its
@@ -3983,11 +3990,13 @@ ready for lowering as one LLVM module."
       (unless (typep (cdr entry) 'semantic-protocol-declaration)
         (resolve-declaration-signature program (cdr entry))))
     (resolve-types program)
+    (when *analysis-observer* (funcall *analysis-observer* :resolution program))
     (type-check-program program)
     (resolve-native-exports program modules)
     (validate-for-backend program)
-    (dolist (module modules)
-      (setf (compilation-unit-semantic-program module) program))
+    (when publish-modules
+      (dolist (module modules)
+        (setf (compilation-unit-semantic-program module) program)))
     program))
 
 (defun resolve-compilation-unit (unit)

@@ -16,7 +16,7 @@
            #:source-state #:module-state #:record-phase #:result-session-id
            #:result-value #:result-source-id #:result-source-revision #:result-module
            #:result-configuration-revision
-           #:build-inputs #:record-dependencies #:dependency-graph #:dependency-cycles))
+           #:evaluate-module #:evaluate-request #:build-inputs #:record-dependencies #:dependency-graph #:dependency-cycles))
 (in-package #:verona.ide)
 
 (defstruct (configuration (:constructor %configuration))
@@ -32,7 +32,8 @@
                          (truename (uiop:pathname-directory-pathname absolute))))))
 
 (defun make-configuration (&key (root (uiop:getcwd)) build-file build-target
-                                (search-paths nil search-paths-p) package-locations target reader-features)
+                                (search-paths nil search-paths-p) package-locations target
+                                (reader-features nil reader-features-p))
   "Explicit values replace discovered defaults. TARGET is a portable target descriptor."
   (let ((root (truename (uiop:ensure-directory-pathname root))))
     (%configuration :root root
@@ -41,7 +42,9 @@
                     :search-paths (mapcar (lambda (p) (canonical-path p root))
                                          (if search-paths-p search-paths (list root)))
                     :package-locations (copy-tree package-locations)
-                    :target (copy-tree target) :reader-features (copy-list reader-features))))
+                    :target (copy-tree target)
+                    :reader-features (copy-list (if reader-features-p reader-features
+                                                   (verona:target-feature-names target))))))
 
 (defun copy-value (value)
   (typecase value
@@ -69,7 +72,7 @@
 ;; Only an explicit evaluation retains its input while it is pending.
 ;; Results keep revision metadata, not previous source contents.
 (defstruct (request (:constructor %request))
-  session-id source-id source-revision module module-key text
+  session-id source-id source-path source-revision module module-key text
   configuration-revision generation (status :pending))
 (defstruct (result (:constructor %result))
   value source-id source-revision module configuration-revision generation session-id)
@@ -249,7 +252,7 @@
     (:resolution :resolved-definitions) (:type-checking :types)))
 
 (defstruct (module-evaluation (:constructor %module-evaluation))
-  identity source-id source-path source-revision configuration-revision
+  identity source-id source-path source-revision configuration-revision generation dependency-environments
   (status :pending) phase completed-phases failed-phase products diagnostics reasons (dependencies-complete nil))
 
 (defun mark-modules-needing-evaluation (s)
@@ -261,18 +264,20 @@
                    (module-evaluation-reasons state) (list (list :kind :configuration))))
            (session-modules s)))
 
-(defun begin-request (store id source)
+(defun %begin-request (store id source &key parent)
   "Replace this module's current evaluation with an empty pending state."
   (serialized (store)
     (let ((s (require-session store id)))
-      (unless (eq source (gethash (source-id source) (session-sources s)))
+      (unless (or parent (eq source (gethash (source-id source) (session-sources s))))
         (error "Evaluation requires a source owned by this session"))
-      (invalidate-requests s)
+      (if parent
+          (unless (current-request-state s parent) (error "Evaluation action is no longer current"))
+          (invalidate-requests s))
       (let* ((key (list (or (source-module source)
                            (and (source-path source) (pathname-name (source-path source)))
                            (source-id source))
                        (source-id source)))
-             (r (%request :session-id id :source-id (source-id source)
+             (r (%request :session-id id :source-id (source-id source) :source-path (source-path source)
                           :source-revision (source-revision source)
                           :module (source-module source) :module-key key
                           :text (source-text source)
@@ -281,6 +286,7 @@
         (replace-module-dependencies s key (source-id source))
         ;; Drop the previous state's products and environments immediately.
         (remhash (source-id source) (session-cache s))
+        (remhash (source-id source) (session-environments s))
         (dolist (old (session-requests s))
           (when (equal (request-source-id old) (source-id source))
             (remhash (request-module-key old) (session-modules s))))
@@ -289,9 +295,14 @@
                                   :source-id (source-id source)
                                   :source-path (source-path source)
                                   :source-revision (source-revision source)
-                                  :configuration-revision (session-configuration-revision s))
+                                  :configuration-revision (session-configuration-revision s)
+                                  :generation (session-generation s))
               (gethash (source-id source) (session-submitted s)) (source-revision source))
         (push r (session-requests s)) r))))
+
+(defun begin-request (store id source)
+  "Replace the selected module immediately and capture its explicit input."
+  (%begin-request store id source))
 
 (defun current-request-state (s request)
   (unless (member request (session-requests s)) (error "Unknown request"))
@@ -336,10 +347,15 @@ Partial products of a failed phase are retained and explicitly labelled incomple
 
 (defun cancel-request (store id request)
   (serialized (store)
-    (let ((state (current-request-state (require-session store id) request)))
+    (let* ((s (require-session store id)) (state (current-request-state s request)))
       (when state
-        (setf (module-evaluation-status state) :cancelled
-              (request-status request) :cancelled (request-text request) nil)))
+        ;; All pending requests in this generation belong to the same explicit
+        ;; action, including prerequisites suspended beneath the selected file.
+        (dolist (pending (session-requests s))
+          (let ((current (current-request-state s pending)))
+            (when current
+              (setf (module-evaluation-status current) :cancelled
+                    (request-status pending) :cancelled (request-text pending) nil))))))
     (request-status request)))
 
 (defun publish-result (store id request value &key failed diagnostics)
@@ -359,6 +375,7 @@ Partial products of a failed phase are retained and explicitly labelled incomple
               (module-evaluation-dependencies-complete state)
               (and (not failed) (member :resolution (module-evaluation-completed-phases state)) t)
               (module-evaluation-status state) (if failed :failed :complete)
+              (module-evaluation-reasons state) nil
               (module-evaluation-failed-phase state)
               (and failed (or (module-evaluation-phase state) :reading))
               (module-evaluation-diagnostics state)
@@ -398,6 +415,7 @@ Partial products of a failed phase are retained and explicitly labelled incomple
                :failed-phase (module-evaluation-failed-phase state)
                :products (module-evaluation-products state)
                :dependency-complete (module-evaluation-dependencies-complete state)
+               :dependency-environments (module-evaluation-dependency-environments state)
                :needs-evaluation-reasons (module-evaluation-reasons state)
                :diagnostics (module-evaluation-diagnostics state)))))))
 

@@ -31,6 +31,15 @@
                 (cons key (loop for state being the hash-values of (session-modules s)
                                 when (equal source-id (module-evaluation-source-id state))
                                   collect (module-evaluation-identity state))) :test 'equal)))
+    ;; Unresolved imports may have been recorded before their module context
+    ;; was known. Canonical source identity still recognizes their arrival.
+    (maphash (lambda (owner edges)
+               (declare (ignore owner))
+               (dolist (edge edges)
+                 (when (and (getf edge :unresolved)
+                            (equal source-id (second (getf edge :target))))
+                   (pushnew (getf edge :target) roots :test #'equal))))
+             (session-dependencies s))
     (dolist (root roots)
       (dolist (entry (dependent-module-paths s root))
         (destructuring-bind (module path) entry
@@ -112,32 +121,99 @@ Completeness covers every visited module, including missing target modules."
                         (let ((state (gethash module (session-modules s))))
                           (and state (module-evaluation-reasons state))))))))
 
-(defun dependency-cycles (store id &key (level :module))
-  "Return cycles with their edges and source locations. A cycle is invalid when
-an analysis caller marks any participating edge :CYCLE-POLICY :FORBIDDEN.
-Language-specific legality is supplied by the resolver, not inferred from names."
-  (unless (member level '(:module :definition)) (error "Unknown graph level"))
+(defun cycle-graph-snapshot (store id)
+  "Copy edges and completeness under the mutex; traversal uses only this copy."
   (serialized (store)
-    (let ((s (require-session store id)) (cycles nil) (signatures nil))
-      (labels ((visit (node nodes path)
-                 (dolist (edge (graph-edges s node :dependencies level))
-                   (unless (getf edge :unresolved)
-                     (let* ((target (edge-destination edge level))
-                            (position (position target nodes :test 'equal)))
-                       (if position
-                           (let ((cycle (append (nthcdr position path) (list edge))))
-                             (unless (some (lambda (signature)
-                                             (and (= (length signature) (length cycle))
-                                                  (every (lambda (e) (member e signature :test 'eq)) cycle)))
-                                           signatures)
-                               (push cycle signatures)
-                               (push (list :status (if (some (lambda (e) (eq :forbidden (getf e :cycle-policy))) cycle)
-                                                       :invalid :allowed)
-                                           :edges cycle) cycles)))
-                           (visit target (append nodes (list target)) (append path (list edge)))))))))
-        (maphash (lambda (module edges)
-                   (declare (ignore module))
-                   (dolist (edge edges)
-                     (let ((node (edge-origin edge level))) (visit node (list node) nil))))
+    (let* ((s (require-session store id)) (edges nil)
+           (incomplete (make-hash-table :test 'equal)))
+      (labels ((check-module (module)
+                 (let ((state (gethash module (session-modules s))))
+                   (unless (and state (module-evaluation-dependencies-complete state))
+                     (setf (gethash module incomplete) t)))))
+        (maphash (lambda (module state)
+                   (declare (ignore state))
+                   (check-module module)) (session-modules s))
+        (maphash (lambda (module outgoing)
+                   (check-module module)
+                   (dolist (edge outgoing)
+                     (push (copy-value edge) edges)
+                     (check-module (getf edge :target))
+                     ;; Unknown edges cannot establish cycles or prove their
+                     ;; absence, even if discovery of their owner completed.
+                     (when (getf edge :unresolved)
+                       (setf (gethash module incomplete) t))))
                  (session-dependencies s)))
-      (copy-value (nreverse cycles)))))
+      (values edges
+              (list :complete (zerop (hash-table-count incomplete))
+                    :incomplete-modules
+                    (loop for module being the hash-keys of incomplete collect (copy-value module)))))))
+
+(defstruct cycle-component nodes edges forbidden)
+
+(defun cyclic-components (edges level)
+  "Iterative Kosaraju traversal: O(V + E) time and space, including parallel edges.
+Return one cyclic component, rather than enumerate every elementary cycle."
+  (let ((forward (make-hash-table :test 'equal))
+        (reverse (make-hash-table :test 'equal))
+        (nodes (make-hash-table :test 'equal))
+        (seen (make-hash-table :test 'equal))
+        (component-of (make-hash-table :test 'equal))
+        (order nil) (components nil))
+    (dolist (edge edges)
+      (unless (getf edge :unresolved)
+        (let ((from (edge-origin edge level)) (to (edge-destination edge level)))
+          (setf (gethash from nodes) t (gethash to nodes) t)
+          (push to (gethash from forward))
+          (push from (gethash to reverse)))))
+    ;; Each frame stores a node and the remaining adjacency list. Explicit
+    ;; stacks also avoid exhausting the Lisp call stack on long import chains.
+    (maphash
+     (lambda (root present)
+       (declare (ignore present))
+       (unless (gethash root seen)
+         (setf (gethash root seen) t)
+         (let ((stack (list (cons root (gethash root forward)))))
+           (loop while stack do
+             (let ((frame (first stack)))
+               (if (cdr frame)
+                   (let ((next (pop (cdr frame))))
+                     (unless (gethash next seen)
+                       (setf (gethash next seen) t)
+                       (push (cons next (gethash next forward)) stack)))
+                   (progn (push (car frame) order) (pop stack))))))))
+     nodes)
+    (dolist (root order)
+      (unless (gethash root component-of)
+        (let ((component (make-cycle-component)) (stack (list root)))
+          (push component components)
+          (setf (gethash root component-of) component)
+          (loop while stack do
+            (let ((node (pop stack)))
+              (push node (cycle-component-nodes component))
+              (dolist (next (gethash node reverse))
+                (unless (gethash next component-of)
+                  (setf (gethash next component-of) component)
+                  (push next stack))))))))
+    ;; Every internal edge of an SCC lies on a cycle. This includes self-loops,
+    ;; parallel edges and forbidden edges not selected by a DFS spanning tree.
+    (dolist (edge edges)
+      (unless (getf edge :unresolved)
+        (let ((component (gethash (edge-origin edge level) component-of)))
+          (when (eq component (gethash (edge-destination edge level) component-of))
+            (push edge (cycle-component-edges component))
+            (when (eq :forbidden (getf edge :cycle-policy))
+              (setf (cycle-component-forbidden component) t))))))
+    (loop for component in components
+          when (cycle-component-edges component)
+            collect (list :status (if (cycle-component-forbidden component) :invalid :allowed)
+                          :nodes (cycle-component-nodes component)
+                          :edges (nreverse (cycle-component-edges component))))))
+
+(defun dependency-cycles (store id &key (level :module))
+  "Return cyclic strongly connected components with :NODES, :EDGES and :STATUS.
+Any forbidden internal edge makes its component :INVALID; otherwise :ALLOWED.
+A second value reports :COMPLETE and :INCOMPLETE-MODULES for this graph snapshot.
+Unresolved edges cannot establish cycles. Traversal runs outside the session lock."
+  (unless (member level '(:module :definition)) (error "Unknown graph level"))
+  (multiple-value-bind (edges completeness) (cycle-graph-snapshot store id)
+    (values (cyclic-components edges level) completeness)))

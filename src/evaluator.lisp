@@ -137,7 +137,10 @@ at the expansion boundary so macro code manipulates ordinary Lisp data."
                (make-expansion-origin invocation (verona-macro-source macro)
                                       (syntax-expansion-origin invocation))))
 
+(defvar *macro-observer* nil)
+
 (defun invoke-verona-macro (macro invocation arguments)
+  (when *macro-observer* (funcall *macro-observer* macro invocation))
   (when (>= *macro-expansion-count* *macro-expansion-depth-limit*)
     (error 'macro-expansion-limit-error :limit *macro-expansion-depth-limit*
            :syntax invocation))

@@ -1157,8 +1157,13 @@ or inventing attributes that its own surface language does not define."
                      (verona-name-p (syntax-datum (third arguments))))
           (error 'module-error :source form))
         (setf alias (syntax-datum (third arguments))))
-      (make-instance 'import :module (module-loader-load loader name)
-                            :alias alias :source form))))
+      (make-instance 'import
+                     :module (handler-bind ((module-error
+                                              (lambda (condition)
+                                                (unless (module-error-source condition)
+                                                  (setf (slot-value condition 'source) form)))))
+                               (module-loader-load loader name))
+                     :alias alias :source form))))
 
 (defun parse-export-form (form)
   (let ((names (rest (verona-list-elements (syntax-datum form)))))
@@ -1215,11 +1220,14 @@ with a Verona module EXPORT."
   (setf (module-exports module) (nreverse (module-exports module)))
   module)
 
+(defvar *collection-observer* nil)
+
 (defun collect-module (module loader)
   (let ((environment (module-environment module)))
     ;; Only top-level forms reach the definition processor.  Expansion is
     ;; sequential because a preceding %MACRO can affect a following form.
     (dolist (form (module-forms module))
+      (when *collection-observer* (funcall *collection-observer* :form module form))
       (cond ((string= (or (top-level-form-head form) "") "import")
              (register-import module (parse-import-form form loader)))
             ((string= (or (top-level-form-head form) "") "export")
@@ -1230,7 +1238,10 @@ with a Verona module EXPORT."
             (t (dolist (expanded-syntax
                          (top-level-expansion-result-definitions
                           (expand-top-level form environment)))
-                 (process-definition environment module form expanded-syntax)))))
+                 (when *collection-observer*
+                   (funcall *collection-observer* :expanded module expanded-syntax))
+                 (process-definition environment module form expanded-syntax))))
+      (when *collection-observer* (funcall *collection-observer* :collected module form)))
     (resolve-module-exports module)
     (setf (module-native-export-specs module) (nreverse (module-native-export-specs module)))
     module))
@@ -1244,7 +1255,9 @@ with a Verona module EXPORT."
              (mapcar (lambda (root) (merge-pathnames filename root))
                      (module-loader-search-paths loader)))))
 
-(defun module-loader-load (loader name)
+(defgeneric module-loader-load (loader name))
+
+(defmethod module-loader-load ((loader module-loader) name)
   (let ((position (position name (module-loader-loading-stack loader)
                            :test #'module-name=)))
     (when position
