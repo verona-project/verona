@@ -1,3 +1,7 @@
 build/
 CMakeUserPresets.json
 compile_flags.txt
+
+# Native shared libraries (macOS and Linux).
+*.dylib
+*.so
