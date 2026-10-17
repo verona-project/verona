@@ -16,7 +16,7 @@
            #:source-state #:module-state #:record-phase #:result-session-id
            #:result-value #:result-source-id #:result-source-revision #:result-module
            #:result-configuration-revision
-           #:build-inputs))
+           #:build-inputs #:record-dependencies #:dependency-graph #:dependency-cycles))
 (in-package #:verona.ide)
 
 (defstruct (configuration (:constructor %configuration))
@@ -81,6 +81,7 @@
   (buffers (make-hash-table :test 'equal))
   (modules (make-hash-table :test 'equal))
   (dependencies (make-hash-table :test 'equal))
+  (reverse-dependencies (make-hash-table :test 'equal))
   (environments (make-hash-table :test 'equal))
   (cache (make-hash-table :test 'equal))
   (requests nil) (connections nil) (detached-at (get-universal-time)) (closed nil))
@@ -149,7 +150,7 @@
     (let ((s (require-session store id)))
       (invalidate-requests s)
       (dolist (table (list (session-modules s) (session-dependencies s)
-                          (session-environments s) (session-cache s)
+                          (session-reverse-dependencies s) (session-environments s) (session-cache s)
                           (session-submitted s))) (clrhash table))
       (setf (session-requests s) nil) id)))
 (defun close-session (store id)
@@ -249,14 +250,15 @@
 
 (defstruct (module-evaluation (:constructor %module-evaluation))
   identity source-id source-path source-revision configuration-revision
-  (status :pending) phase completed-phases failed-phase products diagnostics)
+  (status :pending) phase completed-phases failed-phase products diagnostics reasons (dependencies-complete nil))
 
 (defun mark-modules-needing-evaluation (s)
-  ;; Conservatively include every other module until the dependency graph
-  ;; supplies selective invalidation. Never called by source editing operations.
+  ;; Configuration changes affect every module. Explicit evaluations instead
+  ;; use reverse dependency traversal; source editing never calls either path.
   (maphash (lambda (key state)
              (declare (ignore key))
-             (setf (module-evaluation-status state) :needs-evaluation))
+             (setf (module-evaluation-status state) :needs-evaluation
+                   (module-evaluation-reasons state) (list (list :kind :configuration))))
            (session-modules s)))
 
 (defun begin-request (store id source)
@@ -266,7 +268,6 @@
       (unless (eq source (gethash (source-id source) (session-sources s)))
         (error "Evaluation requires a source owned by this session"))
       (invalidate-requests s)
-      (mark-modules-needing-evaluation s)
       (let* ((key (list (or (source-module source)
                            (and (source-path source) (pathname-name (source-path source)))
                            (source-id source))
@@ -277,6 +278,7 @@
                           :text (source-text source)
                           :configuration-revision (session-configuration-revision s)
                           :generation (session-generation s))))
+        (replace-module-dependencies s key (source-id source))
         ;; Drop the previous state's products and environments immediately.
         (remhash (source-id source) (session-cache s))
         (dolist (old (session-requests s))
@@ -321,6 +323,8 @@ Partial products of a failed phase are retained and explicitly labelled incomple
                   (copy-value value))))
       (setf (module-evaluation-diagnostics state)
             (append (module-evaluation-diagnostics state) (copy-value diagnostics)))
+      (when (or failed (not complete))
+        (setf (module-evaluation-dependencies-complete state) nil))
       (cond (failed
              (setf (module-evaluation-failed-phase state) phase
                    (module-evaluation-status state) :failed
@@ -352,6 +356,8 @@ Partial products of a failed phase are retained and explicitly labelled incomple
                        :module (copy-value (request-module request))
                        :configuration-revision (request-configuration-revision request)
                        :generation (session-generation s))
+              (module-evaluation-dependencies-complete state)
+              (and (not failed) (member :resolution (module-evaluation-completed-phases state)) t)
               (module-evaluation-status state) (if failed :failed :complete)
               (module-evaluation-failed-phase state)
               (and failed (or (module-evaluation-phase state) :reading))
@@ -367,7 +373,9 @@ Partial products of a failed phase are retained and explicitly labelled incomple
     (let* ((s (require-session store id)) (result (gethash source-id (session-cache s))))
       (values result
               (cond ((null result) :missing)
-                    ((and (= (result-generation result) (session-generation s))
+                    ((and (loop for state being the hash-values of (session-modules s)
+                                thereis (and (equal source-id (module-evaluation-source-id state))
+                                             (not (module-evaluation-reasons state))))
                           (= (result-configuration-revision result) (session-configuration-revision s))) :current)
                     (t :stale))))))
 
@@ -389,6 +397,8 @@ Partial products of a failed phase are retained and explicitly labelled incomple
                :completed-phases (module-evaluation-completed-phases state)
                :failed-phase (module-evaluation-failed-phase state)
                :products (module-evaluation-products state)
+               :dependency-complete (module-evaluation-dependencies-complete state)
+               :needs-evaluation-reasons (module-evaluation-reasons state)
                :diagnostics (module-evaluation-diagnostics state)))))))
 
 (defun source-state (store id source-id)

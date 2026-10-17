@@ -91,7 +91,8 @@
   :description "Transport-independent project analysis sessions"
   :depends-on (#:verona)
   :serial t
-  :components ((:file "src/ide/session")))
+  :components ((:file "src/ide/session")
+               (:file "src/ide/dependencies")))
 
 (asdf:defsystem #:verona/ide/project
   :depends-on (#:verona/ide #:verona/compiler)

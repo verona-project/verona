@@ -764,9 +764,9 @@ The later incremental-analysis step will connect these operations to the
 compiler pipeline.
 
 Superseded, cancelled and terminal requests cannot publish products or replace
-the current state. Explicit evaluation conservatively marks other module states
-`:needs-evaluation` and their aggregate results stale, including importers;
-selective dependency invalidation is deferred to the dependency-graph step.
+the current state. Explicit evaluation marks direct and transitive dependent module states
+`:needs-evaluation` and their aggregate results stale using the current graph.
+Unrelated completed results remain current. Dependents are not evaluated automatically.
 Source edits alone never mark dependents or cancel pending requests.
 Configuration changes mark module states as needing evaluation and invalidate
 pending requests. `reset-session` clears analysis while preserving buffers and
@@ -782,3 +782,59 @@ buffers are rejected unless the caller explicitly selects
 `:unsaved-buffers :ignore`. The later build integration must discover transitive
 inputs and compile these captured contents. IDE evaluation never runs
 application code or writes build artifacts; it may evaluate compile-time macros.
+
+### IDE dependency graph
+
+`record-dependencies` takes a store, session ID, current request and a list of
+edge plists. It records analysis discoveries; compiler integration belongs to
+the incremental-analysis step, just as for `record-phase` products. Recording
+`:imports` products alone does not infer edges from arbitrary caller data.
+
+Each edge requires `:kind` (`:import`, `:semantic`, `:macro`, `:binding`, or
+`:expanded`) and `:target`, the full module identity returned by `module-state`
+(a module context and canonical source identity). Targets need not have been
+evaluated. Equal module names at different sources remain distinct.
+`:from` and `:to` carry originating and referenced definition identities,
+including functions, types, constants, generics, protocols and implementations;
+`:location` carries the reference source location. Import edges may also carry
+`:alias` and `:selected`. Macro and binding edges identify compile-time uses;
+`:expanded` edges identify references introduced by expansion. Definitions and
+locations are supplied by the analysis caller, without reinterpretation.
+
+Missing modules or definitions use the expected `:target` identity and, for a
+missing definition, `:to`, plus `:unresolved t` and required `:lookup-context`.
+These references remain queryable with their locations. Evaluating the missing
+target module marks its users even on the target's first evaluation. This does
+not silently resolve old edges; users must be explicitly evaluated again.
+
+Calls append discoveries, deduplicating identical edges. Each batch is validated
+before mutation. Superseded, cancelled and terminal requests cannot add edges.
+At `begin-request`, affected dependents are captured before previous outgoing
+edges are removed. Incoming references survive, including references to removed
+definitions. Discovered partial edges remain after failure or cancellation.
+Source edits and buffer lifecycle operations leave edges unchanged.
+
+`dependency-graph` takes a store, session ID and module identity. It returns
+`:edges`, `:complete`, `:incomplete-modules`, and `:needs-evaluation-reasons`.
+Use `:direction :dependencies` (default) or `:dependents`, `:transitive t` for
+reachability, or `:imports-only t` to restrict traversal to imports. Module-level
+traversal is the default. Use `:level :definition` and `:definition identity`
+for definition relationships. Traversal terminates through cycles. Returned
+lists and strings are snapshots that cannot mutate the graph.
+
+Completeness describes the visited modules' outgoing discovery, not whether
+references resolved or cached semantic results remain current. It requires a
+successful evaluation with all phases completed through resolution; legacy
+aggregate-only publication, pending, failed and cancelled evaluations remain
+incomplete. Transitive queries include missing target modules in
+`:incomplete-modules`. `module-state` also exposes `:dependency-complete` and
+`:needs-evaluation-reasons`. Dependency reasons carry `:changed-module` and an
+edge `:path`; configuration invalidation has reason kind `:configuration`.
+
+`dependency-cycles` returns cycle snapshots with `:edges` and `:status`, at
+`:level :module` (default) or `:definition`. Unresolved edges do not establish
+cycles. The analysis caller supplies language legality using edge
+`:cycle-policy :allowed` (default) or `:forbidden`. A cycle containing a forbidden
+edge is `:invalid`; its edges retain source locations for diagnostics. This
+allows recursive relationships while reporting resolver-classified illegal
+cycles without embedding language rules in session storage.
