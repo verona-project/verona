@@ -1,0 +1,7 @@
+;; A deliberately small C-facing ABI for the dynamic-linking smoke test.
+;; Native exports stay explicit: ordinary Verona module visibility does not
+;; make a symbol available to a separately linked program.
+(function add ((left i32) (right i32)) i32
+  (+ left right))
+
+(native-export add "dynamic_library_add")

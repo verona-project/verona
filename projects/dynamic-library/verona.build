@@ -1,0 +1,5 @@
+(shared-library dynamic-library
+  (root dynamic-library)
+  (module-path "src")
+  (target native)
+  (optimize 0))

@@ -1,0 +1,8 @@
+;; The shared-library project writes its artifact here before this target runs.
+(executable dynamic-library-client
+  (root dynamic-library-client)
+  (module-path "src")
+  (library-path "../../build/dynamic-library")
+  (library "dynamic-library")
+  (target native)
+  (optimize 0))

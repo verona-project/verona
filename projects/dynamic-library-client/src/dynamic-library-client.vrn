@@ -1,0 +1,8 @@
+;; This project is compiled independently from the dynamic-library project.
+;; The native linker and dynamic loader resolve this C-ABI symbol.
+(external-function add-from-library "dynamic_library_add" (i32 i32) i32)
+
+(function main () exit-code
+  (match (%=-primitive-i32 (add-from-library 20 22) 42)
+    (true 0)
+    (false 1)))
