@@ -18,6 +18,8 @@
            #:result-configuration-revision
            #:discover-modules #:list-modules #:inspect-module #:module-contents
            #:module-relationships #:module-diagnostics
+           #:list-definitions #:find-definitions #:inspect-definition
+           #:definition-type-structure #:definition-relationships
            #:evaluate-module #:evaluate-request #:build-inputs #:record-dependencies #:dependency-graph #:dependency-cycles))
 (in-package #:verona.ide)
 
@@ -256,7 +258,8 @@
 
 (defstruct (module-evaluation (:constructor %module-evaluation))
   identity source-id source-path source-revision configuration-revision generation dependency-environments
-  (status :pending) phase completed-phases failed-phase products diagnostics diagnostic-phases reasons (dependencies-complete nil))
+  (status :pending) phase completed-phases failed-phase products diagnostics diagnostic-phases reasons
+  definition-identities (dependencies-complete nil))
 
 (defun mark-modules-needing-evaluation (s)
   ;; Configuration changes affect every module. Explicit evaluations instead
@@ -330,6 +333,14 @@ Partial products of a failed phase are retained and explicitly labelled incomple
       (setf (module-evaluation-status state) :processing
             (module-evaluation-phase state) phase)
       (loop for (key value) on products by #'cddr do
+        ;; Assign once at publication, so a macro keeps its ID when it later
+        ;; appears in the full declaration product. Queries never mutate this.
+        (when (member key '(:declarations :macros))
+          (dolist (definition value)
+            (when (and (typep definition 'verona::declaration)
+                       (not (assoc definition (module-evaluation-definition-identities state) :test #'eq)))
+              (push (cons definition (length (module-evaluation-definition-identities state)))
+                    (module-evaluation-definition-identities state)))))
         (setf (getf (module-evaluation-products state) key)
               (if (member key '(:macros :bindings))
                   (list :module (copy-value (module-evaluation-identity state))

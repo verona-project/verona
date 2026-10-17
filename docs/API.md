@@ -936,8 +936,9 @@ into portable summaries rather than returned as mutable objects.
   kinds/locations, import aliases/paths, export definitions, or local compile-time
   binding names. Callable values and compiler internals are represented by kind.
   Names sort deterministically, with original product order breaking ties.
-  Content identifiers are `(module kind product-index)` and refer to the current
-  evaluation only; retain the response's evaluation revisions with them.
+  Declaration and macro identifiers use the definition-query identifiers below.
+  Other content identifiers are `(module kind product-index)` and refer to the
+  current evaluation only; retain the response's evaluation revisions with them.
 - `(module-relationships store id module &key direction transitive imports-only
   offset limit)` reuses the dependency graph. Direction is `:dependencies` or
   `:dependents`. Items retain edge kinds, definition identities, source locations,
@@ -970,3 +971,60 @@ while evaluation is pending, processing, failed, cancelled or invalidated, and
 `:complete` after successful evaluation. Inspection reports cached products
 without returning their potentially large syntax/type payloads; detailed
 inspection of definitions belongs to the subsequent definition-query API.
+
+
+### Definition queries
+
+Definition queries in `verona.ide` use the same session lock, isolated portable
+responses, pagination limits, and current-state rules as module queries. They
+perform no I/O, macro invocation, binding evaluation, or implicit analysis.
+
+- `(list-definitions store id &key module name kind visibility offset limit)`
+  lists current functions (including external functions), types (including
+  aliases), constants, variables, macros, generics, protocols, and implementations.
+  Kind and visibility (`:public` or `:private`) are exact keyword filters; name
+  is a case-insensitive substring. Module is a full module identity. Results
+  sort by their portable descriptors, including identity to break name ties.
+- `(find-definitions store id name &key module offset limit)` accepts an exact,
+  case-sensitive name or a definition identifier. Names use `qualifier:member`
+  for qualification. With a module context, unqualified names search that
+  module; qualified names follow its imports and aliases and expose only
+  exported declarations, matching compiler lookup semantics. Without a context,
+  unqualified names search all current modules and qualifiers match module
+  names. The response reports `:status :found`, `:ambiguous`, or `:unresolved`
+  before pagination, alongside the standard collection fields.
+- `(inspect-definition store id identifier)` returns shared identity, owning
+  module, kind, visibility, source range, evaluation revisions, status and phase
+  metadata. `:documentation` has explicit availability and a value of `nil`
+  when the declaration has no documentation. `:declared` contains structural
+  source syntax for parameters, results, generic clauses, declared types, and
+  type layout. `:resolved` wraps the current semantic structure with its phase
+  availability; absent semantic data is `:unavailable`. Named semantic nodes
+  carry their compiler kind and descriptive slots as keyword fields, including
+  parameter types, return types, type parameters and constraints. Nominal type
+  references include related definition identifiers. Recursive structures end
+  with a kind and `:recursive-p t` marker rather than cycling.
+- `(definition-type-structure store id identifier)` returns the same inspection
+  snapshot, including declared layout and resolved product fields, sum variants,
+  payload types, alias targets, pointers, arrays, tuples, and function types.
+- `(definition-relationships store id identifier &key offset limit)` lists
+  current source implementations associated with a generic, protocol, or type.
+  Protocol operations appear structurally in `:requirements`. Availability is
+  complete only when all known modules have completed resolution; undiscovered
+  modules are outside the query scope. It never evaluates potential implementors.
+
+Compile-time inspection reports macro parameters, the originating definition
+identifier and cached binding kind in `:compile-time`. It excludes callable
+implementations, environments, runtime bodies and initializer values. Generated
+definitions expose `:generated-p` and `:expansion-origins` with invocation and
+macro source locations. This includes expansions of the language's bootstrap
+definition macros; primitive `%` definitions are source-written.
+
+Identifiers are opaque `(module-identity evaluation-generation declaration-index)`
+values, consistent across definition queries and declaration/macro content lists.
+They remain valid across source edits, but replacement evaluation (even at the
+same source revision), reset, or removal makes them unresolved. Clients must not
+reuse them across sessions. No query falls back to old declarations or semantics.
+Declaration information remains available after body analysis fails. Collection
+responses include module summaries with revision and phase information and
+explicit availability, so an empty page does not imply that analysis is complete.
