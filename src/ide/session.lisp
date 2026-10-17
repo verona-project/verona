@@ -16,6 +16,8 @@
            #:source-state #:module-state #:record-phase #:result-session-id
            #:result-value #:result-source-id #:result-source-revision #:result-module
            #:result-configuration-revision
+           #:discover-modules #:list-modules #:inspect-module #:module-contents
+           #:module-relationships #:module-diagnostics
            #:evaluate-module #:evaluate-request #:build-inputs #:record-dependencies #:dependency-graph #:dependency-cycles))
 (in-package #:verona.ide)
 
@@ -82,6 +84,7 @@
   (submitted (make-hash-table :test 'equal))
   (build-sources (make-hash-table :test 'equal))
   (buffers (make-hash-table :test 'equal))
+  (discovered (make-hash-table :test 'equal))
   (modules (make-hash-table :test 'equal))
   (dependencies (make-hash-table :test 'equal))
   (reverse-dependencies (make-hash-table :test 'equal))
@@ -253,7 +256,7 @@
 
 (defstruct (module-evaluation (:constructor %module-evaluation))
   identity source-id source-path source-revision configuration-revision generation dependency-environments
-  (status :pending) phase completed-phases failed-phase products diagnostics reasons (dependencies-complete nil))
+  (status :pending) phase completed-phases failed-phase products diagnostics diagnostic-phases reasons (dependencies-complete nil))
 
 (defun mark-modules-needing-evaluation (s)
   ;; Configuration changes affect every module. Explicit evaluations instead
@@ -333,7 +336,10 @@ Partial products of a failed phase are retained and explicitly labelled incomple
                         :definitions (copy-value value))
                   (copy-value value))))
       (setf (module-evaluation-diagnostics state)
-            (append (module-evaluation-diagnostics state) (copy-value diagnostics)))
+            (append (module-evaluation-diagnostics state) (copy-value diagnostics))
+            (module-evaluation-diagnostic-phases state)
+            (append (module-evaluation-diagnostic-phases state)
+                    (make-list (length diagnostics) :initial-element phase)))
       (when (or failed (not complete))
         (setf (module-evaluation-dependencies-complete state) nil))
       (cond (failed
@@ -380,6 +386,10 @@ Partial products of a failed phase are retained and explicitly labelled incomple
               (and failed (or (module-evaluation-phase state) :reading))
               (module-evaluation-diagnostics state)
               (append (module-evaluation-diagnostics state) (copy-value diagnostics))
+              (module-evaluation-diagnostic-phases state)
+              (append (module-evaluation-diagnostic-phases state)
+                      (make-list (length diagnostics)
+                                 :initial-element (module-evaluation-phase state)))
               (request-status request) (if failed :failed :complete)
               (request-text request) nil))
       (request-status request))))

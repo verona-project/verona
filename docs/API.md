@@ -908,3 +908,65 @@ Cycle queries copy the graph and completeness under the session mutex, then
 perform iterative strongly connected component analysis outside the mutex.
 Traversal takes O(V + E) time and space and does not use the Lisp call stack
 for graph depth. Returned metadata cannot mutate session-owned graph data.
+
+### Module browsing queries
+
+The `verona.ide` module queries operate on one session snapshot under the session
+lock. They never evaluate, refresh sources, scan directories, or build. Returned
+lists and strings are isolated from session state; compiler objects are projected
+into portable summaries rather than returned as mutable objects.
+
+- `(discover-modules store id &key paths)` explicitly scans `.vrn` files beneath
+  the supplied files/directories, defaulting to configured search paths. It
+  registers canonical paths without reading contents or evaluating them, and
+  returns sorted source identifiers. Repeated discovery is additive; missing
+  files remain known. Names are provisional basenames until a source has an
+  explicit module context. Symlink directory cycles are visited only once.
+- `(list-modules store id &key name source-path status offset limit)` lists
+  discovered sources, registered buffers/files, and evaluated modules. Name and
+  path filters are case-insensitive substrings; status is an exact keyword.
+  Listing never performs discovery. Ordering is by printed full module identity.
+- `(inspect-module store id module)` returns identity, project root, target and
+  build target, current and evaluated revisions, evaluation status, phases,
+  invalidation reasons, and cached product availability. `:evaluated-p` means
+  evaluation has been submitted, including pending/failed evaluation.
+- `(module-contents store id module &key kind name offset limit)` queries one of
+  `:declarations` (default), `:imports`, `:exports`, `:macros`, or `:bindings`.
+  Each item has an `:id`, `:name`, and `:summary`. Summaries include declaration
+  kinds/locations, import aliases/paths, export definitions, or local compile-time
+  binding names. Callable values and compiler internals are represented by kind.
+  Names sort deterministically, with original product order breaking ties.
+  Content identifiers are `(module kind product-index)` and refer to the current
+  evaluation only; retain the response's evaluation revisions with them.
+- `(module-relationships store id module &key direction transitive imports-only
+  offset limit)` reuses the dependency graph. Direction is `:dependencies` or
+  `:dependents`. Items retain edge kinds, definition identities, source locations,
+  unresolved lookups and import metadata. Responses include graph completeness,
+  incomplete modules, and reasons evaluation is needed. Edges sort by their
+  printed portable descriptors. Completeness describes known graph discovery;
+  it does not assert that every source in the project has been discovered.
+- `(module-diagnostics store id module &key severity offset limit)` returns only
+  current evaluation diagnostics, with their originating processing phases,
+  severity, message, code, source ranges and structured data. Ordering is emission
+  order. Severity filters by exact keyword.
+
+`module` is the full `(module-context source-id)` identity returned as `:id` by
+listing/inspection. Equal names at different paths remain distinct. Unknown
+identities signal an error without looking them up on disk. Unevaluated known
+modules have `:status :unevaluated` and need evaluation. Current buffer revisions
+may differ from evaluated revisions without invalidating cached products.
+
+Collection responses contain `:items`, `:total` (after filtering), `:offset`,
+`:limit`, and `:next-offset` (`nil` at the end). Offset defaults to zero; limit
+is 100 by default and must be between 1 and 1000. Offsets beyond the end return
+an empty page. Separate calls may see different session states, so clients should
+restart pagination after evaluation or discovery changes.
+
+Contents include the supplying `:phase` and `:availability`: `:unavailable`
+means the product has not been supplied, `:partial` means it has been supplied
+by an unfinished phase, and `:complete` means its phase completed, even if the
+collection is empty. Diagnostics use `:unavailable` before submission, `:partial`
+while evaluation is pending, processing, failed, cancelled or invalidated, and
+`:complete` after successful evaluation. Inspection reports cached products
+without returning their potentially large syntax/type payloads; detailed
+inspection of definitions belongs to the subsequent definition-query API.

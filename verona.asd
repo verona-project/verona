@@ -93,7 +93,8 @@
   :serial t
   :components ((:file "src/ide/session")
                (:file "src/ide/dependencies")
-               (:file "src/ide/analysis")))
+               (:file "src/ide/analysis")
+               (:file "src/ide/queries")))
 
 (asdf:defsystem #:verona/ide/project
   :depends-on (#:verona/ide #:verona/compiler)

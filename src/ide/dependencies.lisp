@@ -101,25 +101,28 @@ Completeness covers every visited module, including missing target modules."
   (unless (member level '(:module :definition)) (error "Unknown graph level"))
   (unless (member direction '(:dependencies :dependents)) (error "Unknown direction"))
   (serialized (store)
-    (let* ((s (require-session store id)) (start (graph-node module definition))
-           (queue (list start)) (seen nil) (edges nil) (incomplete nil))
-      (loop while queue do
-        (let* ((node (pop queue)) (state (gethash (first node) (session-modules s))))
-          (unless (member node seen :test 'equal)
-            (push node seen)
-            (unless (and state (module-evaluation-dependencies-complete state))
-              (pushnew (first node) incomplete :test 'equal))
-            (dolist (edge (graph-edges s node direction level))
-              (when (or (not imports-only) (eq :import (getf edge :kind)))
-                (pushnew edge edges :test 'eq)
-                (when transitive
-                  (push (if (eq direction :dependencies)
-                            (edge-destination edge level) (edge-origin edge level)) queue)))))))
-      (copy-value (list :edges (nreverse edges) :complete (null incomplete)
-                        :incomplete-modules incomplete
-                        :needs-evaluation-reasons
-                        (let ((state (gethash module (session-modules s))))
-                          (and state (module-evaluation-reasons state))))))))
+    (query-dependency-graph (require-session store id) module definition level direction transitive imports-only)))
+
+(defun query-dependency-graph (s module definition level direction transitive imports-only)
+  (let* ((start (graph-node module definition))
+         (queue (list start)) (seen nil) (edges nil) (incomplete nil))
+    (loop while queue do
+      (let* ((node (pop queue)) (state (gethash (first node) (session-modules s))))
+        (unless (member node seen :test 'equal)
+          (push node seen)
+          (unless (and state (module-evaluation-dependencies-complete state))
+            (pushnew (first node) incomplete :test 'equal))
+          (dolist (edge (graph-edges s node direction level))
+            (when (or (not imports-only) (eq :import (getf edge :kind)))
+              (pushnew edge edges :test 'eq)
+              (when transitive
+                (push (if (eq direction :dependencies)
+                          (edge-destination edge level) (edge-origin edge level)) queue)))))))
+    (copy-value (list :edges (nreverse edges) :complete (null incomplete)
+                      :incomplete-modules incomplete
+                      :needs-evaluation-reasons
+                      (let ((state (gethash module (session-modules s))))
+                        (and state (module-evaluation-reasons state)))))))
 
 (defun cycle-graph-snapshot (store id)
   "Copy edges and completeness under the mutex; traversal uses only this copy."
