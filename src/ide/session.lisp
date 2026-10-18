@@ -17,7 +17,8 @@
            #:result-value #:result-source-id #:result-source-revision #:result-module
            #:result-configuration-revision
            #:discover-modules #:list-modules #:inspect-module #:module-contents
-           #:module-relationships #:module-diagnostics
+           #:module-relationships #:module-diagnostics #:project-diagnostics
+           #:inspect-expansion #:type-at-position
            #:list-definitions #:find-definitions #:inspect-definition
            #:definition-type-structure #:definition-relationships
            #:position-context #:complete-names #:signature-help #:go-to-definition
@@ -261,7 +262,7 @@
 (defstruct (module-evaluation (:constructor %module-evaluation))
   identity source-id source-path source-revision configuration-revision generation dependency-environments
   (status :pending) phase completed-phases failed-phase products diagnostics diagnostic-phases reasons
-  definition-identities navigation-contexts (dependencies-complete nil))
+  definition-identities navigation-contexts expansion-steps expression-types (dependencies-complete nil))
 
 (defun mark-modules-needing-evaluation (s)
   ;; Configuration changes affect every module. Explicit evaluations instead

@@ -946,7 +946,7 @@ into portable summaries rather than returned as mutable objects.
   incomplete modules, and reasons evaluation is needed. Edges sort by their
   printed portable descriptors. Completeness describes known graph discovery;
   it does not assert that every source in the project has been discovered.
-- `(module-diagnostics store id module &key severity offset limit)` returns only
+- `(module-diagnostics store id module &key severity phase definition offset limit)` returns only
   current evaluation diagnostics, with their originating processing phases,
   severity, message, code, source ranges and structured data. Ordering is emission
   order. Severity filters by exact keyword.
@@ -1091,3 +1091,60 @@ replacement ranges are nil; historical coordinates remain available only as
 module also suppresses its exact target locations. Edits leave semantic caches
 and identities intact; explicit reevaluation replaces them and invalidates old
 definition and local identifiers. Responses contain isolated portable data.
+
+
+### Diagnostics, cached expansion, and types
+
+The `verona/ide` system exports these read-only queries:
+
+```lisp
+(module-diagnostics store session-id module-id
+                    :definition definition-id :severity :error :phase :type-checking
+                    :offset 0 :limit 100)
+(project-diagnostics store session-id :module module-id :definition definition-id
+                     :severity :error :phase :type-checking :offset 0 :limit 100)
+(inspect-expansion store session-id module-id :offset character-offset :limit 4096)
+(inspect-expansion store session-id module-id :definition definition-id :limit 4096)
+(type-at-position store session-id module-id character-offset)
+```
+
+Diagnostic filters are optional and combined. Project diagnostics use the same
+current module diagnostics and include per-module `:coverage`; they never discover
+additional files. Both views return deterministic pages with `:items`, `:total`,
+`:next-offset`, and the existing pagination limits. Each item identifies its
+`:module`, `:phase`, and `:diagnostic`. Diagnostic fields include `:severity`,
+`:code`, `:message`, `:location`, `:evaluated-location`, `:related-locations`,
+`:secondary-locations`, `:notes`, and compiler `:data`. Prerequisite failures remain
+visible on affected modules; `:data :prerequisite-failures`, when available,
+identifies failed source inputs. Generated-code failures retain expansion
+invocation and macro-definition locations when recorded.
+
+`inspect-expansion` selects the innermost source list containing the evaluated
+zero-based offset, or a current definition's source form. It returns portable
+`:before` and `:after` syntax data, chronological `:steps`, and `:expanded-p`.
+Names become case-sensitive strings, lists become lists, and other atoms use the
+definition-query representation. Core declaration macros are included, so a
+source `function` can expand to `%function`. Expansion steps are captured during
+evaluation, including expression macros; inspection never invokes a macro.
+`limit` is a shared syntax-node/string-character budget for before, after, and
+step data (1–100000). `:truncated-p` explicitly reports omitted output. A complete
+expansion with `:expanded-p nil` required no expansion; `:unknown` denotes missing
+expansion information. Replaced definition identifiers return `:status :unavailable`.
+
+`type-at-position` returns `:declared-type`, `:inferred-type`, a readable
+`:description`, and the enclosing current `:definition`. Types reuse the structured
+definition-query representation. The smallest captured expression containing the
+position supplies its inferred type, including contextually typed literals;
+otherwise available enclosing definition type information is used. Valid partial
+expression types remain queryable when a later body fails. Missing information is
+explicit through `:status :unavailable` and phase availability metadata.
+
+These queries include evaluated source/configuration revisions, current source
+revision, processing status, completed/failed/incomplete phases, and availability.
+Exact locations require matching current revisions; after edits, historical ranges
+remain only in `:evaluated-location`, with `:location nil` and `:exact-p nil`.
+Related diagnostic locations check their owning source independently. Queries do
+not refresh files, run macros, infer new types, evaluate bindings, or start builds.
+New evaluation clears previous diagnostics, expansion steps, and expression types;
+publication obeys the same cancellation and supersession gates as other products.
+Fix suggestions are deferred until the compiler provides reliable edits.

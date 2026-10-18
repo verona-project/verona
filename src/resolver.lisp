@@ -3195,7 +3195,14 @@ expression position."
         (expand syntax (module-environment module))
         syntax)))
 
+(defvar *expression-observer* nil)
+
 (defun infer-expression (syntax scope &optional expected-type)
+  (let ((result (%infer-expression syntax scope expected-type)))
+    (when *expression-observer* (funcall *expression-observer* scope syntax result))
+    result))
+
+(defun %infer-expression (syntax scope &optional expected-type)
   "Analyze SYNTAX in SCOPE and return a fully typed semantic expression."
   (check-type syntax syntax)
   (check-type scope semantic-scope)
@@ -3290,6 +3297,11 @@ expression position."
 					      :message "unsupported expression")))))
 
 (defun check-expression (syntax scope expected-type)
+  (let ((result (%check-expression syntax scope expected-type)))
+    (when *expression-observer* (funcall *expression-observer* scope syntax result))
+    result))
+
+(defun %check-expression (syntax scope expected-type)
   "Analyze SYNTAX with EXPECTED-TYPE, contextually typing numeric literals."
   (check-type expected-type verona-type)
   (let* ((syntax (expand-expression-macros syntax scope))

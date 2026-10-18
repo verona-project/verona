@@ -55,6 +55,24 @@
                     :location (verona::import-source import) :cycle-policy :forbidden)))
           (verona::module-imports module)))
 
+(defun record-inspection (loader request kind value)
+  (check-analysis loader)
+  (serialized ((analysis-store loader))
+    (let ((state (current-request-state
+                  (require-session (analysis-store loader) (analysis-id loader)) request)))
+      (when state
+        (ecase kind
+          (:expansion (push value (module-evaluation-expansion-steps state)))
+          (:type (push value (module-evaluation-expression-types state))))))))
+
+(defun record-expansion-step (loader invocation expanded)
+  (let* ((name (verona::source-name (verona::syntax-source invocation)))
+         (request (find name (analysis-requests loader) :test #'equal
+                        :key (lambda (r)
+                               (let ((id (request-source-id r)))
+                                 (if (stringp id) id (format nil "<buffer ~A>" (second id))))))))
+    (when request (record-inspection loader request :expansion (list invocation expanded)))))
+
 (defun analysis-products (module)
   (list :expanded-forms (mapcar #'verona:declaration-expanded-syntax
                                (verona::module-declarations module))
@@ -72,6 +90,31 @@
                 (loop for other in (analysis-requests loader)
                       when (and (not (eq request other)) (eq :failed (request-status other)))
                         collect (request-source-id other)))))
+    (let* ((syntax (ignore-errors (slot-value condition 'verona::syntax)))
+           (origin (and (typep syntax 'verona::syntax)
+                        (or (verona::syntax-expansion-origin syntax)
+                            (and loader request
+                                 (serialized ((analysis-store loader))
+                                   (let ((state (current-request-state
+                                                 (require-session (analysis-store loader) (analysis-id loader)) request)))
+                                     (loop for step in (and state (module-evaluation-expansion-steps state))
+                                           for expanded = (second step)
+                                           when (and (eq (verona::syntax-source expanded) (verona::syntax-source syntax))
+                                                     (<= (verona::source-location-offset (verona::syntax-start expanded))
+                                                         (verona::source-location-offset (verona::syntax-start syntax)))
+                                                     (>= (verona::source-location-offset (verona::syntax-end expanded))
+                                                         (verona::source-location-offset (verona::syntax-end syntax))))
+                                             return (verona::syntax-expansion-origin expanded)))))))))
+      (when origin
+        (setf diagnostic (copy-structure diagnostic))
+        (setf (verona::diagnostic-secondary-locations diagnostic)
+              (append (verona::diagnostic-secondary-locations diagnostic)
+                      (loop for current = origin then (verona::expansion-origin-parent-origin current)
+                            while current append
+                              (remove nil (list (verona::syntax-source-range (verona::expansion-origin-invocation current))
+                                                (let ((macro (verona::expansion-origin-macro current)))
+                                                  (when (typep macro 'verona::syntax)
+                                                    (verona::syntax-source-range macro))))))))))
     (if prerequisites
         (let ((copy (copy-structure diagnostic)))
           (setf (verona:diagnostic-data copy)
@@ -298,6 +341,8 @@ uses the compiler's reader and import-name parser, including reader features."
                       (handler-case (record-import-attempt loader request form)
                         (verona::module-error () nil)
                         (type-error () nil)))))
+                (verona::*expansion-observer*
+                  (lambda (before after) (record-expansion-step loader before after)))
                 (verona::*macro-observer*
                   (lambda (macro syntax) (record-macro-use loader request module macro syntax))))
             (verona::collect-module module loader))
@@ -416,7 +461,13 @@ uses the compiler's reader and import-name parser, including reader features."
       (handler-case
           (progn
             (dolist (request (analysis-requests loader)) (record-analysis-environments loader request))
-            (let ((verona::*reference-observer* #'reference)
+            (let ((verona::*expansion-observer*
+                    (lambda (before after) (record-expansion-step loader before after)))
+                  (verona::*expression-observer*
+                    (lambda (scope syntax expression)
+                      (let ((request (analysis-module-request loader (verona::semantic-scope-owning-module scope))))
+                        (when request (record-inspection loader request :type (list syntax expression))))))
+                  (verona::*reference-observer* #'reference)
                   (verona::*scope-observer* #'scope-context)
                   (verona::*macro-observer* #'macro-use)
                   (verona::*analysis-observer* #'progress))

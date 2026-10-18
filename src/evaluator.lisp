@@ -149,12 +149,16 @@ at the expansion boundary so macro code manipulates ordinary Lisp data."
         (arguments (mapcar #'syntax->macro-s-expression arguments)))
     (apply (verona-macro-implementation macro) arguments)))
 
+(defvar *expansion-observer* nil)
+
 (defun macro-result-syntax (result invocation macro)
   "Rehydrate RESULT at INVOCATION, retaining compatibility with host macros."
   (let ((syntax (if (typep result 'syntax)
                     result
                     (macro-s-expression->syntax result invocation))))
-    (annotate-macro-expansion syntax invocation macro)))
+    (let ((expanded (annotate-macro-expansion syntax invocation macro)))
+      (when *expansion-observer* (funcall *expansion-observer* invocation expanded))
+      expanded)))
 
 (defclass environment ()
   ((parent :initarg :parent :initform nil :reader environment-parent)

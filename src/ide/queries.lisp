@@ -169,21 +169,3 @@ Register identities without reading contents or evaluating modules."
                                  :complete (getf graph :complete) :incomplete-modules (getf graph :incomplete-modules)
                                  :needs-evaluation-reasons (getf graph :needs-evaluation-reasons))
                            (query-page edges offset limit)))))))
-
-(defun module-diagnostics (store id module &key severity (offset 0) (limit 100))
-  (serialized (store)
-    (let* ((s (require-session store id)) (state (fourth (require-query-module s module)))
-           (items (loop for diagnostic in (and state (module-evaluation-diagnostics state))
-                        for index from 0
-                        for phase = (nth index (module-evaluation-diagnostic-phases state))
-                        for data = (query-data diagnostic)
-                        when (or (null severity) (eq severity (getf data :severity)))
-                          collect (list :phase phase :diagnostic data))))
-      (query-data (append (list :evaluation-source-revision (and state (module-evaluation-source-revision state))
-                               :evaluation-configuration-revision (and state (module-evaluation-configuration-revision state))
-                               :module module :availability
-                               (cond ((null state) :unavailable)
-                                     ((eq (module-evaluation-status state) :complete) :complete)
-                                     (t :partial))
-                               :completed-phases (and state (module-evaluation-completed-phases state)))
-                          (query-page items offset limit))))))
