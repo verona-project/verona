@@ -56,9 +56,9 @@
                (listp (getf edge :target)) (= 2 (length (getf edge :target)))
                (every 'identity (getf edge :target))
                (member (getf edge :cycle-policy :allowed) '(:allowed :forbidden)))
-    (error "Invalid dependency descriptor ~S" edge))
+    (reject-request "Invalid dependency descriptor ~S" edge))
   (when (and (getf edge :unresolved) (not (getf edge :lookup-context)))
-    (error "Unresolved dependencies require lookup context")))
+    (reject-request "Unresolved dependencies require lookup context")))
 
 (defun record-dependencies (store id request edges)
   "Add discovered edges to the current request. No application code is evaluated.
@@ -98,8 +98,8 @@ Each edge has :KIND and :TARGET (module identity), and optional :FROM/:TO
                                              (direction :dependencies) transitive imports-only)
   "Return a copied relationship snapshot. MODULE is the full module identity.
 Completeness covers every visited module, including missing target modules."
-  (unless (member level '(:module :definition)) (error "Unknown graph level"))
-  (unless (member direction '(:dependencies :dependents)) (error "Unknown direction"))
+  (unless (member level '(:module :definition)) (reject-request "Unknown graph level"))
+  (unless (member direction '(:dependencies :dependents)) (reject-request "Unknown direction"))
   (serialized (store)
     (query-dependency-graph (require-session store id) module definition level direction transitive imports-only)))
 
@@ -217,6 +217,6 @@ Return one cyclic component, rather than enumerate every elementary cycle."
 Any forbidden internal edge makes its component :INVALID; otherwise :ALLOWED.
 A second value reports :COMPLETE and :INCOMPLETE-MODULES for this graph snapshot.
 Unresolved edges cannot establish cycles. Traversal runs outside the session lock."
-  (unless (member level '(:module :definition)) (error "Unknown graph level"))
+  (unless (member level '(:module :definition)) (reject-request "Unknown graph level"))
   (multiple-value-bind (edges completeness) (cycle-graph-snapshot store id)
     (values (cyclic-components edges level) completeness)))

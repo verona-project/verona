@@ -119,8 +119,8 @@
 
 (defun inspect-expansion (store id module &key offset definition (limit 4096))
   "Inspect a cached source form or current definition. LIMIT is a shared node/character budget."
-  (unless (and (integerp limit) (<= 1 limit 100000)) (error "Invalid expansion LIMIT"))
-  (unless (or definition (and (integerp offset) (>= offset 0))) (error "Supply OFFSET or DEFINITION"))
+  (unless (and (integerp limit) (<= 1 limit 100000)) (reject-request "Invalid expansion LIMIT"))
+  (unless (or definition (and (integerp offset) (>= offset 0))) (reject-request "Supply OFFSET or DEFINITION"))
   (serialized (store)
     (let* ((s (require-session store id)) (record (require-query-module s module)) (state (fourth record))
            (entry (and definition (find definition (definition-records s) :key #'first :test #'equal)))

@@ -1148,3 +1148,120 @@ not refresh files, run macros, infer new types, evaluate bindings, or start buil
 New evaluation clears previous diagnostics, expansion steps, and expression types;
 publication obeys the same cancellation and supersession gates as other products.
 Fix suggestions are deferred until the compiler provides reliable edits.
+# Optional Swank IDE adapter
+
+`verona/swank` depends on `verona/ide` and Swank. The compiler, project
+builder, and ordinary test suite do not depend on Swank. Load and start it
+in a Lisp process with ASDF and Quicklisp configured:
+
+```lisp
+(require :asdf)
+(asdf:load-asd #P"/path/to/verona/verona.asd")
+(ql:quickload :verona/swank)
+(swank:create-server :port 4005 :style :spawn :dont-close t)
+```
+
+Use a Swank backend with thread support (tested with SBCL). In Emacs, run
+`M-x slime-connect`, select localhost and port 4005, then send Verona requests
+with `slime-eval` or `slime-eval-async`. Standard Common Lisp Swank operations
+remain available for developing the compiler itself. Verona analysis uses only
+`verona.swank:rpc`; it does not execute application code or invoke a build.
+Editor presentation and verona-mode integration are separate from this adapter.
+
+The entry point is `(verona.swank:rpc operation &optional session arguments)`.
+`operation` is a keyword; `arguments` is a list of data arguments. Successful
+responses are `(:ok value)`. Rejected requests return
+`(:error (:code :invalid-request :message "..."))`. IDE request validation
+signals `verona.ide:request-error`, a subtype of `simple-error`; the adapter
+translates that condition and filesystem input errors. Unexpected implementation
+errors propagate to Swank's debugger rather than becoming compiler diagnostics.
+User compilation/configuration conditions raised before evaluation return
+`(:error (:code :compiler-diagnostic :diagnostic diagnostic-plist))`.
+Compiler failures during evaluation use the IDE's structured diagnostic and
+partial-result responses and leave the request in `:failed` status.
+
+```elisp
+(slime-eval '(verona.swank:rpc :capabilities))
+(setq verona-session
+      (cadr (slime-eval
+             '(verona.swank:rpc :create-session nil
+                                '(:root "/path/to/project/")))))
+(slime-eval `(verona.swank:rpc :open-buffer ,verona-session
+                             '("scratch" "(function answer () i64 42)")))
+(setq verona-request
+      (cadr (slime-eval
+             `(verona.swank:rpc :evaluate ,verona-session
+                                '((:buffer "scratch"))))))
+(slime-eval `(verona.swank:rpc :request-status ,verona-session
+                             '(,(plist-get verona-request :request))))
+```
+
+`:capabilities` works before attachment and reports `:protocol-version` (1),
+`:adapter-version`, supported operations, and features. Editors should check it
+before use. The operation set is:
+
+| Operations | Arguments after the session |
+| --- | --- |
+| `:create-session` | `make-configuration` keywords, with session `nil`; creates or reuses and attaches |
+| `:create-project-session` | Project root, then `discover-project-configuration` keywords; optional, see below |
+| `:attach-session`, `:detach-session` | Empty argument list |
+| `:configure-session` | Complete `make-configuration` keywords |
+| `:inspect-session`, `:reset-session`, `:close-session` | Empty argument list |
+| `:open-buffer`, `:edit-buffer`, `:save-buffer`, `:rename-buffer`, `:close-buffer`, `:read-source` | Corresponding IDE API arguments after store/session |
+| `:evaluate` | One canonical file path or unnamed source ID, e.g. `(:buffer "scratch")` |
+| `:request-status`, `:cancel-request` | One request token returned by `:evaluate` |
+| `:source-state`, `:module-state` | Source ID |
+| `:discover-modules`, `:list-modules`, `:inspect-module`, `:module-contents`, `:module-relationships`, `:dependency-graph`, `:dependency-cycles` | Corresponding IDE API arguments after store/session |
+| `:list-definitions`, `:find-definitions`, `:inspect-definition`, `:definition-type-structure`, `:definition-relationships` | Corresponding IDE API arguments after store/session |
+| `:position-context`, `:complete-names`, `:signature-help`, `:go-to-definition`, `:find-references`, `:related-definitions` | Corresponding IDE API arguments after store/session |
+| `:module-diagnostics`, `:project-diagnostics`, `:inspect-expansion`, `:type-at-position` | Corresponding IDE API arguments after store/session |
+
+Every operation except capabilities and session creation requires attachment to
+the supplied session. A connection may attach to several sessions. Sessions are
+identified by project configuration; selecting another target creates or attaches
+to its independent session. Configuring an existing session preserves its target
+identity, following the direct API. To use the build system's discovery defaults,
+load `verona/ide/project` in the Nix development environment. Capabilities then
+advertises `:create-project-session`; its arguments are, for example,
+`("/path/to/project/" :build-target "app" :overrides (:reader-features ("linux")))`.
+Without that optional LLVM-backed system, `:create-session` accepts explicit
+configuration and the same defaults as `make-configuration`.
+
+Transport values are lists/plists, keywords, booleans, numbers, and strings.
+Paths become namestrings, characters become one-character strings, and other
+symbols become names. Configuration and source records become plists; source
+records omit source text. Compiler objects remain server-side: the adapter uses
+the IDE's structured query representations, including source locations, types,
+and diagnostics, rather than printing or serializing compiler instances. Module,
+source, and definition IDs are opaque data: pass returned IDs back unchanged.
+Query revision metadata, completeness, pagination, expansion bounds, and stale
+location handling are preserved. Semantic query operations take full module
+identities from `:list-modules`, not just a filename or module name.
+`:dependency-cycles` packages its two IDE return values as
+`(:items cycles :completeness metadata)` so partial graph coverage is retained.
+
+Buffer updates, source discovery, and queries never evaluate or invalidate
+analysis. `:evaluate` captures the selected source through `begin-request`,
+immediately replaces its current state, starts a connection-independent worker,
+and returns `(:request "request-N" :session "session-N")`. The worker invokes
+`evaluate-request`, including required transitive dependencies. Poll
+`:request-status` for `:pending`, `:complete`, `:failed`, `:cancelled`, or `:stale`.
+It includes the request's source/configuration revisions and `:current-module`,
+the current module snapshot with active/completed/failed phases and diagnostics.
+That snapshot may belong to a newer request; its own revision metadata is
+authoritative. Historical request tokens retain status, never older products.
+Cancellation is cooperative; cancelled or superseded workers cannot publish.
+Queries remain available while workers process analysis.
+
+The Swank disconnect hook detaches that connection without cancelling workers
+or closing sessions. After reconnecting, use `:attach-session` with the original
+session ID and poll the original request token. This persistence is within the
+server process. Explicit reset/close releases request handles. Detached sessions
+follow the IDE's lifecycle policy: explicit `expire-sessions` maintenance on
+`verona.swank:*store*` may expire them; otherwise they remain until closed.
+Expired-session handles are pruned on subsequent RPCs. Builds and application
+execution remain explicit project operations outside this protocol.
+
+Run `make test-swank` for the optional adapter suite. Swank and FiveAM must be
+available through ASDF or Quicklisp; `VERONA_SWANK_ASD` may point to a particular
+Swank ASDF file. `make test` continues to test the compiler without loading Swank.

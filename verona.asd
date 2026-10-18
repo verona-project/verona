@@ -102,3 +102,12 @@
 (asdf:defsystem #:verona/ide/project
   :depends-on (#:verona/ide #:verona/compiler)
   :components ((:file "src/ide/project")))
+
+(asdf:defsystem #:verona/swank
+  :description "Optional Verona IDE RPC adapter for Swank"
+  :depends-on (#:verona/ide #:swank)
+  :components ((:file "src/ide/swank")))
+
+(asdf:defsystem #:verona/swank-tests
+  :depends-on (#:verona/swank #:verona/test-support)
+  :components ((:file "tests/swank")))

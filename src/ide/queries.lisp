@@ -40,7 +40,7 @@ Register identities without reading contents or evaluating modules."
 
 (defun require-query-module (s module)
   (or (find module (query-module-records s) :key #'first :test #'equal)
-      (error "Unknown module identity ~S" module)))
+      (reject-request "Unknown module identity ~S" module)))
 
 (defun query-summary (s record)
   (destructuring-bind (identity path source state) record
@@ -65,7 +65,7 @@ Register identities without reading contents or evaluating modules."
 
 (defun query-page (items offset limit)
   (unless (and (integerp offset) (>= offset 0) (integerp limit) (<= 1 limit 1000))
-    (error "OFFSET must be nonnegative and LIMIT must be between 1 and 1000"))
+    (reject-request "OFFSET must be nonnegative and LIMIT must be between 1 and 1000"))
   (let* ((total (length items)) (end (min total (+ offset limit))))
     (list :items (subseq items (min offset total) end) :total total
           :offset offset :limit limit :next-offset (and (< end total) end))))
@@ -133,7 +133,7 @@ Register identities without reading contents or evaluating modules."
 
 (defun module-contents (store id module &key (kind :declarations) name (offset 0) (limit 100))
   "Return paginated summaries of one current product, with phase availability."
-  (unless (member kind '(:declarations :imports :exports :macros :bindings)) (error "Unknown content kind"))
+  (unless (member kind '(:declarations :imports :exports :macros :bindings)) (reject-request "Unknown content kind"))
   (serialized (store)
     (let* ((s (require-session store id)) (record (require-query-module s module))
            (product (query-product (fourth record) kind)) (raw (getf product :value)))
@@ -159,7 +159,7 @@ Register identities without reading contents or evaluating modules."
 
 (defun module-relationships (store id module &key (direction :dependencies) transitive imports-only
                                                  (offset 0) (limit 100))
-  (unless (member direction '(:dependencies :dependents)) (error "Unknown direction"))
+  (unless (member direction '(:dependencies :dependents)) (reject-request "Unknown direction"))
   (serialized (store)
     (let ((s (require-session store id)))
       (require-query-module s module)

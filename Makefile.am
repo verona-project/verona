@@ -10,7 +10,7 @@ EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md \
 	editors/emacs/verona-mode.el flake.lock flake.nix license projects readme.md \
 	scripts src tests verona.asd
 
-.PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona
+.PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona test-swank
 
 help:
 	@printf '%s\n' 'Verona development commands:'
@@ -22,6 +22,7 @@ help:
 	@printf '%s\n' '  make test-llvm      Run LLVM backend integration tests'
 	@printf '%s\n' '  make test-compiler  Run compiler-driver, CLI, and build tests'
 	@printf '%s\n' '  make test-verona    Build and run the supplied Verona project smoke suite'
+	@printf '%s\n' '  make test-swank     Run optional Swank adapter integration tests'
 
 all-local: build
 
@@ -47,6 +48,10 @@ test: test-frontend test-llvm test-compiler test-verona
 
 test-frontend:
 	cd $(verona_srcdir) && $(SBCL) --script tests/run.lisp
+
+# Deliberately separate: the compiler test/build path never requires Swank.
+test-swank:
+	cd $(verona_srcdir) && $(SBCL) --script tests/run-swank.lisp
 
 test-llvm:
 	cd $(verona_srcdir) && $(SBCL) --script tests/run-llvm.lisp

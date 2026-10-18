@@ -1,6 +1,6 @@
 (defpackage #:verona.ide
   (:use #:cl)
-  (:export #:make-configuration #:configuration #:configuration-root
+  (:export #:request-error #:make-configuration #:configuration #:configuration-root
            #:configuration-build-file #:configuration-build-target
            #:configuration-search-paths #:configuration-package-locations
            #:configuration-target #:configuration-reader-features
@@ -25,6 +25,11 @@
            #:find-references #:related-definitions
            #:evaluate-module #:evaluate-request #:build-inputs #:record-dependencies #:dependency-graph #:dependency-cycles))
 (in-package #:verona.ide)
+
+(define-condition request-error (simple-error) ())
+(defun reject-request (control &rest arguments)
+  "Reject an invalid API request without disguising implementation failures."
+  (error 'request-error :format-control control :format-arguments arguments))
 
 (defstruct (configuration (:constructor %configuration))
   (root nil :read-only t) (build-file nil :read-only t)
@@ -105,7 +110,7 @@
   #-sb-thread `(progn ,@body))
 
 (defun require-session (store id)
-  (or (gethash id (session-store-sessions store)) (error "Unknown IDE session ~A" id)))
+  (or (gethash id (session-store-sessions store)) (reject-request "Unknown IDE session ~A" id)))
 (defun configuration-key (configuration)
   (loop for slot in '(root build-file build-target search-paths package-locations target reader-features)
         collect (slot-value configuration slot)))
@@ -136,19 +141,19 @@
     (let ((s (require-session store id)))
       (unless (equal (configuration-root configuration)
                      (configuration-root (session-configuration s)))
-        (error "A session cannot change project root"))
+        (reject-request "A session cannot change project root"))
       ;; Switching targets selects another session; configuring never destroys
       ;; the cached state belonging to the previously selected target.
       (unless (and (equal (configuration-target configuration)
                           (configuration-target (session-configuration s)))
                    (equal (configuration-build-target configuration)
                           (configuration-build-target (session-configuration s))))
-        (error "Select or create another session to switch build targets"))
+        (reject-request "Select or create another session to switch build targets"))
       (when (loop for other being the hash-values of (session-store-sessions store)
                   thereis (and (not (eq other s))
                                (equal (configuration-key configuration)
                                        (configuration-key (session-configuration other)))))
-        (error "This configuration already belongs to another session"))
+        (reject-request "This configuration already belongs to another session"))
       (unless (equal (configuration-key configuration)
                       (configuration-key (session-configuration s)))
         (invalidate-requests s)
@@ -206,12 +211,12 @@
            (key (if path (source-key s path) (list :buffer buffer))))
       (when (or (gethash buffer (session-buffers s))
                 (loop for value being the hash-values of (session-buffers s) thereis (equal value key)))
-        (error "Buffer or source already open"))
+        (reject-request "Buffer or source already open"))
       (setf (gethash buffer (session-buffers s)) key)
       (record-source s key (and path (pathname key)) module text))))
 (defun buffer-source (s buffer)
   (let ((key (gethash buffer (session-buffers s))))
-    (or (and key (gethash key (session-sources s))) (error "Unknown buffer ~A" buffer))))
+    (or (and key (gethash key (session-sources s))) (reject-request "Unknown buffer ~A" buffer))))
 (defun edit-buffer (store id buffer text)
   (serialized (store)
     (let* ((s (require-session store id)) (old (buffer-source s buffer)))
@@ -229,7 +234,7 @@
   (let* ((old (buffer-source s buffer)) (key (source-key s path)))
     (when (loop for b being the hash-keys of (session-buffers s) using (hash-value value)
                 thereis (and (not (equal b buffer)) (equal value key)))
-      (error "Destination already open"))
+      (reject-request "Destination already open"))
     (remhash (source-id old) (session-sources s))
     (setf (gethash buffer (session-buffers s)) key)
     (record-source s key (pathname key) (source-module old) (source-text old))))
@@ -241,9 +246,9 @@
   (serialized (store)
     (let* ((s (require-session store id)) (old (buffer-source s buffer))
            (destination (or path (source-path old))))
-      (unless destination (error "Saving an unnamed buffer requires a path"))
+      (unless destination (reject-request "Saving an unnamed buffer requires a path"))
       (unless (string= (uiop:read-file-string (source-key s destination)) (source-text old))
-        (error "Saved file differs from buffer"))
+        (reject-request "Saved file differs from buffer"))
       (if (equal (source-id old) (source-key s destination)) old
           (rename-buffer-in-session s buffer destination)))))
 (defun close-buffer (store id buffer)
@@ -278,9 +283,9 @@
   (serialized (store)
     (let ((s (require-session store id)))
       (unless (or parent (eq source (gethash (source-id source) (session-sources s))))
-        (error "Evaluation requires a source owned by this session"))
+        (reject-request "Evaluation requires a source owned by this session"))
       (if parent
-          (unless (current-request-state s parent) (error "Evaluation action is no longer current"))
+          (unless (current-request-state s parent) (reject-request "Evaluation action is no longer current"))
           (invalidate-requests s))
       (let* ((key (list (or (source-module source)
                            (and (source-path source) (pathname-name (source-path source)))
@@ -314,7 +319,7 @@
   (%begin-request store id source))
 
 (defun current-request-state (s request)
-  (unless (member request (session-requests s)) (error "Unknown request"))
+  (unless (member request (session-requests s)) (reject-request "Unknown request"))
   (when (and (eq :pending (request-status request))
              (= (request-generation request) (session-generation s)))
     (gethash (request-module-key request) (session-modules s))))
@@ -327,12 +332,12 @@ Partial products of a failed phase are retained and explicitly labelled incomple
       (unless state (return-from record-phase (request-status request)))
       (unless (and (member phase +module-phases+)
                    (eq phase (nth (length (module-evaluation-completed-phases state)) +module-phases+)))
-        (error "Phases must run in order, once each"))
+        (reject-request "Phases must run in order, once each"))
       (unless (and (listp products) (evenp (length products)))
-        (error "Products must be a property list"))
+        (reject-request "Products must be a property list"))
       (loop for key in products by #'cddr do
         (unless (member key (cdr (assoc phase +phase-products+)))
-          (error "Product ~S does not belong to ~S" key phase)))
+          (reject-request "Product ~S does not belong to ~S" key phase)))
       (setf (module-evaluation-status state) :processing
             (module-evaluation-phase state) phase)
       (loop for (key value) on products by #'cddr do
@@ -384,7 +389,7 @@ Partial products of a failed phase are retained and explicitly labelled incomple
       (when state
         (when (and (not failed) (module-evaluation-phase state)
                    (not (equal +module-phases+ (module-evaluation-completed-phases state))))
-          (error "Complete all reported phases before successful publication"))
+          (reject-request "Complete all reported phases before successful publication"))
         (setf (gethash (request-source-id request) (session-cache s))
               (%result :session-id id :value value
                        :source-id (copy-value (request-source-id request))
@@ -461,7 +466,7 @@ The build integration must discover transitive inputs and consume these values,
 not reread mutable files. Capturing a disk input never replaces an IDE overlay."
   (serialized (store)
     (let ((s (require-session store id)))
-      (unless (member unsaved-buffers '(:reject :ignore)) (error "Unknown buffer policy"))
+      (unless (member unsaved-buffers '(:reject :ignore)) (reject-request "Unknown buffer policy"))
       (when (eq unsaved-buffers :reject)
         (maphash (lambda (buffer key)
                    (declare (ignore buffer))
@@ -469,7 +474,7 @@ not reread mutable files. Capturing a disk input never replaces an IDE overlay."
                      (unless (and (source-path source) (probe-file (source-path source))
                                   (string= (source-text source)
                                            (uiop:read-file-string (source-path source))))
-                       (error "Build requires saved buffers or explicit :IGNORE policy"))))
+                       (reject-request "Build requires saved buffers or explicit :IGNORE policy"))))
                  (session-buffers s)))
       (let* ((keys (remove-duplicates
                     (append (mapcar (lambda (path) (source-key s path)) paths)

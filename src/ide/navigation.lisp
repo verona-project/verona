@@ -37,7 +37,7 @@
         :location (and (nav-exact-p s record) (query-data syntax))))
 
 (defun nav-context (s module offset)
-  (unless (and (integerp offset) (>= offset 0)) (error "OFFSET must be nonnegative"))
+  (unless (and (integerp offset) (>= offset 0)) (reject-request "OFFSET must be nonnegative"))
   (let* ((record (require-query-module s module)) (state (fourth record))
          (path (nav-path (getf (query-product state :syntax) :value) offset))
          (contexts (and state (module-evaluation-navigation-contexts state)))

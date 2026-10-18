@@ -11,8 +11,8 @@ OVERRIDES is a MAKE-CONFIGURATION keyword plist; explicit keys win."
                       (if build-target (verona.compiler:find-build-target file build-target)
                           (let ((targets (verona.compiler:build-file-targets file)))
                             (if (= 1 (length targets)) (first targets)
-                                (error "Select a project build target")))))))
-    (when (and build-target (null target)) (error "Unknown project build target"))
+                                (reject-request "Select a project build target")))))))
+    (when (and build-target (null target)) (reject-request "Unknown project build target"))
     (let* ((resolved (if target (verona.compiler::resolve-build-target target)
                          (verona.compiler:resolve-compilation-target)))
            (defaults (list :root root :build-file path
@@ -26,5 +26,5 @@ OVERRIDES is a MAKE-CONFIGURATION keyword plist; explicit keys win."
                                          :platform (verona.compiler:compilation-target-platform resolved)
                                          :pointer-width (verona.compiler:compilation-target-pointer-width resolved))
                            :reader-features (verona:target-feature-names resolved))))
-      (when (loop for key in overrides by #'cddr thereis (eq key :root)) (error "Project root cannot be overridden"))
+      (when (loop for key in overrides by #'cddr thereis (eq key :root)) (reject-request "Project root cannot be overridden"))
       (apply #'make-configuration (append overrides defaults)))))
