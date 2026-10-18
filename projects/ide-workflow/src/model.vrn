@@ -1,0 +1,12 @@
+(import leaf :as values)
+
+(macro identity (form) form)
+(generic echo (value))
+(implementation echo ((value i32)) i32 value)
+(protocol measure (a)
+  (measure ((value a)) i32))
+(implementation (measure i32)
+  (function measure ((value i32)) i32 value))
+
+(function answer () exit-code (values:answer))
+(export answer identity)

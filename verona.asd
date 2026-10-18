@@ -61,7 +61,8 @@
                (:file "tests/resolver-generics")
                (:file "tests/hardening")
                (:file "tests/modules")
-               (:file "tests/ide-session")))
+               (:file "tests/ide-session")
+               (:file "tests/ide-workflows")))
 
 ;; Retain the original system name for callers that use the front-end suite.
 (asdf:defsystem #:verona/tests

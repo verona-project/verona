@@ -33,6 +33,77 @@
         do (sleep 0.02)
         finally (error "Build timeout: ~S" (verona.ide:build-status store id token))))
 
+(test ide-representative-edit-evaluate-build-run-workflow
+  ;; Work on a disposable copy: acceptance fixtures must remain repeatable.
+  (with-ide-build-project (store id root)
+    (let* ((fixture (asdf:system-relative-pathname :verona "projects/ide-workflow/"))
+           (main (namestring (merge-pathnames "src/main.vrn" root)))
+           (leaf (merge-pathnames "src/leaf.vrn" root)))
+      (dolist (relative '("verona.build" "src/main.vrn" "src/model.vrn" "src/leaf.vrn"
+                          "src/unrelated.vrn" "src/broken.vrn"))
+        (ide-build-write (merge-pathnames relative root)
+                         (uiop:read-file-string (merge-pathnames relative fixture))))
+      (verona.ide:close-session store id)
+      (setf id (verona.ide:create-session store
+                 (verona.ide:make-configuration :root root
+                   :build-file (merge-pathnames "verona.build" root) :build-target "workflow"
+                   :search-paths (list (merge-pathnames "src/" root)))))
+      (verona.ide:open-buffer store id "main" (uiop:read-file-string main) :path main)
+      (verona.ide:open-buffer store id "leaf" (uiop:read-file-string leaf) :path leaf)
+      (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main))))
+      (verona.ide:edit-buffer store id "leaf" "(function answer () exit-code 9) (export answer)")
+      (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main))))
+      (let ((evaluated (verona.ide:module-state store id main)))
+        (signals verona.ide:request-error (verona.ide:start-build store id))
+        ;; Explicitly ignoring the overlay runs the saved 7, not evaluated 9.
+        (let* ((token (getf (verona.ide:start-build store id :unsaved-buffers :ignore) :build))
+               (built (wait-ide-build store id token)))
+          (is (eq :succeeded (getf built :status)))
+          (verona.ide:start-program store id token)
+          (is (= 7 (getf (wait-ide-build store id token :run t) :run-exit-status))))
+        ;; Saving does not replace analysis. IDE and CLI now both run 9.
+        (ide-build-write leaf "(function answer () exit-code 9) (export answer)")
+        (verona.ide:save-buffer store id "leaf")
+        (is (equalp evaluated (verona.ide:module-state store id main)))
+        (let* ((token (getf (verona.ide:start-build store id) :build))
+               (built (wait-ide-build store id token))
+               (cli (verona.compiler:execute-build
+                      (verona.compiler:parse-build-file (merge-pathnames "verona.build" root))
+                      (verona.compiler:make-build-invocation "workflow" (merge-pathnames "cli/" root)))))
+          (is (eq :succeeded (getf built :status)))
+          (verona.ide:start-program store id token)
+          (multiple-value-bind (out err code)
+              (uiop:run-program (list (namestring (verona.compiler:artifact-path cli)))
+                                :output :string :error-output :string :ignore-error-status t)
+            (is (equal '("" "" 9) (list out err code)))
+            (let ((run (wait-ide-build store id token :run t)))
+              (is (= code (getf run :run-exit-status)))
+              (is (equal out (getf (getf run :stdout) :text)))
+              (is (equal err (getf (getf run :stderr) :text)))))
+          (is (equalp evaluated (verona.ide:module-state store id main))))
+        ;; The other representative targets distinguish semantic and link failures.
+        (dolist (target '("analysis-failure" "link-failure"))
+          (let ((failure-session
+                  (verona.ide:create-session store
+                    (verona.ide:make-configuration :root root
+                      :build-file (merge-pathnames "verona.build" root) :build-target target
+                      :search-paths (list (merge-pathnames "src/" root))))))
+            (unwind-protect
+                 (let* ((source (merge-pathnames
+                                 (if (string= target "analysis-failure") "src/broken.vrn" "src/main.vrn") root))
+                        (request (verona.ide:evaluate-module store failure-session source))
+                        (token (getf (verona.ide:start-build store failure-session) :build))
+                        (failure (wait-ide-build store failure-session token)))
+                   (is (eq (if (string= target "analysis-failure") :failed :complete)
+                           (verona.ide:request-status request)))
+                   (is (eq :failed (getf failure :status)))
+                   (is (null (getf failure :artifact)))
+                   (is (not (null (getf failure :diagnostics))))
+                   (signals verona.ide:request-error
+                     (verona.ide:start-program store failure-session token)))
+              (verona.ide:close-session store failure-session))))
+        (is (equalp evaluated (verona.ide:module-state store id main)))))))
+
 (test ide-build-saved-snapshot-and-analysis-isolation
   (with-ide-build-project (store id root)
     (let* ((main (namestring (merge-pathnames "src/main.vrn" root)))

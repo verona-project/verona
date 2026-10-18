@@ -1,0 +1,18 @@
+(executable workflow
+  (root main)
+  (module-path "src"))
+
+(static-library workflow-library
+  (root model)
+  (module-path "src"))
+
+;; Deliberate semantic failure, separate from the runnable target.
+(executable analysis-failure
+  (root broken)
+  (module-path "src"))
+
+;; Analysis succeeds; the native linker must reject this missing library.
+(executable link-failure
+  (root main)
+  (module-path "src")
+  (library "verona_missing_library_for_workflow_test"))

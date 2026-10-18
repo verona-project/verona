@@ -123,6 +123,11 @@ Run the editor regression tests with:
 emacs -Q --batch -L editors/emacs -l tests/editor.el -f ert-run-tests-batch-and-exit
 ```
 
+For combined compiler/server/editor verification, use `make test-workflows`
+(`EMACS=/absolute/path/to/emacs` is supported). The repeatable connected-editor
+acceptance walkthrough and coverage map are in
+[`docs/IDE-WORKFLOWS.md`](../../docs/IDE-WORKFLOWS.md).
+
 If imported modules are missing, inspect `verona-ide-project-diagnostics` and
 `verona-ide-session`. The module browser lists known source/evaluation records,
 not every import or package name. For `projects/calculator-repl`, successful

@@ -30,6 +30,67 @@
        (should (eq published 'new))))))
 (ert-deftest verona-editor-stale-locations-withheld ()
   (should-not (verona-ide--location '(:exact-p nil :evaluated-location (:source "old" :line 1)))))
+
+(ert-deftest verona-editor-xref-definitions-and-references-stay-query-only ()
+  (let ((path (make-temp-file "verona-xref-" nil ".vrn")))
+    (unwind-protect
+        (verona-test-buffer
+         (let* ((item (list :id "definition" :name "answer" :exact-p t
+                            :location (list :source path :line 2 :column 3 :offset 4)))
+                (data (list :items (list item) :complete-p nil)) operations shown)
+           (cl-letf (((symbol-function 'verona-ide--query)
+                      (lambda (operation _arguments callback)
+                        (push operation operations) (funcall callback data)))
+                     ((symbol-function 'xref-show-xrefs)
+                      (lambda (fetcher &rest _) (setq shown (funcall fetcher)))))
+             (xref-backend-definitions 'verona "0")
+             (should (equal operations '(:go-to-definition)))
+             (should (equal (xref-item-summary (car shown)) "answer"))
+             (let ((location (xref-item-location (car shown))))
+               (should (equal (xref-file-location-file location) path))
+               (should (= (xref-file-location-line location) 2))
+               (should (= (xref-file-location-column location) 2)))
+             (setq operations nil shown nil)
+             (xref-backend-references 'verona "0")
+             (should (equal (reverse operations) '(:go-to-definition :find-references)))
+             (should (= (length shown) 1))
+             (setf (plist-get item :exact-p) nil)
+             (should-not (verona-ide--xrefs data)))))
+      (delete-file path))))
+
+(ert-deftest verona-editor-navigation-withholds-edited-target-buffer ()
+  (verona-test-buffer
+   (insert "saved")
+   (setq verona-ide-mode t verona-ide--path "/target.vrn" verona-ide--text "saved")
+   (let ((item '(:exact-p t :location (:source "/target.vrn" :line 1 :column 1 :offset 0))))
+     (should (verona-ide--location item))
+     (insert " changed")
+     ;; Even an exact server result is unsafe if its target buffer has changed.
+     (should-not (verona-ide--location item)))))
+
+(ert-deftest verona-editor-inspection-keeps-metadata-and-paginates ()
+  (verona-test-buffer
+   (let (calls)
+     (unwind-protect
+         (cl-letf (((symbol-function 'display-buffer) #'ignore)
+                   ((symbol-function 'verona-ide--query)
+                    (lambda (operation arguments callback)
+                      (push (list operation arguments) calls)
+                      (funcall callback
+                               '(:availability :partial :complete-p nil :truncated t
+                                 :next-offset 2 :items ((:id "definition" :kind :function :name "answer")))))))
+           (verona-ide--view "Acceptance" :list-definitions '(:limit 2))
+           (with-current-buffer "*Verona Acceptance*"
+             (should (derived-mode-p 'special-mode))
+             (should (string-match-p ":availability :partial" (buffer-string)))
+             (should (string-match-p ":truncated t" (buffer-string)))
+             (goto-char (point-min))
+             (search-forward "Inspect answer")
+             (should (button-at (1- (point))))
+             (search-forward "Next page")
+             (button-activate (button-at (1- (point)))))
+           (should (equal (car calls) '(:list-definitions (:limit 2 :offset 2)))))
+       (when (get-buffer "*Verona Acceptance*") (kill-buffer "*Verona Acceptance*"))))))
 (ert-deftest verona-editor-overlay-does-not-evaluate ()
   (verona-test-buffer
    (setq verona-ide--source nil)

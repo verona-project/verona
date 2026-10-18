@@ -6,7 +6,7 @@ export VERONA_LINKER VERONA_AR
 
 verona_srcdir = $(shell cd $(top_srcdir) && pwd -P)
 verona_lisp_files = $(shell find $(verona_srcdir)/src -type f -name '*.lisp' -print)
-EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md \
+EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/IDE-WORKFLOWS.md \
 	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/README.md flake.lock flake.nix license projects readme.md \
 	scripts src tests verona.asd
 
@@ -23,6 +23,8 @@ help:
 	@printf '%s\n' '  make test-compiler  Run compiler-driver, CLI, and build tests'
 	@printf '%s\n' '  make test-verona    Build and run the supplied Verona project smoke suite'
 	@printf '%s\n' '  make test-swank     Run optional Swank adapter integration tests'
+	@printf '%s\n' '  make test-editor    Run optional Emacs integration tests'
+	@printf '%s\n' '  make test-workflows Run all compiler, Swank and editor acceptance tests'
 
 all-local: build
 
@@ -68,6 +70,11 @@ clean-local:
 	$(RM) $(VERONA_EXECUTABLE)
 
 # Optional editor tests; Emacs and SLIME are not compiler dependencies.
-.PHONY: test-editor
+.PHONY: test-editor test-workflows
+EMACS = emacs
+
+# Explicit opt-in: ordinary compiler tests do not require Swank or Emacs.
+test-workflows: test test-swank test-editor
+
 test-editor:
-	cd $(verona_srcdir) && emacs -Q --batch -L editors/emacs -l tests/editor.el -f ert-run-tests-batch-and-exit
+	cd $(verona_srcdir) && $(EMACS) -Q --batch -L editors/emacs -l tests/editor.el -f ert-run-tests-batch-and-exit
