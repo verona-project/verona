@@ -16,8 +16,15 @@
 (declare-function slime-current-connection "slime")
 (declare-function slime-eval-async "slime")
 (defgroup verona-ide nil "Verona analysis." :group 'verona)
-(defcustom verona-ide-build-command nil "Explicit project build shell command." :type '(choice (const nil) string))
-(defcustom verona-ide-run-command nil "Explicit project run shell command." :type '(choice (const nil) string))
+(defcustom verona-ide-program-arguments nil "Built program arguments." :type '(repeat string))
+(defcustom verona-ide-program-directory nil "Working directory; nil uses project root." :type '(choice (const nil) directory))
+(defcustom verona-ide-program-environment nil "Environment overrides as NAME=value." :type '(repeat string))
+(defvar-local verona-ide--build nil)
+(defvar-local verona-ide--build-timer nil)
+(defvar-local verona-ide--build-offset 0)
+(defvar-local verona-ide--build-error-offset 0)
+(defvar-local verona-ide--build-run nil)
+(defvar-local verona-ide--build-options nil)
 (defvar verona-ide-mode)
 (defvar-local verona-ide--session nil)
 (defvar-local verona-ide--connection nil)
@@ -579,12 +586,112 @@ Application code is not executed."
   (verona-ide--view "Type" :type-at-position (list verona-ide--module (verona-ide--offset))))
 (defun verona-ide-project-diagnostics () (interactive)
   (verona-ide--view "Project diagnostics" :project-diagnostics '(:limit 100)))
-(defun verona-ide-build () (interactive)
-  (unless verona-ide-build-command (user-error "Set verona-ide-build-command first"))
-  (let ((default-directory verona-ide--root)) (compile verona-ide-build-command)))
-(defun verona-ide-run () (interactive)
-  (unless verona-ide-run-command (user-error "Set verona-ide-run-command first"))
-  (let ((default-directory verona-ide--root)) (async-shell-command verona-ide-run-command "*Verona run*")))
+(defun verona-ide--prepare-build (save run)
+  (unless (memq :start-build verona-ide--operations)
+    (user-error "Load verona/ide/project on the server to enable builds"))
+  (let* ((root verona-ide--root)
+         (session verona-ide--session)
+         (predicate (lambda ()
+                      (or (and buffer-file-name (file-in-directory-p buffer-file-name root))
+                          (and (derived-mode-p 'verona-mode)
+                               (equal verona-ide--session session)))))
+         (options (list :arguments verona-ide-program-arguments
+                        :directory verona-ide-program-directory
+                        :environment verona-ide-program-environment)))
+    (save-some-buffers save predicate)
+    (let ((modified (cl-loop for buffer in (buffer-list)
+                             when (with-current-buffer buffer (and (funcall predicate) (buffer-modified-p)))
+                             collect (buffer-name buffer))))
+      (when (and modified
+                 (not (yes-or-no-p (format "Build saved files, omitting unsaved changes in %s? "
+                                          (mapconcat #'identity modified ", ")))))
+        (user-error "Build cancelled; save project buffers first")))
+    (verona-ide--sync-project
+     (lambda ()
+       (verona-ide--rpc :start-build '(:unsaved-buffers :ignore)
+        (lambda (data)
+          (let ((session verona-ide--session) (connection verona-ide--connection)
+                (operations verona-ide--operations)
+                (buffer (generate-new-buffer "*Verona build*")))
+            (with-current-buffer buffer
+              (compilation-mode)
+              (setq-local default-directory root
+                          verona-ide--root root verona-ide--session session
+                          verona-ide--connection connection verona-ide--operations operations
+                          verona-ide--build (plist-get data :build)
+                          verona-ide--build-run run verona-ide--build-options options)
+              (verona-ide--build-append "Verona project build (saved-file snapshot)\n")
+              (verona-ide--poll-build))
+            (display-buffer buffer))))))))
+
+(defun verona-ide--build-append (text)
+  (let ((inhibit-read-only t)) (goto-char (point-max)) (insert text)))
+
+(defun verona-ide--poll-build ()
+  (verona-ide--rpc :build-status
+   (list verona-ide--build :offset verona-ide--build-offset :error-offset verona-ide--build-error-offset)
+   (lambda (data)
+     (dolist (key '(:stdout :stderr))
+       (verona-ide--build-append (or (plist-get (plist-get data key) :text) "")))
+     (setq verona-ide--build-offset (plist-get (plist-get data :stdout) :next-offset)
+           verona-ide--build-error-offset (plist-get (plist-get data :stderr) :next-offset))
+     (let ((status (plist-get data :status)) (run-status (plist-get data :run-status)))
+       (setq mode-line-process (format " %s/%s" status run-status))
+       (cond
+        ((or (eq status :building) (eq run-status :running)
+             (plist-get (plist-get data :stdout) :truncated)
+             (plist-get (plist-get data :stderr) :truncated))
+         (let ((buffer (current-buffer)))
+           (setq verona-ide--build-timer
+                 (run-at-time 0.3 nil (lambda () (when (buffer-live-p buffer)
+                                                  (with-current-buffer buffer (verona-ide--poll-build))))))))
+        ((and (eq status :succeeded) verona-ide--build-run (eq run-status :not-started))
+         (setq verona-ide--build-run nil)
+         (verona-ide--build-append (format "\nArtifact: %s\nStarting program\n" (plist-get data :artifact)))
+         (verona-ide--rpc :start-program (cons verona-ide--build verona-ide--build-options)
+          (lambda (_)
+            (setq verona-ide--build-offset 0 verona-ide--build-error-offset 0)
+            (verona-ide--poll-build))))
+        (t
+         (verona-ide--build-append
+          (format "\nBuild: %s; artifact: %s; program: %s; exit: %s\n"
+                  status (or (plist-get data :artifact) "none") run-status (plist-get data :run-exit-status)))
+         (dolist (diagnostic (plist-get data :diagnostics))
+           (let ((location (plist-get (plist-get diagnostic :location) :start)))
+             (verona-ide--build-append
+              (if location
+                  (format "%s:%s:%s: %s\n" (plist-get location :source) (plist-get location :line)
+                          (plist-get location :column) (plist-get diagnostic :message))
+                (format "%s\n" (plist-get diagnostic :message))))))))))))
+
+(defun verona-ide-build ()
+  "Offer to save project buffers, then build saved files using the session target."
+  (interactive) (verona-ide--prepare-build nil nil))
+(defun verona-ide-run ()
+  "Offer to save and build; run only the successful executable artifact."
+  (interactive) (verona-ide--prepare-build nil t))
+(defun verona-ide-save-and-build ()
+  "Save project buffers and build the session target."
+  (interactive) (verona-ide--prepare-build t nil))
+(defun verona-ide-save-build-and-run ()
+  "Save project buffers, build, and run after success."
+  (interactive) (verona-ide--prepare-build t t))
+(defun verona-ide-stop-build ()
+  "Cancel the build shown in this build-results buffer."
+  (interactive) (verona-ide--rpc :cancel-build (list verona-ide--build) #'ignore))
+(defun verona-ide-stop-program ()
+  "Stop the program shown in this build-results buffer."
+  (interactive) (verona-ide--rpc :stop-program (list verona-ide--build) #'ignore))
+(defun verona-ide-program-input (text &optional eof)
+  "Send TEXT to the program; with prefix, close its input afterward."
+  (interactive (list (concat (read-string "Program input: ") "\n") current-prefix-arg))
+  (verona-ide--rpc :program-input (list verona-ide--build text :eof (and eof t)) #'ignore))
+(defun verona-ide-release-build ()
+  "Stop processes and delete this build's snapshot and artifacts."
+  (interactive)
+  (verona-ide--rpc :release-build (list verona-ide--build)
+   (lambda (_) (when (timerp verona-ide--build-timer) (cancel-timer verona-ide--build-timer))
+     (setq verona-ide--build nil) (verona-ide--build-append "\nBuild resources released\n"))))
 
 ;;;###autoload
 (define-minor-mode verona-ide-mode

@@ -10,6 +10,8 @@
 (defvar *requests* (make-hash-table :test 'equal))
 (defvar *next-request* 0)
 (defvar *lock* (swank/backend:make-lock :name "Verona RPC"))
+(defparameter *build-operations*
+  '(:start-build :build-status :cancel-build :start-program :program-input :stop-program :release-build))
 
 (defparameter *queries*
   '(:inspect-session :reset-session :close-session
@@ -168,7 +170,8 @@
     (:capabilities
      (list :protocol-version 1 :adapter-version "0.1.0"
            :features '(:asynchronous-evaluation :reconnect :explicit-evaluation :cached-queries)
-           :operations (append (when (fboundp 'verona.ide::discover-project-configuration)
+           :operations (append (when (fboundp 'verona.ide::start-build) *build-operations*)
+                               (when (fboundp 'verona.ide::discover-project-configuration)
                                  '(:inspect-project :create-project-session))
                                '(:capabilities :create-session :attach-session :detach-session
                                  :configure-session :evaluate :request-status :cancel-request)
@@ -206,6 +209,9 @@
           (verona.ide:cancel-request *store* id (second (request-entry id (first arguments)))))
         (request-info id (first arguments)))
        (otherwise
+        (when (and (member operation *build-operations*) (fboundp 'verona.ide::start-build))
+          (return-from dispatch
+            (apply #'ide-call (find-symbol (symbol-name operation) :verona.ide) *store* id arguments)))
         (unless (member operation *queries*) (invalid "Unknown operation ~S" operation))
         (when (eq operation :dependency-cycles)
           (return-from dispatch

@@ -89,11 +89,33 @@ retained request polling. Closing individual source buffers leaves the project
 context available. If the server was restarted, close the remembered project
 and open it again to create a session on the new server.
 
-Set `verona-ide-build-command` and `verona-ide-run-command` to explicit shell
-commands for the project. `verona-ide-build` uses a compilation buffer;
-`verona-ide-run` uses a separate process buffer. These commands operate in the
-selected project root, use files on disk, and do not run implicitly. Server-side
-snapshot builds remain part of the later project-build integration plan.
+Load `verona/ide/project` in the server's Nix environment to enable project
+build operations. Workers need the same `sbcl`, `VERONA_CL_LLVM`, linker and
+library environment as command-line builds. `VERONA_IDE_SBCL` can select the
+worker's SBCL executable.
+
+- `verona-ide-build` offers to save modified project buffers, then builds the
+  selected target from a private snapshot of saved sources.
+- `verona-ide-run` builds first and runs only its successful host executable.
+- `verona-ide-save-and-build` and `verona-ide-save-build-and-run` save project
+  buffers before performing those operations.
+
+If modified buffers remain, the editor names them and asks whether to build
+saved files while omitting their unsaved changes. Saving and synchronizing these
+buffers never evaluate modules. Configure `verona-ide-program-arguments`,
+`verona-ide-program-directory`, and `verona-ide-program-environment` for program
+execution. Arguments are literal strings; environment entries are `NAME=value`.
+
+Each operation creates a separate `*Verona build*` compilation buffer showing
+stages, output, source-linked build diagnostics, the artifact and program exit
+status. Analysis diagnostics and evaluation state remain available unchanged.
+In that build buffer, use `verona-ide-stop-build`, `verona-ide-stop-program`, or
+`verona-ide-program-input` (prefix argument closes standard input afterward).
+`verona-ide-release-build` stops processes and deletes that build's snapshot and
+artifacts. Closing a view leaves the job available on the server; session close
+or expiry releases all of its builds. Results can also be polled through the
+server's `:build-status` operation using the build token. These commands replace
+the former configurable shell build/run commands.
 
 Run the editor regression tests with:
 

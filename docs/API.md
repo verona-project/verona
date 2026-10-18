@@ -833,9 +833,69 @@ Its `:paths` argument includes inputs not yet opened or read by the IDE. Repeate
 captures of unchanged files retain their revisions. Build inputs use a separate
 registry and never replace analysis overlays or trigger evaluation. Unsaved
 buffers are rejected unless the caller explicitly selects
-`:unsaved-buffers :ignore`. The later build integration must discover transitive
-inputs and compile these captured contents. IDE evaluation never runs
+`:unsaved-buffers :ignore`. Project builds capture the configured module search
+paths, including transitive sources, and compile private copies of these contents. IDE evaluation never runs
 application code or writes build artifacts; it may evaluate compile-time macros.
+
+### Explicit project builds and execution
+
+Load `verona/ide/project` in an SBCL server with the same Nix toolchain environment
+used for CLI builds. Workers use `sbcl` from `PATH` (override its executable with
+`VERONA_IDE_SBCL`) and inherit `VERONA_CL_LLVM`, linker and package settings.
+`verona/ide` and `verona/swank` remain usable without LLVM or build support.
+
+These functions take a session store and session ID first. When project support
+is loaded, Swank advertises matching keyword operations; RPC arguments omit the
+store and session ID. Connections must attach before using them.
+
+| Operation | Remaining arguments | Behavior |
+| --- | --- | --- |
+| `start-build` | `&key (unsaved-buffers :reject)` | Return `:build` token and `:building` status. |
+| `build-status` | token, `&key (offset 0) (error-offset 0) (limit 16384) output` | Poll stage, status, diagnostics, artifact and bounded stdout/stderr. |
+| `cancel-build` | token | Terminate the compiler process group; mark an active build cancelled. |
+| `start-program` | token, `&key arguments directory environment` | Run this successful host executable, with argument strings, working directory and `NAME=value` environment overrides. |
+| `program-input` | token, text, `&key eof` | Write and flush standard input, optionally closing it. |
+| `stop-program` | token | Stop the program and close its input. |
+| `release-build` | token | Stop owned processes and delete this build's snapshot, logs and artifacts. |
+
+Builds use the session's selected target, effective module paths, target triple
+and reader features, plus the captured build file's optimization and native
+library options. Each invocation parses saved build metadata and captures saved
+`.vrn` files in the ordered module search directories before launching. The
+compiler's existing dependency loader, native compiler and linker consume these
+copies through `execute-build`; evaluated IDE products never substitute for
+build inputs. The snapshot is a sequential file capture, not a filesystem-wide
+atomic transaction. Native libraries and toolchain executables remain external
+inputs. Unsaved overlays require explicit `:ignore`; the editor offers saves and
+names any remaining modified project buffers before requesting this policy.
+
+A fresh compiler process reports `:compiling`, `:emitting`, and `:linking` stages.
+Build status becomes `:succeeded`, `:failed`, or `:cancelled`; only success exposes
+`:artifact`, `:artifact-kind`, and the actual `:artifact-target` triple. Artifacts
+live in a unique build-owned temporary directory, so failed builds cannot reuse
+an older output. Metadata includes the selected target, effective configuration
+and its revision, saved build file text, source IDs/paths/revisions and
+`:input-coverage :search-path-snapshot` (all captured search-path sources, not
+only imported modules). Source snapshots and results persist until release or
+session close/expiry. Resetting analysis preserves build jobs.
+
+`:diagnostics` contains compiler diagnostics with original saved-file locations;
+raw tool output, including unlocated linker output, remains in stdout/stderr.
+These locations describe the captured files and may differ from later edits.
+Each output stream returns `:text`, `:next-offset`, and `:truncated`; pass the
+returned offsets to fetch more. `:limit` is 1–65536 characters per stream.
+`:output :build` and `:output :program` select retained logs explicitly; the
+default selects program logs once execution has started. Build `:exit-status`
+and program `:run-exit-status` are separate. Program status is `:not-started`,
+`:running`, `:exited`, or `:stopped`. A program can be started again after exit.
+
+Execution requires a succeeded executable whose emitted target triple exactly
+matches the host triple. Cross-target compilation and library builds use the
+ordinary driver; incompatible executables and libraries cannot be run.
+Arguments are passed directly without shell interpretation. Working directory
+defaults to the project root; environment overrides extend inherited settings.
+Saving, building and running preserve module states and analysis diagnostics.
+Build logs are presented separately in Emacs compilation buffers.
 
 ### IDE dependency graph
 
@@ -1297,8 +1357,9 @@ session ID and poll the original request token. This persistence is within the
 server process. Explicit reset/close releases request handles. Detached sessions
 follow the IDE's lifecycle policy: explicit `expire-sessions` maintenance on
 `verona.swank:*store*` may expire them; otherwise they remain until closed.
-Expired-session handles are pruned on subsequent RPCs. Builds and application
-execution remain explicit project operations outside this protocol.
+Expired-session handles are pruned on subsequent RPCs. Loading `verona/ide/project`
+adds the explicit build and program operations described below; analysis operations
+never compile or execute application code.
 
 Run `make test-swank` for the optional adapter suite. Swank and FiveAM must be
 available through ASDF or Quicklisp; `VERONA_SWANK_ASD` may point to a particular

@@ -457,3 +457,63 @@
                (should (string-match-p "stdio:getchar" (buffer-string)))
                (should (string-match-p "stdio:putchar" (buffer-string)))))
          (when (get-buffer "*Completions*") (kill-buffer "*Completions*")))))))
+
+(ert-deftest verona-editor-save-build-commands-remain-explicit ()
+  (let (calls)
+    (cl-letf (((symbol-function 'verona-ide--prepare-build)
+               (lambda (save run) (push (list save run) calls))))
+      (verona-ide-build) (verona-ide-run)
+      (verona-ide-save-and-build) (verona-ide-save-build-and-run))
+    (should (equal (reverse calls) '((nil nil) (nil t) (t nil) (t t))))))
+
+(ert-deftest verona-editor-unsaved-build-decline-never-submits ()
+  (verona-test-buffer
+   (let* ((root (make-temp-file "verona-build-editor" t))
+          (buffer-file-name (expand-file-name "main.vrn" root))
+          (verona-ide--root root) (verona-ide--operations '(:start-build)) submitted)
+     (unwind-protect
+         (progn
+           (insert "unsaved")
+           (cl-letf (((symbol-function 'save-some-buffers) #'ignore)
+                     ((symbol-function 'yes-or-no-p) (lambda (_) nil))
+                     ((symbol-function 'verona-ide--sync-project) (lambda (_) (setq submitted t))))
+             (should-error (verona-ide-build) :type 'user-error)
+             (should-not submitted)))
+       (delete-directory root)))))
+
+(ert-deftest verona-editor-build-run-launches-only-after-success ()
+  (dolist (status '(:failed :cancelled :succeeded))
+    (verona-test-buffer
+     (let ((verona-ide--build "build") (verona-ide--build-run t) operations)
+       (cl-letf (((symbol-function 'verona-ide--build-append) #'ignore)
+                 ((symbol-function 'verona-ide--rpc)
+                  (lambda (op _args callback &rest _)
+                    (push op operations)
+                    (when (eq op :build-status)
+                      (funcall callback (list :status status :run-status :not-started
+                                              :stdout '(:text "" :next-offset 0)
+                                              :stderr '(:text "" :next-offset 0)))))))
+         (verona-ide--poll-build)
+         (should (eq (and (memq :start-program operations) t) (eq status :succeeded))))))))
+
+(ert-deftest verona-editor-build-controls-use-build-token ()
+  (verona-test-buffer
+   (let ((verona-ide--build "build-token") calls)
+     (cl-letf (((symbol-function 'verona-ide--rpc)
+                (lambda (op args _callback &rest _) (push (cons op args) calls))))
+       (verona-ide-stop-build) (verona-ide-stop-program) (verona-ide-program-input "hello" t))
+     (should (equal (reverse calls) '((:cancel-build "build-token") (:stop-program "build-token")
+                                     (:program-input "build-token" "hello" :eof t)))))))
+
+(ert-deftest verona-editor-save-build-submits-without-evaluation ()
+  (verona-test-buffer
+   (let ((verona-ide--root temporary-file-directory)
+         (verona-ide--operations '(:start-build)) saved calls)
+     (set-buffer-modified-p nil)
+     (cl-letf (((symbol-function 'save-some-buffers) (lambda (all _predicate) (setq saved all)))
+               ((symbol-function 'verona-ide--sync-project) (lambda (done) (funcall done)))
+               ((symbol-function 'verona-ide--rpc)
+                (lambda (op args _callback &rest _) (push (cons op args) calls))))
+       (verona-ide-save-and-build))
+     (should saved)
+     (should (equal calls '((:start-build :unsaved-buffers :ignore)))))))

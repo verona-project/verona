@@ -1,0 +1,22 @@
+;; Reproduce a server that allocated stores and compiled accessors before
+;; loading the current IDE. Its original structure layout must remain valid.
+(require :asdf)
+(defpackage #:verona.ide (:use #:cl))
+(in-package #:verona.ide)
+(defstruct (session-store (:constructor make-session-store ()))
+  (sessions (make-hash-table :test 'equal)) (next-id 0)
+  #+sb-thread (lock (sb-thread:make-mutex :name "IDE sessions")))
+(defvar *old-store* (make-session-store))
+(defvar *old-lock* (session-store-lock *old-store*))
+(defun old-store-lock (store) (session-store-lock store))
+(setf (gethash "retained" (session-store-sessions *old-store*)) :retained)
+(asdf:load-asd (merge-pathnames "../verona.asd"
+                                (uiop:pathname-directory-pathname *load-truename*)))
+(asdf:load-system :verona/ide)
+(assert (eq *old-lock* (old-store-lock *old-store*)))
+(assert (eq *old-lock* (session-store-lock *old-store*)))
+(assert (equal "retained" (find-session *old-store* "retained")))
+(remhash "retained" (session-store-sessions *old-store*))
+(let ((id (create-session *old-store* (make-configuration))))
+  (assert (find-session *old-store* id))
+  (close-session *old-store* id))

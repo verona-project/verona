@@ -1460,3 +1460,11 @@
         (is (= 1 (length (getf first :steps))))
         (is (= 1 (length (getf second :steps))))
         (is (equal '("do" 1 2) (second (fourth (getf whole :after)))))))))
+
+(test ide-session-store-survives-loading-into-a-running-server
+  (multiple-value-bind (out err code)
+      (uiop:run-program
+       (list "sbcl" "--script"
+             (namestring (asdf:system-relative-pathname :verona "tests/ide-store-reload.lisp")))
+       :output :string :error-output :string :ignore-error-status t)
+    (is (eql 0 code) "Live-store reload failed:~%~A~%~A" out err)))

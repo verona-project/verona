@@ -282,3 +282,26 @@
                (is (search "No verona.build" (getf (second reply) :message))))))
       (if old-inspect (setf (symbol-function inspect-symbol) old-inspect) (fmakunbound inspect-symbol))
       (if old-discover (setf (symbol-function discover-symbol) old-discover) (fmakunbound discover-symbol)))))
+
+(test swank-build-capabilities-and-dispatch
+  ;; Keep this suite usable without loading LLVM; exercise the thin adapter.
+  (let* ((symbol 'verona.ide::start-build)
+         (old (and (fboundp symbol) (symbol-function symbol))))
+    (unwind-protect
+         (progn
+           (setf (symbol-function symbol)
+                 (lambda (store id &key (unsaved-buffers :reject))
+                   (verona.ide:inspect-session store id)
+                   (unless (member unsaved-buffers '(:reject :ignore))
+                     (verona.ide::reject-request "Unknown buffer policy"))
+                   (list :build "build-token" :status :building :policy unsaved-buffers)))
+           (with-swank-test
+             (is (member :start-build (getf (rpc-value :capabilities) :operations)))
+             (let ((id (rpc-value :create-session nil '(:root "/tmp/"))))
+               (is (equal "build-token" (getf (rpc-value :start-build id) :build)))
+               (is (eq :ignore (getf (rpc-value :start-build id '(:unsaved-buffers :ignore)) :policy)))
+               (is (eq :error (first (verona.swank:rpc :start-build id '(:unsaved-buffers :bad)))))
+               (is (eq :error (first (verona.swank:rpc :start-build id '(:unknown t)))))
+               (rpc-value :detach-session id)
+               (is (eq :error (first (verona.swank:rpc :start-build id)))))))
+      (if old (setf (symbol-function symbol) old) (fmakunbound symbol)))))

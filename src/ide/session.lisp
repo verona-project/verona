@@ -109,6 +109,8 @@
   #+sb-thread `(sb-thread:with-mutex ((session-store-lock ,store)) ,@body)
   #-sb-thread `(progn ,@body))
 
+(defvar *session-close-hooks* nil)
+
 (defun require-session (store id)
   (or (gethash id (session-store-sessions store)) (reject-request "Unknown IDE session ~A" id)))
 (defun configuration-key (configuration)
@@ -174,6 +176,7 @@
     (let ((s (require-session store id)))
       (invalidate-requests s)
       (setf (session-closed s) t)
+      (dolist (hook *session-close-hooks*) (funcall hook store id))
       (remhash id (session-store-sessions store)) t)))
 (defun attach-session (store id connection)
   (serialized (store)
@@ -191,7 +194,9 @@
                  (when (and (null (session-connections s))
                             (>= (- now (session-detached-at s)) max-idle-seconds))
                    (invalidate-requests s) (push id expired))) (session-store-sessions store))
-      (dolist (id expired) (remhash id (session-store-sessions store))) expired)))
+      (dolist (id expired)
+        (dolist (hook *session-close-hooks*) (funcall hook store id))
+        (remhash id (session-store-sessions store))) expired)))
 
 (defun source-key (s path)
   (namestring (canonical-path path (configuration-root (session-configuration s)))))

@@ -1,5 +1,11 @@
 (in-package #:verona.compiler)
 
+;; Optional observation only; CLI and IDE use the same compilation pipeline.
+(defvar *build-stage-observer* nil)
+(defvar *tool-output-observer* nil)
+(defun report-build-stage (stage)
+  (when *build-stage-observer* (funcall *build-stage-observer* stage)))
+
 ;;; The driver owns orchestration only.  Frontend analysis remains in VERONA,
 ;;; LLVM lowering remains in VERONA.BACKEND.LLVM, and native commands live in
 ;;; the Toolchain protocol below.
@@ -181,6 +187,7 @@ explicit #+/#- conditions without changing LLVM's CPU FEATURES."
   (multiple-value-bind (stdout stderr status)
       (uiop:run-program (cons tool arguments) :output :string :error-output :string
                          :ignore-error-status t)
+    (when *tool-output-observer* (funcall *tool-output-observer* stdout stderr))
     (unless (zerop status)
       (error failure-class :message (format nil "~A failed" tool) :tool tool
              :executable tool :arguments arguments :exit-status status
@@ -289,8 +296,9 @@ in-memory LLVM module, verification, object emission, and toolchain handoff."
   (let* ((target (compiler-driver-target driver))
          (output (pathname (or output (default-output-path root artifact-kind target))))
          (frontend (make-compiler :search-paths (compiler-driver-search-paths driver)))
-         (unit (verona:compile-file frontend root :target target
-                                     :pointer-width (compilation-target-pointer-width target)))
+         (unit (progn (report-build-stage :compiling)
+                      (verona:compile-file frontend root :target target
+                                     :pointer-width (compilation-target-pointer-width target))))
          (program (compilation-unit-semantic-program unit))
          (picp (eq artifact-kind :shared-library))
          (backend (handler-case
@@ -308,6 +316,7 @@ in-memory LLVM module, verification, object emission, and toolchain handoff."
         (error (condition)
           (error 'invalid-entry-point :message (princ-to-string condition)))))
     (hide-verona-symbols backend program)
+    (report-build-stage :emitting)
     (handler-case (verify-llvm-module backend)
       (error (condition)
         (if (typep condition 'verona:compiler-bug)
@@ -319,6 +328,7 @@ in-memory LLVM module, verification, object emission, and toolchain handoff."
           (unwind-protect
                (progn
                  (toolchain-emit-object (compiler-driver-toolchain driver) backend object)
+                 (report-build-stage :linking)
                  (ecase artifact-kind
                    (:executable (toolchain-link-executable (compiler-driver-toolchain driver)
                                                            object output target link-options))

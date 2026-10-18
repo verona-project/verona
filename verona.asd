@@ -85,7 +85,8 @@
                (:file "tests/driver-artifacts")
                (:file "tests/cli")
                (:file "tests/build-parser")
-               (:file "tests/build-integration")))
+               (:file "tests/build-integration")
+               (:file "tests/ide-builds")))
 
 (asdf:defsystem #:verona/ide
   :description "Transport-independent project analysis sessions"
@@ -101,7 +102,9 @@
 
 (asdf:defsystem #:verona/ide/project
   :depends-on (#:verona/ide #:verona/compiler)
-  :components ((:file "src/ide/project")))
+  :serial t
+  :components ((:file "src/ide/project")
+               (:file "src/ide/builds")))
 
 (asdf:defsystem #:verona/swank
   :description "Optional Verona IDE RPC adapter for Swank"
