@@ -258,3 +258,27 @@
                (is (eq :cancelled (getf (rpc-value :request-status id (list token)) :status)))))
         (sb-thread:signal-semaphore resume)
         (setf (symbol-function 'verona.ide:evaluate-request) original)))))
+
+(test swank-project-inspection-before-session-attachment
+  (let* ((inspect-symbol 'verona.ide::inspect-project)
+         (discover-symbol 'verona.ide::discover-project-configuration)
+         (old-inspect (and (fboundp inspect-symbol) (symbol-function inspect-symbol)))
+         (old-discover (and (fboundp discover-symbol) (symbol-function discover-symbol))))
+    (unwind-protect
+         (progn
+           (setf (symbol-function discover-symbol) (lambda (root) root)
+                 (symbol-function inspect-symbol)
+                 (lambda (root)
+                   (when (equal root "/missing/")
+                     (verona.ide::reject-request "No verona.build found in ~A" root))
+                   (list :root root :build-file (concatenate 'string root "verona.build")
+                         :targets '((:name "app" :kind :executable)))))
+           (with-swank-test
+             (is (member :inspect-project (getf (rpc-value :capabilities) :operations)))
+             (is (equal "app" (getf (first (getf (rpc-value :inspect-project nil '("/project/")) :targets)) :name)))
+             (is (zerop (hash-table-count verona.swank::*attachments*)))
+             (let ((reply (verona.swank:rpc :inspect-project nil '("/missing/"))))
+               (is (eq :error (first reply)))
+               (is (search "No verona.build" (getf (second reply) :message))))))
+      (if old-inspect (setf (symbol-function inspect-symbol) old-inspect) (fmakunbound inspect-symbol))
+      (if old-discover (setf (symbol-function discover-symbol) old-discover) (fmakunbound discover-symbol)))))

@@ -38,8 +38,8 @@
 
 (defvar verona-mode-syntax-table
   (let ((table (make-syntax-table)))
-    (modify-syntax-entry ?( "()" table)
-    (modify-syntax-entry ?) ")(" table)
+    (modify-syntax-entry ?\( "()" table)
+    (modify-syntax-entry ?\) ")(" table)
     (modify-syntax-entry ?\" "\"" table)
     (modify-syntax-entry ?\\ "\\" table)
     (modify-syntax-entry ?\; "<" table)

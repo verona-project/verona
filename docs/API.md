@@ -688,7 +688,10 @@ root is the current directory and the default search path is that root. Reader
 features default to the compiler target features; explicit `:reader-features nil`
 selects an empty feature set.
 Load `verona/ide/project` to use `discover-project-configuration`, which reuses
-the build parser, target resolver and package environment. A sole build target
+the build parser, target resolver and package environment. It requires a
+`verona.build` file in the selected root; missing files are rejected.
+`inspect-project` reads the same file and returns target metadata without
+creating a session or resolving the package environment. A sole build target
 is selected automatically; multiple targets require a selection. Its
 `:overrides` keyword plist replaces individual discovered fields.
 `configure-session` increments the configuration revision when settings change;
@@ -1166,7 +1169,33 @@ Use a Swank backend with thread support (tested with SBCL). In Emacs, run
 with `slime-eval` or `slime-eval-async`. Standard Common Lisp Swank operations
 remain available for developing the compiler itself. Verona analysis uses only
 `verona.swank:rpc`; it does not execute application code or invoke a build.
-Editor presentation and verona-mode integration are separate from this adapter.
+The optional Emacs client is documented in `editors/emacs/README.md`.
+For editor sessions based on `verona.build`, also load `verona/ide/project`
+in this server process before session selection. It requires the compiler's
+pinned LLVM setup and `VERONA_SOURCE_DIR`/`VERONA_LIBRARY_DIR` environment.
+Register the pinned LLVM bindings before loading project discovery (after
+Quicklisp setup), as the LLVM test runners do:
+
+```lisp
+(let ((root (uiop:getenv "VERONA_CL_LLVM")))
+  (unless root (error "Start Lisp inside nix develop"))
+  (let ((directory (uiop:ensure-directory-pathname root)))
+    (pushnew directory asdf:*central-registry* :test #'equal)
+    (asdf:load-asd (merge-pathnames "llvm.asd" directory))))
+(asdf:load-system :verona/ide/project)
+```
+
+Setting `VERONA_CL_LLVM` alone does not register the system with ASDF.
+Both the central-registry entry and explicit load are intentional: dependency
+loading can cause ASDF to search again, and Quicklisp can replace a definition
+registered only with `load-asd`. Verify that
+`(asdf:system-source-file (asdf:find-system "llvm"))` points into Nix.
+Quicklisp's outdated CL-LLVM release cannot compile against the shell's LLVM 23
+headers. Restart Lisp if those old bindings were already
+loaded or partially loaded before registering the pinned system.
+The lightweight adapter alone cannot discover build targets or module paths.
+Loading discovery later does not reconfigure an existing generic session;
+create a new project session to obtain the build configuration.
 
 The entry point is `(verona.swank:rpc operation &optional session arguments)`.
 `operation` is a keyword; `arguments` is a list of data arguments. Successful
@@ -1203,6 +1232,7 @@ before use. The operation set is:
 | Operations | Arguments after the session |
 | --- | --- |
 | `:create-session` | `make-configuration` keywords, with session `nil`; creates or reuses and attaches |
+| `:inspect-project` | Project root; reads required `verona.build` and returns root, build-file path and target descriptions without a session |
 | `:create-project-session` | Project root, then `discover-project-configuration` keywords; optional, see below |
 | `:attach-session`, `:detach-session` | Empty argument list |
 | `:configure-session` | Complete `make-configuration` keywords |
@@ -1216,13 +1246,21 @@ before use. The operation set is:
 | `:position-context`, `:complete-names`, `:signature-help`, `:go-to-definition`, `:find-references`, `:related-definitions` | Corresponding IDE API arguments after store/session |
 | `:module-diagnostics`, `:project-diagnostics`, `:inspect-expansion`, `:type-at-position` | Corresponding IDE API arguments after store/session |
 
-Every operation except capabilities and session creation requires attachment to
+Every operation except capabilities, project inspection and session creation requires attachment to
 the supplied session. A connection may attach to several sessions. Sessions are
 identified by project configuration; selecting another target creates or attaches
 to its independent session. Configuring an existing session preserves its target
 identity, following the direct API. To use the build system's discovery defaults,
 load `verona/ide/project` in the Nix development environment. Capabilities then
-advertises `:create-project-session`; its arguments are, for example,
+advertises `:inspect-project` and `:create-project-session`.
+`:inspect-project` requires `verona.build` in the selected directory and returns
+`:root`, `:build-file`, and `:targets` containing `:name`, `:kind`, `:root-module`,
+`:search-paths`, `:target`, `:reader-features`, and `:optimization`. Inspection
+only parses configuration; it does not resolve LLVM targets, require package
+environment variables, create sessions, or evaluate source. Missing or malformed
+files are rejected. Project session creation also requires this build file and
+uses the selected target; the low-level `:create-session` API remains available
+for explicit configurations. Project session creation arguments are, for example,
 `("/path/to/project/" :build-target "app" :overrides (:reader-features ("linux")))`.
 Without that optional LLVM-backed system, `:create-session` accepts explicit
 configuration and the same defaults as `make-configuration`.
@@ -1265,3 +1303,23 @@ execution remain explicit project operations outside this protocol.
 Run `make test-swank` for the optional adapter suite. Swank and FiveAM must be
 available through ASDF or Quicklisp; `VERONA_SWANK_ASD` may point to a particular
 Swank ASDF file. `make test` continues to test the compiler without loading Swank.
+
+# Optional Emacs IDE client
+
+`editors/emacs/verona-ide.el` extends `verona-mode` through SLIME with explicit
+module evaluation, cached completion/signatures, Xref navigation, Flymake
+diagnostics, and structured inspection buffers. See
+[the editor workflow](../editors/emacs/README.md) for setup, session selection,
+reconnection, cancellation, response limits, and separate build/run commands.
+Edits, saves and queries never evaluate modules or build projects.
+
+The Emacs entry point `verona-open-project` selects a project folder, creates
+its project session from `verona.build`, and opens its target root module (or
+prompts for a file if unavailable). `verona-project-find-file` and ordinary file
+opening reuse the opened project context automatically for source buffers under
+that root. This does not evaluate modules or invoke builds.
+
+`verona-close-project` detaches all of the current project's source buffers and
+releases its editor context. Reopening an active project reuses its remembered
+session and target, including after reconnecting SLIME. Session identifiers and
+attachment are internal to this workflow.

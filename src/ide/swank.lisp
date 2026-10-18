@@ -169,13 +169,17 @@
      (list :protocol-version 1 :adapter-version "0.1.0"
            :features '(:asynchronous-evaluation :reconnect :explicit-evaluation :cached-queries)
            :operations (append (when (fboundp 'verona.ide::discover-project-configuration)
-                                 '(:create-project-session))
+                                 '(:inspect-project :create-project-session))
                                '(:capabilities :create-session :attach-session :detach-session
                                  :configure-session :evaluate :request-status :cancel-request)
                                *queries*)))
     (:create-session
      (attach connection (verona.ide:create-session
                          *store* (apply #'ide-call 'verona.ide:make-configuration arguments))))
+    (:inspect-project
+     (unless (fboundp 'verona.ide::inspect-project)
+       (invalid "Load verona/ide/project to enable project inspection"))
+     (apply #'ide-call 'verona.ide::inspect-project arguments))
     (:create-project-session
      (unless (fboundp 'verona.ide::discover-project-configuration)
        (invalid "Load verona/ide/project to enable project configuration discovery"))

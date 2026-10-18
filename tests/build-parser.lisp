@@ -146,3 +146,53 @@
                     root :environment environment :overrides '(:root nil)))
     (signals error (verona.ide:discover-project-configuration
                     root :environment environment :build-target "missing"))))
+
+(test ide-calculator-project-evaluates-all-imported-modules
+  (let* ((root (merge-pathnames "projects/calculator-repl/" (asdf:system-source-directory :verona)))
+         (environment (verona.compiler:resolve-verona-environment
+                       :getenv (lambda (name) (declare (ignore name)) (namestring root))))
+         (configuration (verona.ide:discover-project-configuration
+                         root :build-target "calculator" :environment environment))
+         (store (verona.ide:make-session-store))
+         (id (verona.ide:create-session store configuration))
+         (request (verona.ide:evaluate-module store id
+                    (namestring (merge-pathnames "src/calculator.vrn" root))))
+         (modules (getf (verona.ide:list-modules store id) :items)))
+    (is (equal "calculator" (verona.ide:configuration-build-target configuration)))
+    (is (eq :complete (verona.ide:request-status request)))
+    (is (equal '("base" "calculator" "libc.constants" "libc.descriptor"
+                 "libc.memory" "libc.stdio" "libc.string" "libc.types")
+               (sort (mapcar (lambda (module) (getf module :name)) modules) #'string<)))
+    (is (every (lambda (module) (eq :complete (getf module :status))) modules))
+    (is (null (getf (verona.ide:project-diagnostics store id) :items)))))
+
+(test ide-project-inspection-requires-build-file
+  (let* ((root (asdf:system-source-directory :verona))
+         (calculator (merge-pathnames "projects/calculator-repl/" root))
+         (info (verona.ide:inspect-project calculator))
+         (target (first (getf info :targets))))
+    (is (equal (truename calculator) (getf info :root)))
+    (is (equal (truename (merge-pathnames "verona.build" calculator)) (getf info :build-file)))
+    (is (equal "calculator" (getf target :name)))
+    (is (equal "calculator" (getf target :root-module)))
+    (is (eq :executable (getf target :kind)))
+    (is (= 3 (length (getf target :search-paths))))
+    (is (eq :native (getf target :target)))
+    (signals verona.ide:request-error (verona.ide:inspect-project root))
+    ;; Missing build files are rejected before package environment lookup.
+    (signals verona.ide:request-error (verona.ide:discover-project-configuration root))))
+
+(test ide-project-inspection-multiple-and-malformed-targets
+  (let* ((directory (merge-pathnames (format nil "verona-project-~A/" (gensym)) (uiop:temporary-directory)))
+         (path (merge-pathnames "verona.build" directory)))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist path)
+           (with-open-file (out path :direction :output)
+             (write-string "(executable app (root main)) (static-library lib (root core))" out))
+           (is (equal '("app" "lib") (mapcar (lambda (item) (getf item :name))
+                                           (getf (verona.ide:inspect-project directory) :targets))))
+           (with-open-file (out path :direction :output :if-exists :supersede)
+             (write-string "(executable" out))
+           (signals verona:user-compilation-error (verona.ide:inspect-project directory)))
+      (uiop:delete-directory-tree directory :validate t))))

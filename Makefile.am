@@ -7,7 +7,7 @@ export VERONA_LINKER VERONA_AR
 verona_srcdir = $(shell cd $(top_srcdir) && pwd -P)
 verona_lisp_files = $(shell find $(verona_srcdir)/src -type f -name '*.lisp' -print)
 EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md \
-	editors/emacs/verona-mode.el flake.lock flake.nix license projects readme.md \
+	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/README.md flake.lock flake.nix license projects readme.md \
 	scripts src tests verona.asd
 
 .PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona test-swank
@@ -66,3 +66,8 @@ test-verona: $(VERONA_EXECUTABLE)
 
 clean-local:
 	$(RM) $(VERONA_EXECUTABLE)
+
+# Optional editor tests; Emacs and SLIME are not compiler dependencies.
+.PHONY: test-editor
+test-editor:
+	cd $(verona_srcdir) && emacs -Q --batch -L editors/emacs -l tests/editor.el -f ert-run-tests-batch-and-exit
