@@ -73,7 +73,7 @@
         (connection verona-ide--connection))
     (unless (and connection (process-live-p connection))
       (setq verona-ide--status "disconnected")
-      (user-error "Connect Verona IDE first"))
+      (user-error "Use verona-start-server and verona-open-project first"))
     (let ((slime-dispatching-connection connection))
       (slime-eval-async
        `(verona.swank:rpc ,operation ,(or session verona-ide--session) (quote ,arguments))
@@ -185,6 +185,8 @@
 
 (defun verona-ide--auto-attach ()
   (when (and buffer-file-name (derived-mode-p 'verona-mode)
+             (not (and verona-ide-mode verona-ide--connection
+                       (process-live-p verona-ide--connection)))
              (not (equal (file-name-nondirectory buffer-file-name) "verona.build")))
     (let ((project (verona-ide--project-for-file buffer-file-name)))
       (when project (verona-ide--use-project project)))))
@@ -198,16 +200,20 @@
       (verona-ide--use-project project))))
 
 ;;;###autoload
-(defun verona-open-project (root)
+(defun verona-open-project (root &optional target)
   "Open ROOT's project, create its session, and visit its root module.
 Use the current SLIME connection. Multiple build targets prompt for selection."
-  (interactive (list (read-directory-name "Open Verona project: ")))
+  (interactive (list (read-directory-name "Open Verona project: ")
+                     (when current-prefix-arg (read-string "Build target: "))))
   (require 'slime)
   (let* ((root (file-name-as-directory (file-truename root)))
-         (previous (cl-find root verona-ide--projects :key (lambda (item) (plist-get item :root)) :test #'equal)))
-    (with-current-buffer (get-buffer-create (format " *Verona project %s*" root))
+         (previous (cl-find-if (lambda (item)
+                                 (and (equal root (plist-get item :root))
+                                      (or (null target) (equal target (plist-get item :target)))))
+                               verona-ide--projects)))
+    (with-current-buffer (get-buffer-create (format " *Verona project %s %s*" root (or target "default")))
       (verona-ide--start-project
-       root (plist-get previous :target) (plist-get previous :session)
+       root (or target (plist-get previous :target)) (plist-get previous :session)
        (lambda (metadata target)
          (let* ((description (cl-find target (plist-get metadata :targets)
                                       :key (lambda (item) (plist-get item :name)) :test #'equal))
@@ -220,40 +226,54 @@ Use the current SLIME connection. Multiple build targets prompt for selection."
                                 when (file-exists-p file) return file)))
            (setq verona-ide--projects
                  (cons project (cl-remove-if
-                                (lambda (old) (equal (plist-get old :root) (plist-get project :root)))
+                                (lambda (old) (and (equal (plist-get old :root) (plist-get project :root))
+                                                   (equal (plist-get old :target) target)))
                                 verona-ide--projects)))
            (dolist (buffer (buffer-list))
              (with-current-buffer buffer (verona-ide--auto-attach)))
            (verona-ide--open-project-file project entry)))))))
 
+(defun verona-ide--current-project ()
+  "Prefer the buffer's explicit session over root-based discovery."
+  (or (cl-find-if (lambda (p) (and (equal verona-ide--session (plist-get p :session))
+                                  (eq verona-ide--connection (plist-get p :connection))))
+                  verona-ide--projects)
+      (and buffer-file-name (verona-ide--project-for-file buffer-file-name))
+      (cl-find verona-ide--root verona-ide--projects
+               :key (lambda (p) (plist-get p :root)) :test #'equal)))
+
 (defun verona-project-find-file ()
   "Choose another file in the current opened project, reusing its session."
   (interactive)
-  (let ((project (or (and buffer-file-name (verona-ide--project-for-file buffer-file-name))
-                     (cl-find verona-ide--root verona-ide--projects
-                              :key (lambda (item) (plist-get item :root)) :test #'equal))))
+  (let ((project (verona-ide--current-project)))
     (unless project (user-error "Open a project with verona-open-project first"))
     (verona-ide--open-project-file project)))
 
 (defun verona-close-project ()
-  "Detach the current project and its buffers, retaining server analysis."
+  "Close the current project session and release its work and editor state."
   (interactive)
-  (let ((project (or (and buffer-file-name (verona-ide--project-for-file buffer-file-name))
-                     (cl-find verona-ide--root verona-ide--projects
-                              :key (lambda (item) (plist-get item :root)) :test #'equal))))
+  (let ((project (verona-ide--current-project)))
     (unless project (user-error "No opened Verona project"))
     (let ((session (plist-get project :session)) (connection (plist-get project :connection)))
+      (unless (process-live-p connection)
+        (user-error "Reconnect SLIME and reopen this project before closing its server session"))
       (dolist (buffer (buffer-list))
         (with-current-buffer buffer
-          (when (and verona-ide-mode (equal session verona-ide--session)
+          (when (and (equal session verona-ide--session)
                      (eq connection verona-ide--connection))
-            (verona-ide-mode -1)
-            (setq verona-ide--connection nil verona-ide--status "disconnected"))))
+            (when verona-ide-mode (verona-ide-mode -1))
+            (when (timerp verona-ide--build-timer) (cancel-timer verona-ide--build-timer))
+            (setq verona-ide--build nil)
+            (when (derived-mode-p 'special-mode 'compilation-mode)
+              (let ((inhibit-read-only t)) (erase-buffer) (insert "Project closed\n")))
+            (setq verona-ide--connection nil verona-ide--session nil
+                  verona-ide--request nil verona-ide--cache nil
+                  verona-ide--status "disconnected"))))
       (when (process-live-p connection)
         (let ((verona-ide--connection connection)
               (verona-ide--session session)
               (verona-ide--operations (plist-get project :operations)))
-          (verona-ide--rpc :detach-session nil #'ignore)))
+          (verona-ide--rpc :close-session nil #'ignore)))
       (setq verona-ide--projects (delq project verona-ide--projects)))))
 
 (defun verona-ide--contents ()
@@ -331,6 +351,7 @@ Use the current SLIME connection. Multiple build targets prompt for selection."
 
 (defun verona-ide--query (operation arguments callback)
   "Query cached analysis, rejecting replies superseded by edits or newer requests."
+  (unless verona-ide--session (user-error "Open a project with verona-open-project first"))
   (let ((tick (buffer-chars-modified-tick))
         (serial (1+ (gethash operation verona-ide--serials 0))))
     (puthash operation serial verona-ide--serials)
@@ -347,6 +368,7 @@ Use the current SLIME connection. Multiple build targets prompt for selection."
   "Explicitly analyze this module and dependencies, including compile-time macros.
 Application code is not executed."
   (interactive)
+  (unless verona-ide--session (user-error "Open a project with verona-open-project first"))
   (let ((serial (cl-incf verona-ide--evaluation-serial)))
     (verona-ide--sync-project
      (lambda ()
@@ -528,6 +550,8 @@ Application code is not executed."
    (lambda (data)
      (let ((origin (current-buffer)))
        (with-current-buffer (get-buffer-create (format "*Verona %s*" title))
+         (setq verona-ide--session (buffer-local-value 'verona-ide--session origin)
+               verona-ide--connection (buffer-local-value 'verona-ide--connection origin))
          (let ((inhibit-read-only t))
            (erase-buffer)
            (insert (format "%s — cached analysis\n\n" title))
@@ -587,6 +611,7 @@ Application code is not executed."
 (defun verona-ide-project-diagnostics () (interactive)
   (verona-ide--view "Project diagnostics" :project-diagnostics '(:limit 100)))
 (defun verona-ide--prepare-build (save run)
+  (unless verona-ide--session (user-error "Open a project with verona-open-project first"))
   (unless (memq :start-build verona-ide--operations)
     (user-error "Load verona/ide/project on the server to enable builds"))
   (let* ((root verona-ide--root)
@@ -731,5 +756,6 @@ Application code is not executed."
       (when verona-ide-mode (verona-ide-mode 1)))))
 (verona-ide--refresh-active-modes)
 
+(require 'verona-server)
 (provide 'verona-ide)
 ;;; verona-ide.el ends here

@@ -2,57 +2,87 @@
 
 Add `editors/emacs` to `load-path`, install SLIME, and load both
 `verona-mode` and `verona-ide`. Emacs 28.1 or later is required.
-Start the optional server as described in the Swank section of `docs/API.md`.
-For projects with a `verona.build` file, also load project discovery in the
-SLIME server before selecting a session:
+Configure the checkout and package directories before starting the server:
 
-Start a fresh Lisp process from `nix develop` in the repository root. After
-loading Quicklisp, register the pinned CL-LLVM ASDF file **before** loading the
-project system:
-
-```lisp
-(require :asdf)
-(let ((root (uiop:getenv "VERONA_CL_LLVM")))
-  (unless root (error "Start this Lisp process inside nix develop"))
-  (let ((directory (uiop:ensure-directory-pathname root)))
-    (pushnew directory asdf:*central-registry* :test #'equal)
-    (asdf:load-asd (merge-pathnames "llvm.asd" directory))))
-(asdf:load-system :verona/ide/project)
+```elisp
+(setq verona-server-directory "/absolute/path/to/verona"
+      verona-server-environment
+      '("VERONA_SOURCE_DIR=/absolute/path/to/verona/projects"
+        "VERONA_LIBRARY_DIR=/absolute/path/to/verona/build"))
 ```
 
-`VERONA_CL_LLVM` does not register an ASDF system by itself. Register the
-Nix directory in `asdf:*central-registry*` as well as loading `llvm.asd`:
-ASDF can search again during dependency loading, allowing Quicklisp to replace
-a definition loaded only with `load-asd`. The central registry gives the pinned
-bindings priority. Check the effective source with
-`(asdf:system-source-file (asdf:find-system "llvm"))`; it must point into Nix. If the old bindings have already started loading,
-restart Lisp before following these steps. Errors mentioning removed identifiers
-such as `LLVMBr` or `LLVMX86_MMXTypeKind` while compiling a Quicklisp
-`sellout-CL-LLVM-2019…` path indicate this mismatch.
+`verona-start-server` checks the inherited environment together with
+`verona-server-environment` overrides before launching. `VERONA_SOURCE_DIR` and
+`VERONA_LIBRARY_DIR` must name existing, readable absolute local directories.
+An explicitly supplied `VERONA_CL_LLVM` must also contain a readable `llvm.asd`.
+Missing or invalid settings reject startup and open `*Verona help*`, listing
+all settings, their effective values, and OK/MISSING/INVALID status. An LLVM
+path supplied later by Nix is marked CHECK ON START. Use `M-x verona-help` at
+any time to see this checklist, setup instructions, and developer commands;
+press `g` to refresh it after changing settings. Help never starts a server,
+evaluates sources, or builds.
+Nix can supply `VERONA_CL_LLVM` during launch; the server checks all three
+variables in its actual environment before loading compiler support or Swank.
 
-This uses the compiler development environment (including the pinned LLVM ASDF
-setup and `VERONA_SOURCE_DIR`/`VERONA_LIBRARY_DIR` package directories). Project
-discovery reads the build target, module paths and target reader features.
-The editor requires project discovery and a valid `verona.build` in the selected
-root directory. It rejects missing or malformed build files.
+Use `M-x verona-start-server`. By default it runs the installed `verona-server` Bash launcher
+from that checkout, registers the pinned LLVM bindings, and loads project/build
+support and the Swank adapter from the installed SLIME package. The checkout's development prerequisites must be available in the server environment. Startup is asynchronous;
+wait for “Verona ready” before opening a project. `*Verona server*` retains
+initialization output and failures. Repeated start requests reuse the managed
+process. Starting the server does not select a project, evaluate or build.
 
-Run `M-x slime-connect` once and wait for SLIME to connect. Then use
-`M-x verona-open-project` and select the project folder. It reads `verona.build`,
-presents its settings, selects a sole target automatically (or asks you to
-choose among multiple targets), starts the project session, and opens the
-selected target's root module. If that module cannot be located in its module
-paths, it asks you to select a file.
+Customize `verona-server-command` (a list of literal executable/arguments),
+`verona-server-startup-arguments` (SBCL options, including optional `--load`
+settings), `verona-server-environment`, `verona-server-host`,
+`verona-server-port`, and `verona-server-startup-timeout` as needed. The default
+host is `127.0.0.1`; port zero chooses a free port. The environment must supply the pinned `VERONA_CL_LLVM`, compiler/linker
+and package paths. To explicitly launch through Nix, set
+`verona-server-command` to `'("nix" "develop" "--command" "verona-server")`.
+The launcher uses `sbcl` by default; set `VERONA_IDE_SBCL` to select another
+SBCL executable. Before installation, set `verona-server-command` to a list
+containing the absolute path to `build/verona-server` after running `make build`.
+For the default command, the editor searches its executable paths, beside a
+located `verona` binary, common installation directories, and finally
+`build/verona-server` under `verona-server-directory`. `verona-help` shows the
+resolved launcher path. If none is available, startup opens the checklist with
+build/install instructions before launching a process. Custom launcher commands
+are used as configured and never replaced by a local fallback.
+The server loads Swank through ASDF from the same installed SLIME directory,
+avoiding a mismatched Quicklisp Swank version.
 
-Use `M-x verona-project-find-file` to choose another project file, or open it
-normally with Emacs. Source buffers inside an opened project automatically
-reuse its session, including source buffers that were already open. There is
-no session ID to enter for each file. The context outlives individual source
-buffers. Reopening a project reuses its session and target. To select a different target,
-close the project first; server sessions and caches remain independent.
+Use `M-x verona-open-project`, select a folder containing `verona.build`, and
+choose its target (a sole target is automatic). Project discovery reads the
+build configuration before attaching buffers. Opening and synchronizing never
+evaluate or build. The target root module opens automatically. Use
+`verona-project-find-file` for another file; existing source buffers and newly
+visited files associate with an opened project. Local paths must be shared
+between Emacs and SBCL; TRAMP is unsupported.
+
+Reopening the same project reattaches its session. Use `C-u M-x
+verona-open-project` to name another target without closing existing target
+sessions, or call `(verona-open-project root target)` from Lisp. Each source
+buffer uses one selected session; opening a target's entry file explicitly
+selects that session for the entry buffer. Other attached buffers retain their
+selection. Independent targets keep separate analysis and build state.
+
+`verona-close-project` explicitly closes the current buffer's project/target
+session, cancels its work, stops its programs, and releases its build artifacts.
+It clears attached editor state and views while preserving source buffers and
+unsaved edits. Other sessions and the server remain available. Reopening creates
+a fresh session. Disconnecting SLIME alone preserves server sessions and pending
+evaluation. After a dropped connection, `verona-start-server` reconnects the
+managed process; reopen the project to reattach its remembered session. An
+external server can also be used with `slime-connect` and `verona-open-project`.
+
+`verona-stop-server` releases all remaining server sessions, builds and programs,
+disconnects its SLIME connection, and shuts down only the process started by
+`verona-start-server`. Unrelated Lisp processes and external servers are never
+terminated by this command. Output remains available in `*Verona server*`.
+An already stopped or crashed managed process can be started again.
 
 `verona-ide-mode` is enabled in project source buffers; the mode line shows
 `V:` followed by analysis status. `C-c C-e` evaluates the current module.
-Use `verona-close-project` to detach all source buffers in the current project.
+Use `verona-close-project` to close the current project session.
 Local editor and server files must share absolute paths; TRAMP is not supported.
 Opening a project requires an existing SLIME connection to the configured server.
 
@@ -80,14 +110,6 @@ origins), `verona-ide-expansion`, `verona-ide-type`, and
 `verona-ide-project-diagnostics`. Views retain structured metadata, availability,
 coverage and truncation flags. Valid locations have source buttons; paginated
 views offer a Next page button. Expansion output has a 4096-unit server budget.
-
-`verona-close-project` releases the project's overlays and editor hooks while
-preserving server analysis. To reconnect after a dropped socket, reconnect
-SLIME and run `verona-open-project` for the same folder. It reattaches the
-remembered session and target, restores buffer synchronization, and resumes
-retained request polling. Closing individual source buffers leaves the project
-context available. If the server was restarted, close the remembered project
-and open it again to create a session on the new server.
 
 Load `verona/ide/project` in the server's Nix environment to enable project
 build operations. Workers need the same `sbcl`, `VERONA_CL_LLVM`, linker and
@@ -123,6 +145,10 @@ Run the editor regression tests with:
 emacs -Q --batch -L editors/emacs -l tests/editor.el -f ert-run-tests-batch-and-exit
 ```
 
+For real connected lifecycle acceptance, run `make test-editor-live` inside
+`nix develop`, setting `EMACS` and `SLIME_DIR` to the installed editor and SLIME
+paths. This remains separate from mock transport tests.
+
 For combined compiler/server/editor verification, use `make test-workflows`
 (`EMACS=/absolute/path/to/emacs` is supported). The repeatable connected-editor
 acceptance walkthrough and coverage map are in
@@ -145,3 +171,11 @@ buffer to inspect the full response. Project discovery requires both
 `VERONA_SOURCE_DIR` and `VERONA_LIBRARY_DIR` to name absolute package directories
 in the **server process** environment; starting Emacs with these variables does
 not update an already running Lisp process.
+
+`make install` installs `verona` and the executable `verona-server` launcher
+at the same level in `PREFIX/bin` (for example, `/usr/local/bin/verona` and
+`/usr/local/bin/verona-server`). The launcher embeds its Lisp entry point;
+there is no separate `ide-server.lisp` to install. It forwards SBCL startup
+options and uses `exec` to preserve process ownership and standard input for
+shutdown. It requires the configured Verona checkout and development environment.
+For invocation details, run `verona-server --help`.

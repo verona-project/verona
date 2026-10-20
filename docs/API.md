@@ -1384,3 +1384,24 @@ that root. This does not evaluate modules or invoke builds.
 releases its editor context. Reopening an active project reuses its remembered
 session and target, including after reconnecting SLIME. Session identifiers and
 attachment are internal to this workflow.
+
+### Managed Emacs server lifecycle
+
+The optional Emacs integration provides `verona-start-server`,
+`verona-open-project`, `verona-close-project` and `verona-stop-server`.
+Startup loads `verona/ide/project` and `verona/swank` in a configured SBCL
+development environment, then connects SLIME after listener readiness and checks
+adapter capabilities. See `editors/emacs/README.md` for configuration.
+Server startup, project discovery and overlay synchronization never evaluate or
+build. Project/target sessions remain independent of editor connections.
+Explicit project close calls `:close-session`, releasing pending work, builds
+and owned programs; ordinary disconnection only detaches. Managed shutdown uses
+`verona.swank:close-all-sessions` before exiting the owned process. This helper
+is a server lifecycle function, not a remotely advertised RPC operation.
+
+Managed startup rejects missing or invalid `VERONA_SOURCE_DIR` and
+`VERONA_LIBRARY_DIR` before launching; values must identify existing readable
+absolute local directories. An editor-supplied `VERONA_CL_LLVM` must also
+contain a readable `llvm.asd`. The server rechecks all three variables in its
+actual launch environment before loading systems, including LLVM settings
+supplied by Nix. Errors name the offending variable; no listener is published.

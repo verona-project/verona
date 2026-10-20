@@ -132,7 +132,8 @@ make test
 ```
 
 To install the command, configure the desired prefix (default: `/usr/local`)
-and run `make install`:
+and run `make install`. This installs `verona` and the `verona-server` Bash launcher side by side in the configured
+`bin` directory. The launcher embeds its Lisp entry point:
 
 ```sh
 ./configure --prefix=/path

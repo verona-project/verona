@@ -1,13 +1,17 @@
 VERONA_EXECUTABLE = $(abs_top_builddir)/build/verona
+VERONA_SERVER = $(abs_top_builddir)/build/verona-server
 VERONA_LINKER = @VERONA_LINKER@
 VERONA_AR = @VERONA_AR@
 
 export VERONA_LINKER VERONA_AR
 
 verona_srcdir = $(shell cd $(top_srcdir) && pwd -P)
+# The generated launcher embeds its Lisp entry point and shares bindir with verona.
+nodist_bin_SCRIPTS = $(VERONA_SERVER)
+
 verona_lisp_files = $(shell find $(verona_srcdir)/src -type f -name '*.lisp' -print)
 EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/IDE-WORKFLOWS.md \
-	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/README.md flake.lock flake.nix license projects readme.md \
+	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/verona-server.el editors/emacs/README.md flake.lock flake.nix license projects readme.md \
 	scripts src tests verona.asd
 
 .PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona test-swank
@@ -33,11 +37,18 @@ bootstrap: $(VERONA_EXECUTABLE)
 	@cd $(verona_srcdir)/projects/bootstrap && $(VERONA_EXECUTABLE) build bootstrap $(abs_top_builddir)/build/bootstrap
 	@$(abs_top_builddir)/build/bootstrap/bootstrap
 
-build: $(VERONA_EXECUTABLE)
+build: $(VERONA_EXECUTABLE) $(VERONA_SERVER)
 
 $(VERONA_EXECUTABLE): $(verona_srcdir)/verona.asd $(verona_srcdir)/scripts/build-executable.lisp $(verona_lisp_files)
 	@$(MKDIR_P) $(@D)
 	$(SBCL) --script $(verona_srcdir)/scripts/build-executable.lisp $@
+
+$(VERONA_SERVER): $(verona_srcdir)/scripts/verona-server.in $(verona_srcdir)/scripts/ide-server.lisp
+	@$(MKDIR_P) $(@D)
+	cat $(verona_srcdir)/scripts/verona-server.in $(verona_srcdir)/scripts/ide-server.lisp > $@.tmp
+	printf '\nVERONA_EMBEDDED_IDE_SERVER\n' >> $@.tmp
+	chmod +x $@.tmp
+	mv $@.tmp $@
 
 install-exec-local: $(VERONA_EXECUTABLE)
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
@@ -67,7 +78,7 @@ test-verona: $(VERONA_EXECUTABLE)
 	@$(abs_top_builddir)/build/testing/testing-smoke
 
 clean-local:
-	$(RM) $(VERONA_EXECUTABLE)
+	$(RM) $(VERONA_EXECUTABLE) $(VERONA_SERVER) $(VERONA_SERVER).tmp
 
 # Optional editor tests; Emacs and SLIME are not compiler dependencies.
 .PHONY: test-editor test-workflows
@@ -78,3 +89,9 @@ test-workflows: test test-swank test-editor
 
 test-editor:
 	cd $(verona_srcdir) && $(EMACS) -Q --batch -L editors/emacs -l tests/editor.el -f ert-run-tests-batch-and-exit
+
+# Explicit real editor/server acceptance; never required by compiler builds.
+.PHONY: test-editor-live
+test-editor-live: $(VERONA_SERVER)
+	@test -n "$(SLIME_DIR)" || { echo 'Set SLIME_DIR to the installed SLIME directory'; exit 1; }
+	cd $(verona_srcdir) && $(EMACS) -Q --batch -L "$(SLIME_DIR)" -L editors/emacs -l tests/editor-live.el -f ert-run-tests-batch-and-exit

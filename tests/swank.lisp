@@ -305,3 +305,17 @@
                (rpc-value :detach-session id)
                (is (eq :error (first (verona.swank:rpc :start-build id)))))))
       (if old (setf (symbol-function symbol) old) (fmakunbound symbol)))))
+
+(test swank-managed-server-releases-all-sessions
+  (with-swank-test
+    (let* ((one (rpc-value :create-session nil '(:reader-features ("one"))))
+           (two (rpc-value :create-session nil '(:reader-features ("two"))))
+           (source (verona.ide:open-buffer verona.swank:*store* one "scratch" "(function value () i64 42)"))
+           (pending (verona.ide:begin-request verona.swank:*store* one source)))
+      (verona.swank:close-all-sessions)
+      (is (null (verona.ide:find-session verona.swank:*store* one)))
+      (is (null (verona.ide:find-session verona.swank:*store* two)))
+      (is (not (eq :pending (verona.ide:request-status pending))))
+      (is (= 0 (hash-table-count verona.swank::*attachments*)))
+      (is (= 0 (hash-table-count verona.swank::*requests*)))
+      (verona.swank:close-all-sessions))))

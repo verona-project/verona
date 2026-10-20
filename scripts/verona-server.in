@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Generated launcher: the build appends the IDE Lisp entry point below.
+set -euo pipefail
+
+usage() {
+  echo 'Usage: verona-server [SBCL-OPTION ...] -- ROOT SWANK-LOADER HOST PORT READY-FILE'
+  echo 'Set VERONA_IDE_SBCL to select SBCL (default: sbcl).'
+}
+if [[ ${1:-} == --help ]]; then
+  usage
+  exit 0
+fi
+
+options=()
+while [[ $# -gt 0 && $1 != -- ]]; do
+  options+=("$1")
+  shift
+done
+if [[ $# -ne 6 || $1 != -- ]]; then
+  usage >&2
+  exit 2
+fi
+shift
+# Pass embedded Lisp on a separate descriptor so stdin remains editor-owned.
+# Exec preserves process identity for lifecycle management and shutdown.
+exec "${VERONA_IDE_SBCL:-sbcl}" "${options[@]}" --script /dev/fd/3 "$@" 3<<'VERONA_EMBEDDED_IDE_SERVER'

@@ -1,6 +1,6 @@
 (defpackage #:verona.swank
   (:use #:cl)
-  (:export #:rpc #:disconnect #:*store*))
+  (:export #:rpc #:disconnect #:*store* #:close-all-sessions))
 (in-package #:verona.swank)
 
 (defvar *store* (verona.ide:make-session-store))
@@ -239,3 +239,15 @@
     (verona:user-compilation-error (condition)
       (list :error (list :code :compiler-diagnostic
                          :diagnostic (encode (verona:diagnostic-for-condition condition)))))))
+
+(defun close-all-sessions ()
+  "Release managed server work before the owning process exits."
+  (swank/backend:call-with-lock-held
+   *lock*
+   (lambda ()
+     (dolist (id (loop for id being the hash-keys of
+                      (verona.ide::session-store-sessions *store*) collect id))
+       (verona.ide:close-session *store* id))
+     (clrhash *requests*)
+     (clrhash *attachments*)
+     (clrhash *connection-ids*))))
