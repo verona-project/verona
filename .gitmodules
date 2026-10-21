@@ -1,0 +1,3 @@
+[submodule "vendor/CL-LLVM"]
+	path = vendor/CL-LLVM
+	url = https://github.com/verona-project/CL-LLVM.git

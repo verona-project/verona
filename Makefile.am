@@ -9,10 +9,12 @@ verona_srcdir = $(shell cd $(top_srcdir) && pwd -P)
 # The generated launcher embeds its Lisp entry point and shares bindir with verona.
 nodist_bin_SCRIPTS = $(VERONA_SERVER)
 
+# Include the pinned bindings in source archives without Git's metadata pointer.
+cl_llvm_files = $(shell cd $(verona_srcdir) && find vendor/CL-LLVM -type f ! -name .git -print)
 verona_lisp_files = $(shell find $(verona_srcdir)/src -type f -name '*.lisp' -print)
 EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/IDE-WORKFLOWS.md \
 	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/verona-server.el editors/emacs/README.md flake.lock flake.nix license projects readme.md \
-	scripts src tests verona.asd
+	scripts src tests $(cl_llvm_files) verona.asd
 
 .PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona test-swank
 

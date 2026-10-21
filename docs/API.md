@@ -36,9 +36,16 @@ artifact path.
 | `-L PATH`, `--library-path PATH` | Add a native library search path. Repeatable. |
 | `--framework NAME` | Link a Darwin framework. Repeatable; rejected on non-Darwin targets. |
 
-The development shell supplies `VERONA_CL_LLVM`, `VERONA_LINKER`, and
-`VERONA_AR`.  Override the latter two only to deliberately use another native
-linker or archiver.
+The LLVM bindings are pinned in the `vendor/CL-LLVM` Git submodule from
+[verona-project/CL-LLVM](https://github.com/verona-project/CL-LLVM). Initialize
+it with `git submodule update --init --recursive` and set `VERONA_CL_LLVM` to
+that directory's absolute path when configuring the environment manually.
+Keep the recorded submodule revision matched to LLVM 23.
+
+The optional Nix development shell uses that same submodule and supplies
+`VERONA_CL_LLVM`, `VERONA_LINKER`, and `VERONA_AR`. Its automatic submodule
+inclusion requires Nix 2.27 or later. Override the latter two variables to
+select a different native linker or archiver.
 
 ## Verona language
 
@@ -1380,28 +1387,68 @@ prompts for a file if unavailable). `verona-project-find-file` and ordinary file
 opening reuse the opened project context automatically for source buffers under
 that root. This does not evaluate modules or invoke builds.
 
-`verona-close-project` detaches all of the current project's source buffers and
-releases its editor context. Reopening an active project reuses its remembered
-session and target, including after reconnecting SLIME. Session identifiers and
-attachment are internal to this workflow.
+`verona-close-project` explicitly closes the current project/target server
+session through `:close-session`, cancelling evaluation and builds, stopping
+owned programs, and releasing session resources. Editor attachments and
+session-specific views are cleared; source buffers and unsaved edits remain.
+Other project/target sessions stay available. Reopening a closed project creates
+a fresh session. Disconnecting SLIME alone preserves sessions and pending work;
+reopening after reconnecting reattaches the remembered session and target.
+Session identifiers and attachment are internal to this workflow.
 
 ### Managed Emacs server lifecycle
 
-The optional Emacs integration provides `verona-start-server`,
-`verona-open-project`, `verona-close-project` and `verona-stop-server`.
-Startup loads `verona/ide/project` and `verona/swank` in a configured SBCL
-development environment, then connects SLIME after listener readiness and checks
-adapter capabilities. See `editors/emacs/README.md` for configuration.
-Server startup, project discovery and overlay synchronization never evaluate or
-build. Project/target sessions remain independent of editor connections.
-Explicit project close calls `:close-session`, releasing pending work, builds
-and owned programs; ordinary disconnection only detaches. Managed shutdown uses
-`verona.swank:close-all-sessions` before exiting the owned process. This helper
-is a server lifecycle function, not a remotely advertised RPC operation.
+The editor workflow is `verona-help`, `verona-start-server`,
+`verona-open-project`, explicit evaluation/build commands,
+`verona-close-project`, and `verona-stop-server`.
 
-Managed startup rejects missing or invalid `VERONA_SOURCE_DIR` and
-`VERONA_LIBRARY_DIR` before launching; values must identify existing readable
-absolute local directories. An editor-supplied `VERONA_CL_LLVM` must also
-contain a readable `llvm.asd`. The server rechecks all three variables in its
-actual launch environment before loading systems, including LLVM settings
-supplied by Nix. Errors name the offending variable; no listener is published.
+`make build` produces `build/verona` and `build/verona-server`. Installation
+places both executables in `PREFIX/bin`; the default prefix is `/usr/local`.
+The `verona-server` Bash launcher embeds its Lisp entry point and invokes SBCL
+with a separate descriptor for that entry point, preserving standard input and
+process ownership for shutdown. No standalone server Lisp file is installed.
+The launcher still requires the configured Verona checkout and development
+environment. Run `verona-server --help` for its command-line contract.
+
+`verona-server-command` defaults to `'("verona-server")`. Discovery checks the
+editor's executable paths, beside a located `verona`, common installation
+locations, and the configured checkout's `build/verona-server`. Custom commands
+are used as configured. The launcher uses `sbcl` unless `VERONA_IDE_SBCL` selects
+another executable. SBCL startup options belong in
+`verona-server-startup-arguments`. Nix is an explicit environment option; the
+default launcher does not invoke it. The [Emacs setup guide](../editors/emacs/README.md)
+describes checkout, environment, host, port, and timeout configuration.
+
+Startup loads `verona/ide/project` and `verona/swank`, then connects SLIME after
+listener readiness and checks adapter capabilities. Swank is loaded from the
+installed SLIME package. Startup, project discovery, buffer synchronization,
+edits, saves, and ordinary queries never evaluate or build. Explicit evaluation
+analyzes the module and required dependencies, including unsaved overlays;
+project builds use saved-file snapshots. Project/target sessions remain
+independent of editor connections.
+
+`verona-help` displays the startup checklist, effective environment values,
+resolved launcher, and workflow commands without starting work. Managed startup
+rejects missing or invalid `VERONA_SOURCE_DIR` and `VERONA_LIBRARY_DIR`; values
+must identify existing readable absolute local directories. An editor-supplied
+`VERONA_CL_LLVM` must also contain a readable `llvm.asd`. An unset LLVM path is
+marked CHECK ON START because an explicitly configured development shell can
+supply it. The server rechecks all three variables before loading systems.
+Unavailable launchers and invalid editor settings open `*Verona help*`; `g`
+refreshes the checklist. Server initialization output is kept separately in
+`*Verona server*`.
+
+Managed shutdown uses `verona.swank:close-all-sessions` to release all remaining
+sessions and their owned work before exiting the editor-owned process. This is
+a server lifecycle function, not a remotely advertised RPC operation. External
+Lisp processes are not stopped by `verona-stop-server`.
+
+### Editor diagnostics
+
+Evaluation diagnostics are cached session products exposed through Flymake and
+`verona-ide-project-diagnostics`. Build/run output and build diagnostics appear
+in separate `*Verona build*` compilation buffers and do not replace analysis
+state. Request rejection is reported in the minibuffer;
+`verona-ide-last-error` in the originating buffer shows its full response.
+Startup settings appear in `*Verona help*`, while server process output and
+initialization failures appear in `*Verona server*`.

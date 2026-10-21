@@ -22,52 +22,17 @@ executable, object file, static library, or shared library.
 
 ## Example: most of the language in one program
 
-This small program uses a product type, a sum type, construction and field
-access, pattern matching, local bindings, a generic with an implementation,
-and a protocol constraint:
-
 ```lisp
-(type point (product (x i32) (y i32)))
-
-(type option (sum (none) (some i32)))
-
-(generic add (left right))
-
-(implementation add ((left i32) (right i32)) i32
-  (+ left right))
-
-(protocol measurement (a)
-  (measure ((value a)) i32))
-
-(implementation (measurement i32)
-  (function measure ((value i32)) i32
-    value))
-
-(function report
-  (for (a)
-    ((measurement a)))
-  ((value a))
-  i32
-  (measure value))
-
-(function unwrap ((value option)) i32
-  (match value
-    ((none) 0)
-    ((some number) number)))
-
 (function main () exit-code
-  (let ((origin point (point 40 2))
-        (value option (some (add (field origin x) (field origin y)))))
-    (report (unwrap value))))
+  (+ 1 2))
 ```
 
-The program returns `42`. For runnable applications and library packages, see
+The program returns `3`. For runnable applications and library packages, see
 [`projects/`](projects/).
 
 Text literals use familiar source syntax: `"hello"` has type `(pointer u8)`
 and is a NUL-terminated `char*`; `#\\a` is a one-byte `char` (with named forms
-such as `#\\space` and `#\\newline`). Use C's `strlen` when a string length is
-needed.
+such as `#\\space` and `#\\newline`).
 
 Use `;` for a source comment through the end of its line.
 
@@ -98,25 +63,42 @@ of linking policy and makes the front end suitable for embedding.
 
 ## Getting started
 
-Verona's LLVM bindings and native toolchain are supplied by its Nix development
-shell. Install [Nix](https://nixos.org/download/) with flakes enabled, then
-enter the shell from the repository root:
+Install the build prerequisites using your preferred package manager or local
+toolchain setup:
+
+- SBCL with ASDF, and Bash for the server launcher.
+- LLVM 23, Clang, and `llvm-ar`, with LLVM's shared libraries available to SBCL.
+- The bundled CL-LLVM bindings and their Common Lisp dependencies available to
+  ASDF. The bindings are pinned as the `vendor/CL-LLVM` Git submodule from
+  [verona-project/CL-LLVM](https://github.com/verona-project/CL-LLVM).
+- Autoconf, Automake, and Make.
+
+Initialize the submodule from the repository root (or clone Verona with
+`git clone --recurse-submodules`), then set the bindings directory:
 
 ```sh
-nix develop
+git submodule update --init --recursive
+export VERONA_CL_LLVM="$PWD/vendor/CL-LLVM"
 ```
 
-From that shell, bootstrap and configure the Autotools build. This is required
-from a Git checkout because generated Autotools files are not committed:
+Use the recorded submodule commit when updating a checkout; the fork's default
+branch may target a different LLVM version.
+
+From the repository root, bootstrap and configure the Autotools build. Generated
+Autotools files are not committed, so this is required from a Git checkout:
 
 ```sh
 autoreconf -fi
 ./configure
 ```
 
-`configure` locates `clang` and `llvm-ar`. The Nix shell supplies both.
-Outside Nix, provide their locations with `--with-linker=PATH` and
-`--with-archiver=PATH`.
+`configure` locates SBCL, `clang`, and `llvm-ar` on `PATH`. Use
+`--with-linker=PATH` and `--with-archiver=PATH` to select explicit tool paths.
+
+> **Optional Nix environment:** If you use Nix 2.27 or later with flakes enabled, run
+> `nix develop` from the repository root before the commands above. The provided
+> shell supplies the pinned LLVM bindings, SBCL dependencies, and native
+> toolchain, and sets `VERONA_CL_LLVM`, `VERONA_LINKER`, and `VERONA_AR`.
 
 Build the standalone command-line executable with SBCL's runtime bundled into
 the image:
@@ -125,15 +107,18 @@ the image:
 make build
 ```
 
-This creates `build/verona`. Run the full test suite with:
+This creates `build/verona` and `build/verona-server`. The compiler executable
+bundles SBCL; the server launcher uses an SBCL executable from its environment.
+Run the full test suite with:
 
 ```sh
 make test
 ```
 
 To install the command, configure the desired prefix (default: `/usr/local`)
-and run `make install`. This installs `verona` and the `verona-server` Bash launcher side by side in the configured
-`bin` directory. The launcher embeds its Lisp entry point:
+and run `make install`. This installs `verona` and the `verona-server` Bash
+launcher side by side in `PREFIX/bin`. The launcher embeds its Lisp entry point;
+no separate server Lisp file is installed:
 
 ```sh
 ./configure --prefix=/path
@@ -213,17 +198,36 @@ The planned language and tooling work is described in the
 
 ## Editor support
 
-An Emacs major mode is included at
-[`editors/emacs/verona-mode.el`](editors/emacs/verona-mode.el).  Add that
-directory to `load-path` and load the mode from your Emacs configuration:
+The included `verona-mode` provides syntax highlighting and Lisp-style
+indentation for `.vrn`, `.verona`, and `verona.build` files. The optional
+`verona-ide` integration adds SLIME sessions, explicit module evaluation,
+completion, Eldoc, Xref, Flymake diagnostics, inspection, and project build/run
+commands. Emacs 28.1 or later and an installed SLIME package are required for
+the IDE integration.
 
 ```elisp
-(add-to-list 'load-path "/path/to/verona/editors/emacs")
+(add-to-list 'load-path "/absolute/path/to/verona/editors/emacs")
 (require 'verona-mode)
+(require 'verona-ide)
+(setq verona-server-directory "/absolute/path/to/verona")
 ```
 
-It automatically selects itself for `.vrn`, `.verona`, and `verona.build`
-files, and provides Verona-aware font locking and Lisp-style indentation.
+Configure the server environment using the [Emacs setup guide](editors/emacs/README.md),
+then use this workflow:
+
+1. Run `M-x verona-help` to inspect the environment and launcher checklist.
+2. Run `M-x verona-start-server` and wait for the readiness message.
+3. Run `M-x verona-open-project` and select a folder with `verona.build` and a target.
+4. Use `C-c C-e` to analyze a module and its dependencies, including unsaved
+   buffers. Use `verona-ide-build` or `verona-ide-run` to build saved files.
+5. Run `verona-close-project` to release the project session, then
+   `verona-stop-server` to shut down the managed server.
+
+Startup, project opening, edits, saves, and queries never trigger evaluation or
+builds. Analysis diagnostics appear through Flymake and
+`verona-ide-project-diagnostics`; build and run results appear in separate
+`*Verona build*` buffers. The [Emacs guide](editors/emacs/README.md) covers
+configuration, targets, reconnecting, and troubleshooting.
 
 ## License
 
