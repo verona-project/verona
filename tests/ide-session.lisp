@@ -535,7 +535,7 @@
       (is (eq cancelled (verona.ide:evaluate-request store id cancelled)))
       (is (eq :cancelled (verona.ide:request-status cancelled))))))
 
-(test ide-analyzes-and-reuses-transitive-overlays
+(test ide-analyzes-and-replays-transitive-overlays
   (let* ((store (verona.ide:make-session-store))
          (id (verona.ide:create-session store (verona.ide:make-configuration)))
          (leaf (verona.ide:open-buffer store id "leaf"
@@ -549,7 +549,7 @@
     (let* ((previous (verona.ide:query-result store id (verona.ide:source-id leaf)))
            (environment (compilation-unit-semantic-program (verona.ide:result-value previous))))
       (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main))))
-      (is (eq previous (verona.ide:query-result store id (verona.ide:source-id leaf))))
+      (is (not (eq previous (verona.ide:query-result store id (verona.ide:source-id leaf)))))
       (is (eq environment (compilation-unit-semantic-program (verona.ide:result-value previous))))
       (verona.ide:edit-buffer store id "leaf" "(function value () i32 9) (export value)")
       (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main))))
@@ -1468,3 +1468,36 @@
              (namestring (asdf:system-relative-pathname :verona "tests/ide-store-reload.lisp")))
        :output :string :error-output :string :ignore-error-status t)
     (is (eql 0 code) "Live-store reload failed:~%~A~%~A" out err)))
+
+(test ide-compiler-state-replays-imports-and-discards-failures
+  (let* ((store (verona.ide:make-session-store))
+         (id (verona.ide:create-session store (verona.ide:make-configuration :reader-features '("registry"))))
+         (dependency
+           (verona.ide:open-buffer store id "state-library"
+             "(macro initialize ()
+                (let ((n (compiler:state-ref 'count 0)))
+                  (compiler:state-set! 'count (+ n 1)) (definitions)))
+              (initialize)" :path "ide-state-library.vrn"))
+         (text "(import ide-state-library :as lib)
+                (macro verify ()
+                  (cond ((and (= (compiler:state-ref 'count) 1)
+                              (compiler:feature? 'REGISTRY)) (definitions))
+                        (true missing)))
+                (verify)
+                (function value () i32 7)")
+         (main (verona.ide:open-buffer store id "state-main" text :path "ide-state-main.vrn")))
+    (declare (ignore dependency))
+    (dotimes (iteration 2)
+      (declare (ignore iteration))
+      (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main)))))
+    (verona.ide:edit-buffer store id "state-main"
+      "(import ide-state-library) (macro fail ()
+         (let ((ignored (compiler:state-set! 'count 99))) missing)) (fail)")
+    (is (eq :failed (verona.ide:request-status (verona.ide:evaluate-module store id main))))
+    (verona.ide:edit-buffer store id "state-main" text)
+    (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main))))
+    (verona.ide:configure-session store id (verona.ide:make-configuration :reader-features nil))
+    (is (eq :failed (verona.ide:request-status (verona.ide:evaluate-module store id main))))
+    (verona.ide:configure-session store id (verona.ide:make-configuration :reader-features '("registry")))
+    (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main))))
+    (verona.ide:close-session store id)))

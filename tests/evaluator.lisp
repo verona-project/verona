@@ -139,3 +139,107 @@
                                             (make-hash-table))))
      (signals verona::invalid-macro-result-error
        (expand (first (read-source (make-source "macro.vrn" "(invalid)"))) environment)))))
+
+(test compile-time-control-and-empty-list-contract
+  (dolist (source '("nil" "'nil" "'()" "(cond)" "(cond (false 1))"))
+    (is (null (evaluate-macro-data-form source))))
+  (is (= 7 (evaluate-macro-data-form
+             "(let ((x 3) (y (+ x 4))) x (cond (false missing) (true y)))")))
+  (is (verona::compile-time-condition (evaluate-macro-data-form "(and)")))
+  (is (not (verona::compile-time-condition (evaluate-macro-data-form "(or)"))))
+  (is (not (verona::compile-time-condition (evaluate-macro-data-form "(and false missing)"))))
+  (is (verona::compile-time-condition (evaluate-macro-data-form "(or true missing)")))
+  (is (verona::compile-time-condition (evaluate-macro-data-form "(not false)")))
+  (dolist (source '("(cond (nil 1))" "(and true 1)" "(or false nil)"
+                    "(not nil)" "(cond (true))" "(cond (true 1) malformed)"
+                    "(let ((x 1) (x 2)) x)" "(let ((x)) x)" "(let ())"
+                    "(let ((nil 1)) nil)"))
+    (signals verona::evaluator-error (evaluate-macro-data-form source)))
+  (let ((environment (verona::make-compilation-environment)))
+    (evaluate (first (read-source (make-source "scope.vrn" "(let ((local 1)) local)"))) environment)
+    (signals unbound-name-error (environment-lookup environment (make-verona-name "local")))))
+
+(test compile-time-data-library
+  (dolist (source '("(equal? '(a (b) m:c) '(a (b) m:c))"
+                    "(equal? '(nil) '(()))" "(equal? true true)"
+                    "(not (equal? false nil))" "(not (equal? unit nil))"
+                    "(number? 1.5)" "(integer? 999999999999999999999999)"
+                    "(string? \"x\")" "(symbol? 'm:x)" "(keyword? ':name)"
+                    "(not (keyword? (keyword \"name\")))" "(list? nil)" "(empty? nil)"
+                    "(boolean? false)" "(= (+) 0)" "(= (*) 1)"
+                    "(= (- 4) -4)" "(= (/ 4 2) 2)" "(= (/ 1 2) 0.5)"
+                    "(= (quotient -7 3) -2)" "(= (remainder -7 3) -1)"
+                    "(= (abs -3) (min 3 9))" "(= (max 3 9) 9)"
+                    "(< 1 2 3)" "(<= 1 1 2)" "(> 3 2 1)" "(>= 2 2 1)"
+                    "(/= 1 2 3)" "(not (/= 1 2 1))"
+                    "(equal? (take 2 '(a b c)) '(a b))"
+                    "(equal? (drop 2 '(a b c)) '(c))"
+                    "(equal? (nth 1 '(a b)) 'b)" "(equal? (reverse '(a b)) '(b a))"
+                    "(equal? (take 0 nil) nil)" "(equal? (drop 0 nil) nil)"
+                    "(plist-has? '(:a nil) ':a)" "(not (plist-has? '(:a nil) ':b))"
+                    "(equal? (plist-ref '(:a nil) ':a 7) nil)"
+                    "(= (plist-ref nil ':a 7) 7)"
+                    "(equal? (plist-set '(:a 1 :b 2) ':a 3) '(:a 3 :b 2))"
+                    "(equal? (plist-set '(:a 1) ':b 2) '(:a 1 :b 2))"
+                    "(equal? (plist-remove '(:a 1 :b 2) ':a) '(:b 2))"
+                    "(equal? (plist-keys '(:a 1 :b 2)) '(:a :b))"
+                    "(alist-has? '((key nil)) 'key)"
+                    "(equal? (alist-ref '((key nil)) 'key 7) nil)"
+                    "(equal? (alist-set '((a 1) (b 2)) 'a 3) '((a 3) (b 2)))"
+                    "(equal? (alist-remove '((a 1) (b 2)) 'a) '((b 2)))"
+                    "(equal? (alist-keys '((a 1) (b 2))) '(a b))"
+                    "(equal? (alist-values '((a 1) (b 2))) '(1 2))"
+                    "(string= (string-join (string-split \"a,,b,\" \",\") \",\") \"a,,b,\")"
+                    "(string= (string-replace \"aaaaa\" \"aa\" \"x\") \"xxa\")"
+                    "(string-prefix? \"ab\" \"abc\")" "(string-suffix? \"bc\" \"abc\")"
+                    "(not (string-prefix? \"A\" \"abc\"))"
+                    "(string= (keyword-name ':name) \"name\")"
+                    "(equal? (symbol->keyword 'name) ':name)"
+                    "(equal? (symbol->keyword ':name) ':name)"
+                    "(equal? (keyword->symbol ':name) 'name)"
+                    "(= (string->number (number->string 12345678901234567890)) 12345678901234567890)"
+                    "(= (string->number (number->string 1.25)) 1.25)"))
+    (is (verona::compile-time-condition (evaluate-macro-data-form source)) "~A" source))
+  (dolist (source '("(/ 1 0)" "(quotient 1.5 2)" "(+ true 1)" "(min)"
+                    "(nth -1 '(a))" "(nth 1 '(a))" "(take 2 '(a))"
+                    "(plist-ref '(:a 1 :a 2) ':a)" "(plist-keys '(:a))"
+                    "(alist-values '((a 1 2)))" "(alist-keys '((a 1) (a 2)))"
+                    "(string-split \"abc\" \"\")" "(string->number \"1/2\")"
+                    "(string->number \"1 2\")" "(keyword-name 'name)"))
+    (signals verona::evaluator-error (evaluate-macro-data-form source))))
+
+(test compile-time-errors-retain-source
+  (handler-case (evaluate-macro-data-form "(let ((x 1)) (+ x nil))")
+    (verona::evaluator-error (condition)
+      (is (not (null (verona::condition-primary-range condition)))))))
+
+(test compile-time-state-copies-and-presence
+  (let* ((verona::*expansion-context*
+           (verona::make-expansion-context :session (verona::make-compilation-session)))
+         (key (make-verona-name "key"))
+         (input (list (copy-seq "hello"))))
+    (verona::compile-time-state-set key input)
+    (setf (char (first input) 0) #\X)
+    (let ((output (verona::compile-time-state-ref key)))
+      (is (string= "hello" (first output)))
+      (setf (char (first output) 0) #\Y)
+      (is (string= "hello" (first (verona::compile-time-state-ref key)))))
+    (verona::compile-time-state-set key nil)
+    (is (verona::compile-time-condition (verona::compile-time-state-has key)))
+    (is (null (verona::compile-time-state-ref key 7)))
+    (is (verona::compile-time-condition (verona::compile-time-state-remove key)))
+    (is (not (verona::compile-time-condition (verona::compile-time-state-remove key))))
+    (is (= 7 (verona::compile-time-state-ref key 7))))
+  (signals verona::evaluator-error (evaluate-macro-data-form "(compiler:state-ref 'key)")))
+
+(test malformed-host-lists-produce-source-aware-diagnostics
+  (let ((environment (verona::make-compilation-environment))
+        (cycle (list 1)))
+    (setf (cdr cycle) cycle)
+    (dolist (value (list cycle (cons 1 2)))
+      (environment-bind environment (make-verona-name "malformed") value)
+      (dolist (source '("(length malformed)" "(reverse malformed)" "(take 1 malformed)"))
+        (let ((form (first (read-source (make-source "host-list.vrn" source)))))
+          (handler-case (progn (evaluate form environment) (fail "expected an evaluator diagnostic"))
+            (verona::evaluator-error (condition)
+              (is (typep (verona::condition-primary-range condition) 'verona:source-range)))))))))

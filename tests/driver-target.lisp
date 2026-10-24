@@ -107,3 +107,21 @@
              (is (probe-file object))))
       (when (probe-file source) (delete-file source))
       (when (probe-file object) (delete-file object)))))
+
+(test compiler-macro-features-agree-with-native-and-cross-reader
+  (dolist (triple (list nil "x86_64-unknown-linux-gnu" "aarch64-apple-darwin"))
+    (let* ((target (verona.compiler:resolve-compilation-target :triple triple
+                                                            :reader-features '("PROJECT-SWITCH")))
+           (unit (verona:compile-string (verona:make-compiler)
+                   "(macro verify ()
+                      (cond ((and (compiler:feature? 'project-switch)
+                                  (= (plist-ref (compiler:target-info) ':pointer-width) 64))
+                             (definitions))
+                            (true missing)))
+                    #+project-switch (verify)
+                    #-project-switch missing" :target target))
+           (verona::*expansion-context* (verona::module-expansion-context unit)))
+      (is (equal (mapcar #'string-downcase (verona:target-feature-names target))
+                 (verona::expansion-context-features verona::*expansion-context*)))
+      (is (string= (verona.compiler:compilation-target-triple target)
+                   (second (verona::target-compile-time-info target)))))))

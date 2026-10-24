@@ -43,6 +43,10 @@ OVERRIDES is a MAKE-CONFIGURATION keyword plist; explicit keys win."
                      (list (verona.compiler:verona-environment-source-directory environment)
                            (verona.compiler:verona-environment-library-directory environment))
                      :target (list :triple (verona.compiler:compilation-target-triple resolved)
+                                   :cpu (verona.compiler:compilation-target-cpu resolved)
+                                   :data-layout (verona.compiler:compilation-target-data-layout resolved)
+                                   :object-format (string-downcase
+                                                   (symbol-name (verona.compiler:compilation-target-object-format resolved)))
                                    :platform (verona.compiler:compilation-target-platform resolved)
                                    :pointer-width (verona.compiler:compilation-target-pointer-width resolved))
                      :reader-features (verona:target-feature-names resolved))))

@@ -2,5 +2,6 @@
   (root macro-expansion)
   (module-path "src")
   (module-path "../base/src")
+  (module-path "../libc/src")
   (target native)
   (optimize 0))

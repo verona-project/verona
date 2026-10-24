@@ -97,3 +97,100 @@
     (lambda (compiler)
       (signals verona:private-declaration-access
         (compile-module compiler "app"))))))
+
+(test compiler-state-cross-module-aliases-and-fresh-sessions
+  (call-with-module-fixture
+   '(("models.vrn" . "
+      (macro initialize ()
+        (let ((old (compiler:state-ref 'models:types nil)))
+          (compiler:state-set! 'models:types (cons 'Point old))
+          (compiler:state-set! 'global 10)
+          (definitions)))
+      (initialize)
+      (macro add (key item)
+        (let ((items (compiler:state-ref key nil)))
+          (compiler:state-set! key (append items (list item)))
+          (definitions)))
+      (export add)")
+     ("other.vrn" . "
+      (macro initialize ()
+        (let ((ignored (compiler:state-set! 'other:types '(Other)))) (definitions)))
+      (initialize)")
+     ("app.vrn" . "
+      (import models :as m)
+      (import models :as n)
+      (import other)
+      (m:add m:types Extra)
+      (macro check ()
+        (let ((entries (compiler:state-ref 'models:types)))
+          (cond ((and (equal? entries '(Point Extra))
+                      (equal? (compiler:state-ref 'n:types) entries)
+                      (= (compiler:state-ref 'global) 10)
+                      (equal? (compiler:state-ref 'other:types) '(Other)))
+                 (compiler:state-set! 'verified true)
+                 (definitions))
+                (true missing))))
+      (check)"))
+   (lambda (compiler)
+     (let* ((first (compile-module compiler "app"))
+            (second (compile-module compiler "app"))
+            (one (verona::module-expansion-context first))
+            (two (verona::module-expansion-context second)))
+       (is (not (eq (verona::expansion-context-session one) (verona::expansion-context-session two))))
+       (dolist (context (list one two))
+         (let ((verona::*expansion-context* context))
+           (is (verona::compile-time-condition
+                (verona::compile-time-state-ref (make-verona-name "verified")))))
+         (let ((verona::*expansion-context* context))
+           (is (verona::compile-time-equal
+                (list (make-verona-name "Point") (make-verona-name "Extra"))
+                (verona::compile-time-state-ref
+                 (verona:make-qualified-name (verona:make-module-name (make-verona-name "m"))
+                                      (make-verona-name "types")))))))))))
+
+(test compiler-state-expression-expansion-is-once-per-source-form
+  (let* ((unit (verona:compile-source
+                (make-source "expression-state.vrn"
+                  "(macro tick ()
+                     (let ((n (compiler:state-ref 'count 0)))
+                       (compiler:state-set! 'count (+ n 1))
+                       7))
+                   (function identity (for (T)) ((x T)) T (let ((ignored i32 (tick))) x))
+                   (function a () i32 (identity 1))
+                   (function b ((value i64)) i64 (identity value))")))
+         (verona::*expansion-context* (verona::module-expansion-context unit)))
+    (is (= 1 (verona::compile-time-state-ref (make-verona-name "count"))))))
+
+(test compiler-state-unknown-qualifier-and-runtime-nil-diagnostics
+  (signals verona::evaluator-error
+    (verona:compile-source (make-source "bad-state.vrn"
+      "(macro invalid () (compiler:state-ref 'unknown:types)) (invalid)")))
+  (dolist (source '("(function bad () i32 nil)"
+                    "(macro empty () nil) (function bad () i32 (empty))"))
+    (signals verona::semantic-error (verona:compile-source (make-source "runtime-nil.vrn" source)))))
+
+(test compiler-state-statements-run-at-top-level-in-source-order
+  (call-with-module-fixture
+   '(("registry.vrn" . "(compiler:state-set! 'registry:items '(first))")
+     ("app.vrn" . "
+      (compiler:state-set! 'count 0)
+      (import registry :as r)
+      (let ((items (compiler:state-ref 'r:items)))
+        (compiler:state-set! 'r:items (append items '(second)))
+        (compiler:state-set! 'count (+ (compiler:state-ref 'count) 1)))
+      (macro update () '(compiler:state-set! 'count 2))
+      (update)
+      (cond ((= (compiler:state-ref 'count) 2)
+             (compiler:state-set! 'verified true))
+            (true missing))
+      (compiler:state-set! 'temporary nil)
+      (compiler:state-remove! 'temporary)
+      (macro value () (length (compiler:state-ref 'registry:items)))
+      (function main () i32 (value))"))
+   (lambda (compiler)
+     (dotimes (iteration 2)
+       (let* ((unit (compile-module compiler "app"))
+              (verona::*expansion-context* (verona::module-expansion-context unit)))
+         (is (= 2 (verona::compile-time-state-ref (make-verona-name "count"))))
+         (is (verona::compile-time-condition (verona::compile-time-state-ref (make-verona-name "verified"))))
+         (is (not (verona::compile-time-condition (verona::compile-time-state-has (make-verona-name "temporary"))))))))))

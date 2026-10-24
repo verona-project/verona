@@ -28,13 +28,13 @@
            (let ((cached (verona.ide:query-result store id leaf))
                  (unrelated (verona.ide:module-state store id (namestring (truename other)))))
              (verona.ide:evaluate-module store id main)
-             (is (eq cached (verona.ide:query-result store id leaf)))
+             (is (not (eq cached (verona.ide:query-result store id leaf))))
              ;; Edits and read-only queries preserve all evaluated products.
              (verona.ide:edit-buffer store id "leaf"
                "(function answer () exit-code 9) (export answer)")
              (verona.ide:list-definitions store id)
              (verona.ide:project-diagnostics store id)
-             (is (eq cached (verona.ide:query-result store id leaf)))
+             (is (not (eq cached (verona.ide:query-result store id leaf))))
              (is (eq :complete (getf (verona.ide:module-state store id main) :status)))
              (verona.ide:evaluate-module store id leaf)
              (is (eq :needs-evaluation (getf (verona.ide:module-state store id main) :status)))

@@ -1,0 +1,305 @@
+(in-package #:verona)
+
+;;; Plain compile-time values; no native backend dependencies.
+(defun compile-time-equal (left right)
+  (cond ((and (verona-name-p left) (verona-name-p right)) (verona-name= left right))
+        ((and (qualified-name-p left) (qualified-name-p right))
+         (string= (qualified-name-string left) (qualified-name-string right)))
+        ((and (verona-boolean-literal-p left) (verona-boolean-literal-p right))
+         (eq (verona-boolean-literal-value left) (verona-boolean-literal-value right)))
+        ((and (unit-literal-p left) (unit-literal-p right)) t)
+        ((and (consp left) (consp right))
+         (and (compile-time-equal (car left) (car right))
+              (compile-time-equal (cdr left) (cdr right))))
+        (t (equal left right))))
+
+(defun copy-compile-time-value (value)
+  (cond ((consp value) (mapcar #'copy-compile-time-value value))
+        ((stringp value) (copy-seq value))
+        ((verona-name-p value) (make-verona-name (copy-seq (verona-name-value value))))
+        ((qualified-name-p value)
+         (make-qualified-name (apply #'make-module-name
+                                    (mapcar #'copy-compile-time-value
+                                            (module-name-components (qualified-name-qualifier value))))
+                              (copy-compile-time-value (qualified-name-name value))))
+        ((verona-boolean-literal-p value)
+         (compile-time-boolean (verona-boolean-literal-value value)))
+        (t value)))
+
+(defun compile-time-number (value)
+  (unless (or (integerp value) (floatp value))
+    (evaluator-fail "expected an integer or floating-point number"))
+  value)
+
+(defun compile-time-arithmetic (operation values minimum)
+  (unless (>= (length values) minimum)
+    (evaluator-fail "arithmetic operation requires at least ~D operands" minimum))
+  (mapc #'compile-time-number values)
+  (let ((result (apply operation values)))
+    ;; Exact divisions remain integers; fractional divisions use floating point.
+    (if (rationalp result)
+        (if (integerp result) result (coerce result 'double-float))
+        result)))
+
+(defun compile-time-index (index values &optional endp)
+  (compile-time-list values)
+  (unless (and (integerp index) (<= 0 index)
+               (if endp (<= index (length values)) (< index (length values))))
+    (evaluator-fail "list index out of bounds"))
+  index)
+
+(defun compile-time-keyword-p (value)
+  (and (verona-name-p value)
+       (> (length (verona-name-value value)) 1)
+       (char= #\: (char (verona-name-value value) 0))))
+
+(defun compile-time-keyword-name (value)
+  (unless (compile-time-keyword-p value) (evaluator-fail "expected a colon-prefixed keyword"))
+  (subseq (verona-name-value value) 1))
+
+(defun compile-time-entries (value plistp)
+  (compile-time-list value)
+  (let ((entries
+          (if plistp
+              (progn
+                (unless (evenp (length value)) (evaluator-fail "property list requires key/value pairs"))
+                (loop for (key item) on value by #'cddr collect (list key item)))
+              (progn
+                (dolist (entry value)
+                  (unless (and (proper-s-expression-list-p entry) (= 2 (length entry)))
+                    (evaluator-fail "association list entries require two elements")))
+                value))))
+    (loop for tail on entries
+          when (find (caar tail) (cdr tail) :key #'first :test #'compile-time-equal)
+            do (evaluator-fail "duplicate collection key"))
+    entries))
+
+(defun compile-time-collection-operation (operation plistp value &rest arguments)
+  (let* ((entries (compile-time-entries value plistp))
+         (key (first arguments))
+         (entry (assoc key entries :test #'compile-time-equal)))
+    (case operation
+      (:ref (if entry (second entry) (second arguments)))
+      (:has (compile-time-boolean entry))
+      (:keys (mapcar #'first entries))
+      (:values (mapcar #'second entries))
+      (otherwise
+       (let ((updated
+               (if (eq operation :remove)
+                   (remove key entries :key #'first :test #'compile-time-equal)
+                   (if entry
+                       (mapcar (lambda (item) (if (eq item entry) (list key (second arguments)) item)) entries)
+                       (append entries (list (list key (second arguments))))))))
+         (copy-compile-time-value (if plistp (apply #'append updated) updated)))))))
+
+(defun compile-time-string (value)
+  (unless (stringp value) (evaluator-fail "expected a string"))
+  value)
+
+(defun compile-time-string-split (string separator)
+  (compile-time-string string)
+  (compile-time-string separator)
+  (when (zerop (length separator)) (evaluator-fail "separator must not be empty"))
+  (loop with start = 0
+        for next = (search separator string :start2 start)
+        collect (subseq string start next)
+        while next do (setf start (+ next (length separator)))))
+
+(defun compile-time-string-join (strings separator)
+  (compile-time-list strings)
+  (compile-time-string separator)
+  (mapc #'compile-time-string strings)
+  (format nil "~{~A~}" (loop for tail on strings append
+                            (if (cdr tail) (list (car tail) separator) (list (car tail))))))
+
+(defun compile-time-parse-number (text)
+  ;; Reuse the language reader, rather than the host Lisp reader.
+  (compile-time-string text)
+  (setf text (string-trim '(#\Space #\Tab #\Newline #\Return) text))
+  (unless (or (integer-literal-p text) (float-literal-p text))
+    (evaluator-fail "invalid numeric string ~S" text))
+  (handler-case
+      (let ((forms (read-source (make-source "<string->number>" text))))
+        (unless (= 1 (length forms)) (evaluator-fail "expected one numeric literal"))
+        (compile-time-number (syntax-datum (first forms))))
+    (error () (evaluator-fail "invalid numeric string ~S" text))))
+
+(defun install-compile-time-operations (environment)
+  (flet ((bind (name function)
+           (environment-bind environment (make-verona-name name) (make-verona-function function)))
+         (predicate (function)
+           (lambda (value) (compile-time-boolean (funcall function value)))))
+    (dolist (spec `(("+" ,#'+ 0) ("-" ,#'- 1) ("*" ,#'* 0) ("/" ,#'/ 1)
+                    ("min" ,#'min 1) ("max" ,#'max 1)))
+      (destructuring-bind (name operation minimum) spec
+        (bind name (lambda (&rest values) (compile-time-arithmetic operation values minimum)))))
+    (bind "abs" (lambda (value) (abs (compile-time-number value))))
+    (dolist (spec `(("quotient" ,#'truncate) ("remainder" ,#'rem)))
+      (destructuring-bind (name operation) spec
+        (bind name (lambda (left right)
+                     (unless (and (integerp left) (integerp right))
+                       (evaluator-fail "integer division requires integer operands"))
+                     (funcall operation left right)))))
+    (dolist (spec `(("=" ,#'=) ("/=" ,#'/=) ("<" ,#'<) ("<=" ,#'<=) (">" ,#'>) (">=" ,#'>=)))
+      (destructuring-bind (name operation) spec
+        (bind name (lambda (&rest values)
+                     (unless (>= (length values) 2) (evaluator-fail "comparison requires at least two operands"))
+                     (mapc #'compile-time-number values)
+                     (compile-time-boolean (apply operation values))))))
+    (bind "not" (lambda (value) (compile-time-boolean (not (compile-time-condition value)))))
+    (bind "equal?" (lambda (left right)
+                     (unless (and (macro-s-expression-p left) (macro-s-expression-p right))
+                       (evaluator-fail "equal? requires finite S-expression values"))
+                     (compile-time-boolean (compile-time-equal left right))))
+    (dolist (spec `(("number?" ,(lambda (v) (or (integerp v) (floatp v))))
+                    ("integer?" ,#'integerp) ("string?" ,#'stringp)
+                    ("symbol?" ,(lambda (v) (or (verona-name-p v) (qualified-name-p v))))
+                    ("keyword?" ,#'compile-time-keyword-p) ("list?" ,#'proper-s-expression-list-p)
+                    ("empty?" ,(lambda (v) (null (compile-time-list v))))
+                    ("boolean?" ,#'verona-boolean-literal-p)))
+      (bind (first spec) (predicate (second spec))))
+    (bind "nth" (lambda (index values) (nth (compile-time-index index values) values)))
+    (bind "take" (lambda (count values) (subseq values 0 (compile-time-index count values t))))
+    (bind "drop" (lambda (count values) (subseq values (compile-time-index count values t))))
+    (bind "reverse" #'compile-time-reverse)
+    (dolist (plistp '(t nil))
+      (dolist (operation '(:ref :has :set :remove :keys :values))
+        (unless (and plistp (eq operation :values))
+          (let ((op operation) (pl plistp))
+            (bind (format nil "~A-~A" (if pl "plist" "alist")
+                          (case op (:has "has?") (t (string-downcase op))))
+                  (lambda (value &rest arguments)
+                    (unless (case op ((:keys :values) (null arguments))
+                                  (:ref (<= 1 (length arguments) 2))
+                                  (:set (= 2 (length arguments)))
+                                  (t (= 1 (length arguments))))
+                      (evaluator-fail "invalid collection operation arity"))
+                    (apply #'compile-time-collection-operation op pl value arguments)))))))
+    (bind "string=" (lambda (left right)
+                       (compile-time-boolean (string= (compile-time-string left) (compile-time-string right)))))
+    (bind "string-split" #'compile-time-string-split)
+    (bind "string-join" #'compile-time-string-join)
+    (bind "string-replace" (lambda (string old new)
+                              (compile-time-string-join (compile-time-string-split string old) new)))
+    (bind "string-prefix?" (lambda (prefix string)
+                             (compile-time-string prefix) (compile-time-string string)
+                             (compile-time-boolean (and (<= (length prefix) (length string))
+                                                       (string= prefix string :end2 (length prefix))))))
+    (bind "string-suffix?" (lambda (suffix string)
+                             (compile-time-string suffix) (compile-time-string string)
+                             (compile-time-boolean (and (<= (length suffix) (length string))
+                                                       (string= suffix string :start2 (- (length string) (length suffix)))))))
+    (bind "keyword-name" #'compile-time-keyword-name)
+    (bind "symbol->keyword" (lambda (value)
+                               (let ((name (compile-time-symbol-name value)))
+                                 (make-verona-name (if (compile-time-keyword-p value) name
+                                                      (concatenate 'string ":" name))))))
+    (bind "keyword->symbol" (lambda (value) (make-verona-name (compile-time-keyword-name value))))
+    (bind "number->string" (lambda (value)
+                              (compile-time-number value)
+                              (if (integerp value) (format nil "~D" value)
+                                  (format nil "~F" value))))
+    (bind "string->number" #'compile-time-parse-number))
+  (install-compile-time-context-operations environment)
+  environment)
+
+(defun require-expansion-context ()
+  (unless (and *expansion-context* (expansion-context-session *expansion-context*))
+    (evaluator-fail "compiler context operation requires an active compilation session"))
+  *expansion-context*)
+
+(defun compile-time-state-key (key)
+  (let* ((context (require-expansion-context))
+         (module (expansion-context-module context)))
+    (unless (macro-s-expression-p key) (evaluator-fail "invalid state key"))
+    (labels ((normalize (value)
+               (cond
+                 ((qualified-name-p value)
+                  (unless module (evaluator-fail "qualified state key requires a current module"))
+                  (let* ((qualifier (qualified-name-qualifier value))
+                         (text (module-name-string qualifier))
+                         (imports (remove-duplicates
+                                   (remove-if-not
+                                    (lambda (import)
+                                      (or (string= text (verona-name-value (import-qualifier-name import)))
+                                          (module-name= qualifier (module-name (import-module import)))))
+                                    (module-imports module))
+                                   :test #'module-name=
+                                   :key (lambda (import) (module-name (import-module import)))))
+                         (selfp (module-name= qualifier (module-name module))))
+                    (when (or (> (length imports) 1) (and selfp imports))
+                      (evaluator-fail "ambiguous state module qualifier ~A" text))
+                    (unless (or selfp imports)
+                      (evaluator-fail "unknown state module qualifier ~A" text))
+                    (make-qualified-name (if selfp (module-name module)
+                                            (module-name (import-module (first imports))))
+                                         (qualified-name-name value))))
+                 ((consp value) (mapcar #'normalize value))
+                 (t value))))
+      (copy-compile-time-value (normalize key)))))
+
+(defun compile-time-state-ref (key &optional default)
+  (let* ((key (compile-time-state-key key))
+         (entry (assoc key (compilation-session-state
+                           (expansion-context-session *expansion-context*))
+                       :test #'compile-time-equal)))
+    (copy-compile-time-value (if entry (cdr entry) default))))
+
+(defun compile-time-state-has (key)
+  (let ((key (compile-time-state-key key)))
+    (compile-time-boolean
+     (assoc key (compilation-session-state (expansion-context-session *expansion-context*))
+            :test #'compile-time-equal))))
+
+(defun compile-time-state-set (key value)
+  (let* ((key (compile-time-state-key key))
+         (session (expansion-context-session *expansion-context*)))
+    (unless (macro-s-expression-p value) (evaluator-fail "state requires an S-expression value"))
+    (let ((entry (assoc key (compilation-session-state session) :test #'compile-time-equal))
+          (copy (copy-compile-time-value value)))
+      (if entry (setf (cdr entry) copy)
+          (setf (compilation-session-state session)
+                (append (compilation-session-state session) (list (cons key copy)))))
+      (copy-compile-time-value copy))))
+
+(defun compile-time-state-remove (key)
+  (let* ((key (compile-time-state-key key))
+         (session (expansion-context-session *expansion-context*))
+         (present (assoc key (compilation-session-state session) :test #'compile-time-equal)))
+    (setf (compilation-session-state session)
+          (remove key (compilation-session-state session) :key #'car :test #'compile-time-equal))
+    (compile-time-boolean present)))
+
+(defgeneric target-compile-time-info (target)
+  (:documentation "Plain target data. NIL fields explicitly mean unavailable."))
+(defmethod target-compile-time-info ((target t))
+  (declare (ignore target))
+  (list (make-verona-name ":triple") nil
+        (make-verona-name ":cpu") nil
+        (make-verona-name ":pointer-width") nil
+        (make-verona-name ":data-layout") nil
+        (make-verona-name ":object-format") nil))
+
+(defmethod target-compile-time-info ((target cons))
+  ;; IDE configurations carry a portable plist instead of a driver object.
+  (loop for key in '(:triple :cpu :pointer-width :data-layout :object-format)
+        append (list (make-verona-name (string-downcase (format nil "~S" key)))
+                     (getf target key))))
+
+(defun install-compile-time-context-operations (environment)
+  (flet ((bind (name function)
+           (environment-bind environment (make-verona-name name) (make-verona-function function))))
+    (bind "compiler:state-ref" #'compile-time-state-ref)
+    (bind "compiler:state-has?" #'compile-time-state-has)
+    (bind "compiler:state-set!" #'compile-time-state-set)
+    (bind "compiler:state-remove!" #'compile-time-state-remove)
+    (bind "compiler:features"
+          (lambda () (copy-compile-time-value (expansion-context-features (require-expansion-context)))))
+    (bind "compiler:feature?"
+          (lambda (name)
+            (compile-time-boolean
+             (member (string-downcase (compile-time-name-component name))
+                     (expansion-context-features (require-expansion-context)) :test #'string=))))
+    (bind "compiler:target-info"
+          (lambda () (copy-compile-time-value
+                      (target-compile-time-info (expansion-context-target (require-expansion-context))))))))

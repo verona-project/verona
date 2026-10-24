@@ -44,6 +44,77 @@ at the expansion boundary so macro code manipulates ordinary Lisp data."
 ;; UNQUOTE evaluated while another unquote is active as a syntax-value lookup.
 (defvar *unquote-evaluation-p* nil)
 
+(define-condition evaluator-error (user-compilation-error)
+  ((syntax :initarg :syntax :reader evaluator-error-syntax)
+   (message :initarg :message :reader evaluator-error-message))
+  (:report (lambda (condition stream)
+             (write-string (evaluator-error-message condition) stream))))
+
+(defvar *evaluation-syntax* nil)
+
+(defstruct compilation-session (state nil))
+(defstruct expansion-context
+  (session nil :read-only t) (module nil :read-only t)
+  (features nil :read-only t) (target nil :read-only t)
+  (expression-cache (make-hash-table :test #'eq) :read-only t))
+(defvar *expansion-context* nil)
+
+(defun evaluator-fail (control &rest arguments)
+  (error 'evaluator-error :syntax *evaluation-syntax*
+         :message (apply #'format nil control arguments)))
+
+(defun compile-time-boolean (value)
+  (make-verona-boolean-literal (not (null value))))
+
+(defun compile-time-condition (value)
+  (unless (verona-boolean-literal-p value)
+    (evaluator-fail "condition requires a boolean, received ~S" value))
+  (verona-boolean-literal-value value))
+
+(defun evaluate-body (forms environment)
+  (unless forms (evaluator-fail "body requires at least one expression"))
+  (let ((result nil))
+    (dolist (form forms result)
+      (setf result (evaluate form environment)))))
+
+(defun evaluate-control (syntax environment)
+  (let ((arguments (rest (verona-list-elements (syntax-datum syntax)))))
+    (cond
+      ((syntax-head-is-p syntax "cond")
+       ;; Validate all clauses, including unreachable ones.
+       (dolist (clause arguments)
+         (unless (and (verona-list-p (syntax-datum clause))
+                      (rest (verona-list-elements (syntax-datum clause))))
+           (evaluator-fail "cond clauses require a test and a body")))
+       (dolist (clause arguments nil)
+         (let ((forms (verona-list-elements (syntax-datum clause))))
+           (when (compile-time-condition (evaluate (first forms) environment))
+             (return (evaluate-body (rest forms) environment))))))
+      ((syntax-head-is-p syntax "let")
+       (unless (and arguments (verona-list-p (syntax-datum (first arguments)))
+                    (rest arguments))
+         (evaluator-fail "let requires bindings and a body"))
+       (let ((child (environment-child environment)) (names nil))
+         (dolist (binding (verona-list-elements (syntax-datum (first arguments))))
+           (let ((parts (and (verona-list-p (syntax-datum binding))
+                             (verona-list-elements (syntax-datum binding)))))
+             (unless (and (= (length parts) 2)
+                          (verona-name-p (syntax-datum (first parts))))
+               (evaluator-fail "let binding requires a name and initializer"))
+             (let ((name (syntax-datum (first parts))))
+               (when (or (string= (verona-name-value name) "nil")
+                         (member name names :test #'verona-name=))
+                 (evaluator-fail "duplicate or reserved let binding"))
+               (push name names)
+               (environment-bind child name (evaluate (second parts) child)))))
+         (evaluate-body (rest arguments) child)))
+      (t
+       (let ((andp (syntax-head-is-p syntax "and")))
+         (dolist (argument arguments (compile-time-boolean andp))
+           (let ((value (compile-time-condition (evaluate argument environment))))
+             (when (if andp (not value) value)
+               (return (compile-time-boolean value))))))))))
+
 (defun proper-s-expression-list-p (value)
   "Whether VALUE is a finite, proper host list."
   (and (listp value)
@@ -52,16 +123,16 @@ at the expansion boundary so macro code manipulates ordinary Lisp data."
              (not (null length)))
          (type-error () nil))))
 
-(defun macro-s-expression-p (value)
-  "Whether VALUE belongs to the macro evaluator's plain S-expression model."
+(defun macro-s-expression-p (value &optional ancestors)
+  "Whether VALUE is finite plain macro data, with no host ratios or objects."
   (cond ((null value) t)
         ((consp value)
-         (and (proper-s-expression-list-p value)
-              (every #'macro-s-expression-p value)))
+         (and (not (member value ancestors :test #'eq))
+              (proper-s-expression-list-p value)
+              (every (lambda (element) (macro-s-expression-p element (cons value ancestors))) value)))
         ((or (verona-name-p value) (qualified-name-p value)
              (unit-literal-p value) (verona-boolean-literal-p value)
-             (stringp value) (characterp value) (numberp value))
-         t)
+             (stringp value) (characterp value) (integerp value) (floatp value)) t)
         (t nil)))
 
 (defun syntax->macro-s-expression (syntax)
@@ -71,6 +142,12 @@ at the expansion boundary so macro code manipulates ordinary Lisp data."
     (if (verona-list-p datum)
         (mapcar #'syntax->macro-s-expression (verona-list-elements datum))
         datum)))
+
+(defun normalize-macro-nil (value)
+  "Interpret NIL as empty data without rewriting compiler syntax tokens."
+  (cond ((and (verona-name-p value) (string= (verona-name-value value) "nil")) nil)
+        ((consp value) (mapcar #'normalize-macro-nil value))
+        (t value)))
 
 (defun macro-s-expression->syntax (value source)
   "Attach SOURCE's provenance to plain macro VALUE at the compiler boundary."
@@ -87,13 +164,15 @@ at the expansion boundary so macro code manipulates ordinary Lisp data."
    (syntax-source source) (syntax-start source) (syntax-end source)))
 
 (define-condition unbound-name-error (user-compilation-error)
-  ((name :initarg :name :reader unbound-name-error-name))
+  ((syntax :initarg :syntax :initform *evaluation-syntax*)
+   (name :initarg :name :reader unbound-name-error-name))
   (:report (lambda (condition stream)
              (format stream "Unbound Verona name ~S"
                      (verona-name-value (unbound-name-error-name condition))))))
 
 (define-condition not-callable-error (user-compilation-error)
-  ((value :initarg :value :reader not-callable-error-value))
+  ((syntax :initarg :syntax :initform *evaluation-syntax*)
+   (value :initarg :value :reader not-callable-error-value))
   (:report (lambda (condition stream)
              (format stream "Verona value ~S is not callable"
                      (not-callable-error-value condition)))))
@@ -276,7 +355,7 @@ forms such as %FUNCTION are therefore left as Verona syntax for later processing
   "Evaluate unquotes in TEMPLATE, producing an ordinary S-expression."
   (let ((datum (syntax-datum template)))
     (if (not (verona-list-p datum))
-        (syntax->macro-s-expression template)
+        (normalize-macro-nil (syntax->macro-s-expression template))
         (cond
           ((syntax-head-is-p template "quasiquote")
            (let ((arguments (special-form-arguments template "quasiquote")))
@@ -298,21 +377,33 @@ forms such as %FUNCTION are therefore left as Verona syntax for later processing
                    (verona-list-elements datum)))))))
 
 (defun evaluate (syntax environment)
+  (let ((*evaluation-syntax* syntax))
+    (handler-case (%evaluate syntax environment)
+      (user-compilation-error (condition) (error condition))
+      (error (condition) (evaluator-fail "~A" condition)))))
+
+(defun %evaluate (syntax environment)
   "Evaluate source-aware Verona SYNTAX in ENVIRONMENT and return a value."
   (check-type syntax syntax)
   (check-type environment environment)
   (let ((datum (syntax-datum syntax)))
     (cond ((verona-name-p datum)
-           (environment-lookup environment datum))
+           (if (string= (verona-name-value datum) "nil") nil
+               (environment-lookup environment datum)))
           ((qualified-name-p datum)
            ;; Compile-time library functions, like imported macros, use the
            ;; stable textual qualified spelling as their evaluator key.
            (environment-lookup environment
                                (make-verona-name (qualified-name-string datum))))
           ((verona-list-p datum)
-           (cond ((syntax-head-is-p syntax "quote")
-                  (syntax->macro-s-expression
-                   (first (special-form-arguments syntax "quote"))))
+           (cond ((null (verona-list-elements datum)) nil)
+                 ((some (lambda (name) (syntax-head-is-p syntax name))
+                        '("cond" "let" "and" "or"))
+                  (evaluate-control syntax environment))
+                 ((syntax-head-is-p syntax "quote")
+                  (normalize-macro-nil
+                   (syntax->macro-s-expression
+                    (first (special-form-arguments syntax "quote")))))
                  ((syntax-head-is-p syntax "quasiquote")
                  (quasiquote-value
                    (first (special-form-arguments syntax "quasiquote")) environment 1))

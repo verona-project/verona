@@ -228,7 +228,7 @@ definition form itself; it needs no compiler-only definition constructor.
 
 | Function | Signature | Result / notes |
 | --- | --- | --- |
-| `+` | `(+ NUMBER...)` | Bootstrap arithmetic binding. It exists for evaluator tests and simple bootstrap macros; it is not a stable general-purpose macro library. |
+| `+` | `(+ NUMBER...)` | Compile-time addition; zero arguments return 0. |
 | `definitions` | `(definitions FORM...)` | Returns zero or more top-level S-expression forms from one macro expansion. Each argument must be an S-expression. |
 | `compiler:call` | `(compiler:call HEAD FORM...)` | Constructs a call S-expression headed by the identifier `HEAD`. |
 | `compiler:map` | `(compiler:map HEAD LIST...)` | Constructs one call to `HEAD` per parallel set of elements. Lists must be proper and equally long. |
@@ -270,6 +270,140 @@ All compile-time lists are finite, proper S-expression lists.
 | `cdr` | `(cdr LIST)` | Return all but the first item of a non-empty proper list. |
 | `append` | `(append LIST...)` | Join zero or more proper lists. |
 | `length` | `(length VALUE)` | Return the length of a string or proper list. |
+
+### Compile-time control and data
+
+`nil`, `'nil`, `'()`, and `()` evaluate to the empty compile-time list.
+It is distinct from `false` and `unit`, and cannot be used as a runtime value.
+Empty data never means zero declarations: return `(definitions)` for that.
+Conditions require `true` or `false`; predicates return Verona booleans.
+
+| Form | Evaluation |
+| --- | --- |
+| `(cond (TEST BODY...) ...)` | First true test selects a nonempty body; no match returns `nil`. Use `true` for an unconditional final test. Malformed clauses are rejected. |
+| `(let ((NAME INITIALIZER) ...) BODY...)` | Sequential immutable local bindings; later initializers see earlier bindings. Duplicate names and binding `nil` are errors. |
+| `(and TEST...)`, `(or TEST...)` | Evaluate left to right, short-circuit, and return a boolean. With no operands return `true` and `false`, respectively. |
+| `(not BOOLEAN)` | Boolean negation. |
+
+Bodies evaluate in order and return their final value. There is no compile-time
+`if` or `do`, and runtime `let` type annotations do not apply here.
+
+| Operations | Contract |
+| --- | --- |
+| `+`, `*` | Zero or more numeric arguments; identities 0 and 1. |
+| `-`, `/` | One or more arguments; unary negation/reciprocal, otherwise left-associated. |
+| `quotient`, `remainder` | Exactly two integers. Quotient truncates toward zero; remainder has the dividend's sign. |
+| `min`, `max`, `abs` | At least one number for min/max; exactly one for abs. |
+| `=`, `/=`, `<`, `<=`, `>`, `>=` | At least two numbers; adjacent ordered comparisons, or all-distinct for `/=`. |
+| `equal?` | Exactly two values; structural comparison, including identifier spelling, qualified identifiers, booleans, and nested lists. |
+| `number?`, `integer?`, `string?`, `symbol?`, `keyword?`, `list?`, `empty?`, `boolean?` | Unary predicates. `symbol?` includes qualified names; `empty?` requires a proper list. |
+| `(nth INDEX LIST)` | Zero-based index, strictly below length. |
+| `(take COUNT LIST)`, `(drop COUNT LIST)` | Count from zero through length, inclusive. |
+| `(reverse LIST)` | Reversed copy. |
+
+Integers have arbitrary precision at compile time. Numeric values are integers
+or floating-point numbers, never host ratios or complex numbers. Integer-only
+arithmetic stays exact; `/` preserves exact integer results and converts
+fractional rational results to double precision. Mixed operations use floating
+point. Division by zero, floating overflow, invalid arity, and invalid operands
+are compiler diagnostics. Emitted integers must fit their inferred or declared
+runtime type; emitted floats must fit the selected floating type.
+
+Property lists alternate keys and values; association lists contain proper
+two-element lists. Both reject duplicate keys using structural equality.
+
+| Operation | Signature |
+| --- | --- |
+| Lookup | `(plist-ref DATA KEY [DEFAULT])`, `(alist-ref DATA KEY [DEFAULT])` |
+| Presence | `(plist-has? DATA KEY)`, `(alist-has? DATA KEY)` |
+| Update | `(plist-set DATA KEY VALUE)`, `(alist-set DATA KEY VALUE)` |
+| Remove | `(plist-remove DATA KEY)`, `(alist-remove DATA KEY)` |
+| Enumerate | `(plist-keys DATA)`, `(alist-keys DATA)`, `(alist-values DATA)` |
+
+Missing lookups return `DEFAULT`, initially `nil`; presence distinguishes a
+missing key from one associated with `nil`. Updates return new values, replace
+in place in the logical order, and append new entries. Inputs remain unchanged.
+
+Strings compare case-sensitively. `(string= LEFT RIGHT)` tests equality;
+`(string-prefix? PREFIX TEXT)` and `(string-suffix? SUFFIX TEXT)` test boundaries.
+`(string-split TEXT SEPARATOR)` preserves empty segments, and
+`(string-join STRINGS SEPARATOR)` joins a proper list of strings.
+`(string-replace TEXT OLD NEW)` replaces all non-overlapping matches from left
+to right. Empty split separators and empty replacement patterns are errors.
+Source strings and emitted runtime strings retain the existing ASCII rules.
+
+`(number->string NUMBER)` formats decimal integers or decimal floats without
+exponents. `(string->number TEXT)` accepts the source grammar for signed decimal
+integers and decimal floats, with surrounding ASCII whitespace; conversion
+failure is a diagnostic. Ratios, exponent notation, and reader expressions are
+rejected. `keyword` remains equivalent to `symbol`: neither inserts a colon.
+`keyword?` recognizes identifier spellings beginning with a colon and containing
+at least one further character. `keyword-name` removes one leading colon;
+`symbol->keyword` adds one unless already present, and `keyword->symbol` removes
+one. The latter two operate on unqualified identifiers; invalid inputs fail.
+
+### Compilation context and session state
+
+| Operation | Result |
+| --- | --- |
+| `(compiler:feature? NAME)` | Case-insensitive reader feature membership; NAME is a string or identifier. |
+| `(compiler:features)` | Copy of the effective reader feature names as normalized strings. |
+| `(compiler:target-info)` | Plist with `:triple`, `:cpu`, `:pointer-width`, `:data-layout`, and `:object-format`; unavailable fields are `nil`. |
+| `(compiler:state-ref KEY [DEFAULT])` | Stored value or default (`nil`). |
+| `(compiler:state-has? KEY)` | Whether an entry exists, including entries holding `nil`. |
+| `(compiler:state-set! KEY VALUE)` | Store VALUE and return a copy of it. |
+| `(compiler:state-remove! KEY)` | Remove the entry and return whether it existed. |
+
+These operations require an active compilation context. The frontend reports
+only available target facts; it does not use host facts for cross targets.
+LLVM CPU feature strings are separate from reader features. Reader conditionals
+are selected before macros run and cannot be changed by state writes.
+
+State operations may also appear directly at module top level. Top-level
+`let`, `cond`, `and`, and `or` can compose and sequence state operations using
+the same evaluator semantics as macro bodies. These expressions run during
+collection in source order, including when emitted by a macro. Their return
+values are discarded as data; they do not implicitly emit declarations.
+
+```lisp
+(compiler:state-set! 'models:types nil)
+(let ((entries (compiler:state-ref 'models:types)))
+  (compiler:state-set! 'models:types (append entries '(Point))))
+```
+
+One fresh store belongs to each build, development macro-expansion request, or
+IDE analysis generation. Every module in that compilation shares it.
+Unqualified keys are session-global. Qualified keys such as `'models:types`
+use the invoking module's import aliases or full imported module identity;
+self qualification works during collection. The named state entry needs no
+declaration or export. Unknown or ambiguous qualifiers are errors.
+Qualification in composite keys is normalized recursively at the state boundary;
+ordinary quoted qualified names remain unchanged elsewhere.
+
+State holds only finite macro S-expressions. Reads, writes, and returned values
+copy lists, names, and strings so callers cannot alter stored values indirectly.
+The lexical environment still comes from the macro definition; session and
+module context come from the active invocation and restore on return or error.
+
+Top-level expansion follows source order. An import loads and collects its
+module immediately, depth first in source import order; each module is loaded
+once per session. Missing keys never trigger loading. After collection, body
+analysis visits modules in dependency-first depth-first source-import order,
+and declarations in source order. Within expressions, expansion follows the
+type checker's deterministic operand traversal and demand-driven specialization.
+Each source expression's outer expansion is cached for the session, including
+across specializations, so revisiting it does not repeat mutations. State reads
+in cached expressions also retain their first expansion result.
+
+IDE generations replay the entire required import closure rather than reusing
+expanded environments. Successful products retain their session; failed or
+cancelled generations are never reused by a later analysis. Independent builds
+and concurrent requests have separate stores. There is no partial state replay.
+
+`compiler:map`, `compiler:reduce`, and `compiler:reduce-right` construct calls;
+they do not invoke arbitrary compile-time functions. Callable helpers, general
+map/filter/fold, and resolved-type reflection remain outside this language.
+See [the runnable registry example](../projects/macro-expansion/README.md).
 
 ### Reader forms
 

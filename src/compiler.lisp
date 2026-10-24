@@ -47,7 +47,8 @@ front-end knows only feature names, avoiding a dependency on a native backend.")
       (funcall thunk)))
 
 (defclass compilation-unit ()
-  ((source :initarg :source
+  ((expansion-context :initform nil :accessor module-expansion-context)
+   (source :initarg :source
            :reader compilation-unit-source
            :reader module-source)
    ;; FORMS preserves the source program independently of declaration
@@ -102,7 +103,9 @@ front-end knows only feature names, avoiding a dependency on a native backend.")
    (source :initarg :source :reader native-export-spec-source)))
 
 (defclass module-loader ()
-  ((search-paths :initarg :search-paths :reader module-loader-search-paths)
+  ((session :initform (make-compilation-session) :reader module-loader-session)
+   (target :initarg :target :initform nil :reader module-loader-target)
+   (search-paths :initarg :search-paths :reader module-loader-search-paths)
    (features :initarg :features :initform '() :reader module-loader-features)
    (loaded-modules :initform '() :accessor module-loader-loaded-modules)
    (loading-stack :initform '() :accessor module-loader-loading-stack)))
@@ -501,7 +504,8 @@ never evaluates a declaration body."
                         "%macro expected ~:[exactly ~;at least ~]~D argument~:P, received ~D"
                         (not (null rest-name))
                         (length parameter-names) (length arguments)))
-     (let ((macro-environment (environment-child environment)))
+     (let ((macro-environment (environment-child environment))
+           (arguments (mapcar #'normalize-macro-nil arguments)))
        (loop for name in parameter-names
              for argument in arguments
              do (environment-bind macro-environment name argument))
@@ -997,14 +1001,14 @@ or inventing attributes that its own surface language does not define."
 
 (defun compile-time-list (values)
   "Validate VALUES as a proper macro S-expression list."
-  (unless (proper-s-expression-list-p values)
-    (error "list operation requires a proper list, received ~S" values))
+  (unless (and (proper-s-expression-list-p values) (macro-s-expression-p values))
+    (evaluator-fail "list operation requires a finite proper list"))
   values)
 
 (defun compile-time-cons (value list)
   "Prepend VALUE to a proper macro list."
   (unless (macro-s-expression-p value)
-    (error "cons requires an S-expression value, received ~S" value))
+    (evaluator-fail "cons requires a finite S-expression value"))
   (cons value (compile-time-list list)))
 
 (defun compile-time-car (list)
@@ -1029,7 +1033,7 @@ or inventing attributes that its own surface language does not define."
   "Return the length of a macro list or string."
   (cond ((stringp value) (length value))
         ((proper-s-expression-list-p value) (length value))
-        (t (error "length requires a string or proper list, received ~S" value))))
+        (t (evaluator-fail "length requires a string or finite proper list"))))
 
 (defun compile-time-call-head (operation head)
   "Validate HEAD as the name of a call constructed by OPERATION."
@@ -1136,6 +1140,7 @@ or inventing attributes that its own surface language does not define."
                       (make-verona-function #'compile-time-append))
     (environment-bind environment (make-verona-name "length")
                       (make-verona-function #'compile-time-length))
+    (install-compile-time-operations environment)
     environment))
 
 (defun top-level-form-head (form)
@@ -1222,8 +1227,26 @@ with a Verona module EXPORT."
 
 (defvar *collection-observer* nil)
 
+(defun top-level-compile-time-expression-p (form)
+  "Recognize state statements and control forms used to sequence them."
+  (let* ((datum (syntax-datum form))
+         (head (and (verona-list-p datum)
+                    (first (verona-list-elements datum))))
+         (name (and head (syntax-datum head))))
+    (member (cond ((verona-name-p name) (verona-name-value name))
+                  ((qualified-name-p name) (qualified-name-string name)))
+            '("compiler:state-ref" "compiler:state-has?" "compiler:state-set!"
+              "compiler:state-remove!" "let" "cond" "and" "or")
+            :test #'equal)))
+
 (defun collect-module (module loader)
-  (let ((environment (module-environment module)))
+  (unless (module-expansion-context module)
+    (setf (module-expansion-context module)
+          (make-expansion-context :session (module-loader-session loader)
+                                  :module module :target (module-loader-target loader)
+                                  :features (mapcar #'feature-name-string (module-loader-features loader)))))
+  (let ((environment (module-environment module))
+        (*expansion-context* (module-expansion-context module)))
     ;; Only top-level forms reach the definition processor.  Expansion is
     ;; sequential because a preceding %MACRO can affect a following form.
     (dolist (form (module-forms module))
@@ -1240,7 +1263,10 @@ with a Verona module EXPORT."
                           (expand-top-level form environment)))
                  (when *collection-observer*
                    (funcall *collection-observer* :expanded module expanded-syntax))
-                 (process-definition environment module form expanded-syntax))))
+                 (if (top-level-compile-time-expression-p expanded-syntax)
+                     ;; Statement results are data, never implicit declarations.
+                     (evaluate expanded-syntax environment)
+                     (process-definition environment module form expanded-syntax)))))
       (when *collection-observer* (funcall *collection-observer* :collected module form)))
     (resolve-module-exports module)
     (setf (module-native-export-specs module) (nreverse (module-native-export-specs module)))
@@ -1248,6 +1274,18 @@ with a Verona module EXPORT."
 
 (defun module-loader-find (loader name)
   (cdr (assoc name (module-loader-loaded-modules loader) :test #'module-name=)))
+
+(defun module-compilation-order (entry)
+  "Dependency-first depth-first order, visiting imports in source order."
+  (let ((seen (make-hash-table :test #'eq)) (modules nil))
+    (labels ((visit (module)
+               (unless (gethash module seen)
+                 (setf (gethash module seen) t)
+                 (dolist (import (reverse (module-imports module)))
+                   (visit (import-module import)))
+                 (push module modules))))
+      (visit entry))
+    (nreverse modules)))
 
 (defun module-source-pathname (loader name)
   (let ((filename (format nil "~A.vrn" (module-name-string name))))
@@ -1296,6 +1334,7 @@ with a Verona module EXPORT."
                               (lambda () (collect-module module
                                                          (make-instance 'module-loader
                                                                         :search-paths '()
+                                                                        :target target
                                                                         :features features))))
     (call-with-compiler-phase compiler :resolve-and-typecheck
                               (lambda () (resolve-program module (list module)
@@ -1313,13 +1352,19 @@ with a Verona module EXPORT."
                    (make-source name source-or-contents))
                :features (target-feature-names target)))
 
-(defun macroexpand-verona (syntax-or-contents &key (name "<string>") environment)
+(defun macroexpand-verona (syntax-or-contents &key (name "<string>") environment target)
   "Expand a top-level Verona form and retain expansion provenance."
-  (let ((environment (or environment (make-compilation-environment))))
+  (let* ((environment (or environment (make-compilation-environment)))
+         (module (make-instance 'module :name (make-module-name (make-verona-name "string"))
+                                :source (make-source name "") :forms nil :environment environment))
+         (*expansion-context*
+           (or *expansion-context*
+               (make-expansion-context :session (make-compilation-session) :module module
+                                       :target target :features (target-feature-names target)))))
     (cond ((typep syntax-or-contents 'syntax)
            (expand-top-level syntax-or-contents environment))
           (t (mapcar (lambda (form) (expand-top-level form environment))
-                     (read-verona syntax-or-contents :name name))))))
+                     (read-verona syntax-or-contents :name name :target target))))))
 
 (defun analyze-verona (source-or-contents &key (name "<string>") target
                                           (pointer-width 64))
@@ -1348,15 +1393,14 @@ with a Verona module EXPORT."
   (let* ((path (pathname pathname))
          (entry-name (module-name-from-pathname path))
          (loader (make-instance 'module-loader
+                                :target target
                                 :search-paths
                                 (cons (make-pathname :name nil :type nil :defaults path)
                                       (compiler-search-paths compiler))
                                 :features (target-feature-names target)))
          (entry (call-with-compiler-phase compiler :read-and-declarations
                                           (lambda () (module-loader-load loader entry-name))))
-         ;; Recursive loading pushes a dependency after its importer has been
-         ;; cached, so the cache's final order is already dependencies-first.
-         (modules (mapcar #'cdr (module-loader-loaded-modules loader))))
+         (modules (module-compilation-order entry)))
     (call-with-compiler-phase compiler :resolve-and-typecheck
                               (lambda () (resolve-program entry modules :target target
                                                           :pointer-width pointer-width)))
@@ -1371,11 +1415,11 @@ with a Verona module EXPORT."
                            (make-syntax (make-verona-name name)
                                         (make-source "<module>" "")
                                         (make-source-location) (make-source-location)))))
-         (loader (make-instance 'module-loader :search-paths (compiler-search-paths compiler)
+         (loader (make-instance 'module-loader :target target :search-paths (compiler-search-paths compiler)
                                 :features (target-feature-names target)))
          (entry (call-with-compiler-phase compiler :read-and-declarations
                                           (lambda () (module-loader-load loader module-name))))
-         (modules (mapcar #'cdr (module-loader-loaded-modules loader))))
+         (modules (module-compilation-order entry)))
     (call-with-compiler-phase compiler :resolve-and-typecheck
                               (lambda () (resolve-program entry modules :target target
                                                           :pointer-width pointer-width)))

@@ -218,3 +218,26 @@
       (is (search "duplicates.vrn:2:1: duplicate definition `answer`" message))
       (is (search "previous definition:" message))
       (is (search "duplicates.vrn:1:1" message)))))
+
+(test nil-round-trips-through-source-macro-arguments
+  (let* ((unit (verona:compile-source
+                (make-source "nil-macro.vrn"
+                  "(macro classify (value)
+                     (cond ((empty? value) 7) (true missing)))
+                   (function a () i32 (classify nil))
+                   (function b () i32 (classify ()))")))
+         (program (compilation-unit-semantic-program unit)))
+    (is (= 2 (length (remove-if-not
+                     (lambda (entry) (typep (car entry) 'verona:function-declaration))
+                     (verona::semantic-program-declarations program)))))))
+
+(test compilation-context-restores-after-nested-module-errors
+  (let* ((outer (verona::make-expansion-context :session (verona::make-compilation-session)))
+         (verona::*expansion-context* outer))
+    (handler-case
+        (verona:compile-source (make-source "context-error.vrn"
+                                "(macro fail () (/ 1 0)) (fail)"))
+      (verona::evaluator-error () nil))
+    (is (eq outer verona::*expansion-context*))
+    (verona::compile-time-state-set (make-verona-name "outer") 9)
+    (is (= 9 (verona::compile-time-state-ref (make-verona-name "outer"))))))

@@ -1,13 +1,29 @@
 (import base)
+(import libc.stdio :as stdio)
+(import models :as m)
 
-;; Application defines the executable entry point. BODY is an ordinary
-;; S-expression, so the generated declaration is still compiled normally.
-(base:macro application (body)
-  `(base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code ,body))
+;; Reads the two descriptions in models:types and generates Rectangle and
+;; Scale here, before the functions that use them are collected.
+(m:generate-types)
 
-;; This is expanded in the body emitted by APPLICATION, demonstrating that
-;; macros work in executable expression positions as well as at top level.
-(base:macro exit-status (status)
-  status)
+(base:function scaled-area ((rectangle Rectangle) (scale Scale)) i32
+  (* (* (field rectangle width) (field rectangle height))
+     (field scale factor)))
 
-(application (exit-status 42))
+;; Print a nonnegative integer as decimal digits using libc character I/O.
+(base:function print-natural ((value i32)) unit
+  (do
+    (match (< value 10)
+      (true unit)
+      (false (print-natural (/ value 10))))
+    (stdio:putchar (+ 48 (- value (* (/ value 10) 10))))
+    unit))
+
+(base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (let ((rectangle Rectangle (Rectangle 3 7))
+        (scale Scale (Scale 2))
+        (result i32 (scaled-area rectangle scale)))
+    (do
+      (print-natural result)
+      (stdio:putchar 10)
+      0)))

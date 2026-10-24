@@ -370,31 +370,13 @@ uses the compiler's reader and import-name parser, including reader features."
              (path (if entry-p (analysis-entry loader) (analysis-find-path loader name)))
              (input (and path (analysis-input loader path))))
         (unless input (error 'verona::module-not-found :module name))
-        (let* ((store (analysis-store loader)) (id (analysis-id loader))
-               (cached (serialized (store)
-                         (gethash (source-id input) (session-environments (require-session store id)))))
-               (prerequisite-error nil)
+        (let* ((prerequisite-error nil)
                (old-stack (verona::module-loader-loading-stack loader)))
           (unwind-protect
                (progn
                  (setf (verona::module-loader-loading-stack loader) (append old-stack (list name)))
-                 ;; Every action walks imports, even when their owning module
-                 ;; is reusable, so changes anywhere in the closure are seen.
-                 (when (and (not entry-p) cached
-                            (= (first cached) (source-revision input))
-                            (= (second cached) (request-configuration-revision (analysis-request loader)))
-                            (eq :complete (getf (module-state store id (source-id input)) :status)))
-                   (handler-case
-                       (let ((module (third cached)))
-                         (when (every (lambda (import)
-                                        (eq (verona::import-module import)
-                                            (verona::module-loader-load loader
-                                             (verona::module-name (verona::import-module import)))))
-                                      (verona::module-imports module))
-                           (push (cons name module) (verona::module-loader-loaded-modules loader))
-                           (return-from verona::module-loader-load module)))
-                     (abandoned-analysis (c) (error c))
-                     (error (c) (setf prerequisite-error c))))
+                 ;; Session state crosses module boundaries: replay imports in source
+                 ;; order each generation instead of reusing expanded environments.
                  (collect-analysis-module loader name path input prerequisite-error))
             (setf (verona::module-loader-loading-stack loader) old-stack))))))
 
@@ -419,7 +401,7 @@ uses the compiler's reader and import-name parser, including reader features."
   ;; Keep one shared semantic/type context, exactly as project compilation does.
   ;; Resolving each dependency in isolation can change generic/protocol semantics.
   (let* ((store (analysis-store loader)) (id (analysis-id loader))
-         (modules (analysis-graph-order entry))
+         (modules (verona::module-compilation-order entry))
          (program nil) (phase :resolution))
     (labels ((scope-context (scope syntax)
                (let* ((module (verona::semantic-scope-owning-module scope))
@@ -544,6 +526,7 @@ Cancellation and supersession use the ordinary request API from another thread."
                                 :search-paths (remove-duplicates
                                                (cons (uiop:pathname-directory-pathname entry)
                                                      (configuration-search-paths configuration)) :test #'equal)
+                                :target (configuration-target configuration)
                                 :features (configuration-reader-features configuration))))
       (handler-case
           (progn

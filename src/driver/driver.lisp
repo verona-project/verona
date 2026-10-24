@@ -343,3 +343,11 @@ in-memory LLVM module, verification, object emission, and toolchain handoff."
 
 (defun compile-file (driver pathname &rest arguments)
   (apply #'compile-root driver pathname arguments))
+
+(defmethod verona::target-compile-time-info ((target compilation-target))
+  (list (verona:make-verona-name ":triple") (compilation-target-triple target)
+        (verona:make-verona-name ":cpu") (compilation-target-cpu target)
+        (verona:make-verona-name ":pointer-width") (compilation-target-pointer-width target)
+        (verona:make-verona-name ":data-layout") (compilation-target-data-layout target)
+        (verona:make-verona-name ":object-format")
+        (string-downcase (symbol-name (compilation-target-object-format target)))))

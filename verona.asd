@@ -9,6 +9,7 @@
                (:file "src/evaluator")
                (:file "src/semantic")
                (:file "src/compiler")
+               (:file "src/compile-time")
                (:file "src/resolver")))
 
 (asdf:defsystem #:verona/backend/llvm

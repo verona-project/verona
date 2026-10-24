@@ -1,0 +1,21 @@
+(import base)
+
+;; Plain compile-time data describes both runtime product types. State is
+;; initialized directly at top level and shared with importing modules.
+(compiler:state-set! 'models:types
+  '((:name Rectangle :fields ((width i32) (height i32)))
+    (:name Scale :fields ((factor i32)))))
+
+;; Emit both declarations into the invoking module. The field descriptions
+;; become ordinary, statically checked Verona product fields.
+(base:macro generate-types ()
+  (let ((types (compiler:state-ref 'models:types))
+        (rectangle (nth 0 types))
+        (scale (nth 1 types)))
+    (definitions
+      `(base:type ,(plist-ref rectangle ':name)
+         ,(cons 'product (plist-ref rectangle ':fields)))
+      `(base:type ,(plist-ref scale ':name)
+         ,(cons 'product (plist-ref scale ':fields))))))
+
+(export generate-types)

@@ -147,3 +147,12 @@
    (assert-invalid-fixture-code "tests/invalid/match/non-exhaustive-bool.verona" "E0601"))
   (void-dereference
    (assert-invalid-fixture-expectation "tests/invalid/memory/void-dereference.vrn")))
+
+(test compile-time-only-runtime-fixtures-have-source-diagnostics
+  (dolist (fixture '("tests/invalid/compile-time/nil.vrn"
+                     "tests/invalid/compile-time/state.vrn"))
+    (let ((diagnostic (captured-diagnostic
+                       (lambda () (verona:compile-string (verona:make-compiler)
+                                      (invalid-fixture fixture) :name fixture)))))
+      (is (search "compile-time-only" (verona:diagnostic-message diagnostic)))
+      (is (typep (verona:diagnostic-primary-location diagnostic) 'verona:source-range)))))

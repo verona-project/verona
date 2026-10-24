@@ -957,6 +957,14 @@ than recovered later through ad-hoc string comparisons."
   (when *scope-observer* (funcall *scope-observer* scope syntax))
   (when *reference-observer* (funcall *reference-observer* scope syntax))
   (let ((name (syntax-datum syntax)))
+    (when (and (verona-name-p name) (string= (verona-name-value name) "nil"))
+      (error 'semantic-error :syntax syntax :message "nil is a compile-time-only empty list"))
+    (when (and (qualified-name-p name)
+               (string= (module-name-string (qualified-name-qualifier name)) "compiler")
+               (member (verona-name-value (qualified-name-name name))
+                       '("feature?" "features" "target-info" "state-ref" "state-has?"
+                         "state-set!" "state-remove!") :test #'string=))
+      (error 'semantic-error :syntax syntax :message "compiler context operations are compile-time-only"))
     (cond ((qualified-name-p name) (resolve-qualified-name scope syntax name))
           ((verona-name-p name)
            (multiple-value-bind (binding foundp) (semantic-scope-find scope name)
@@ -980,7 +988,7 @@ without changing the scope or binding model established here."
 	   (let ((elements (verona-list-elements datum)))
 	     (unless elements
 	       (error 'semantic-error :syntax syntax
-				      :message "an empty list is not an expression"))
+				      :message "an empty list is compile-time-only, not a runtime expression"))
 	     (make-instance 'semantic-call
 			    :syntax syntax
 			    :callee (build-semantic-expression scope (first elements))
@@ -3192,7 +3200,14 @@ expression position."
   (check-type scope semantic-scope)
   (let ((module (semantic-scope-owning-module scope)))
     (if module
-        (expand syntax (module-environment module))
+        (let* ((*expansion-context* (module-expansion-context module))
+               (cache (and *expansion-context*
+                           (expansion-context-expression-cache *expansion-context*))))
+          (if cache
+              (multiple-value-bind (expanded foundp) (gethash syntax cache)
+                (if foundp expanded
+                    (setf (gethash syntax cache) (expand syntax (module-environment module)))))
+              (expand syntax (module-environment module))))
         syntax)))
 
 (defvar *expression-observer* nil)
@@ -3249,7 +3264,7 @@ expression position."
 	   (let ((elements (verona-list-elements datum)))
 	     (unless elements
 	       (error 'invalid-expression-error :syntax syntax
-						:message "an empty list is not an expression"))
+						:message "an empty list is compile-time-only, not a runtime expression"))
 	     (let ((special (expression-special-form-name syntax)))
 	       (cond ((and special (string= special "do"))
 		      (infer-sequence-expression syntax scope))
