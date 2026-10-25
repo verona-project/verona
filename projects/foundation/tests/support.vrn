@@ -1,0 +1,175 @@
+(import base)
+(import testing)
+(import allocator :as a)
+(import foundation.compat.arithmetic :as n)
+(import system_allocator :as system)
+(import error)
+
+(base:type allocation (product (bytes (pointer u8)) (size u64) (alignment u64) (active bool)))
+
+(base:variable records (pointer u8) "")
+
+(base:function initialize ((storage (pointer u8))) unit
+  (do (assign records storage) (assign budget (base:maxBound)) unit))
+
+(base:function record-at ((i u64)) (pointer allocation)
+  (pointer-offset (cast (pointer allocation) (cast (pointer void) records)) i))
+
+; Runtime initialization installs the unlimited allocation budget.
+(base:variable budget u64 0)
+
+(base:variable live u64 0)
+
+(base:variable calls u64 0)
+
+(base:variable frees u64 0)
+
+(base:variable mistakes u64 0)
+
+(base:variable requested-size u64 0)
+
+(base:variable requested-alignment u64 0)
+
+(base:function limit ((count u64)) unit
+  (do (assign budget count) unit))
+
+(base:function outstanding () u64
+  live)
+
+(base:function attempts () u64
+  calls)
+
+(base:function released () u64
+  frees)
+
+(base:function last-size () u64
+  requested-size)
+
+(base:function last-alignment () u64
+  requested-alignment)
+
+(base:function pairing-errors () u64
+  mistakes)
+
+(base:function oom () a:error
+  (out-of-memory))
+
+(base:function free-slot ((i u64)) u64
+  (match (n:eq i 256)
+    (true 256)
+    (false (match (field (deref (record-at i)) active) (false i) (true (free-slot (n:add i 1)))))))
+
+(base:function find-slot ((p (pointer u8)) (i u64)) u64
+  (match (n:eq i 256)
+    (true 256)
+    (false
+      (match (field (deref (record-at i)) active)
+        (false (find-slot p (n:add i 1)))
+        (true
+          (match (== p (field (deref (record-at i)) bytes))
+            (true i)
+            (false (find-slot p (n:add i 1)))))))))
+
+(base:function acquire ((context (pointer void)) (size u64) (alignment u64)) a:result
+  (do
+    (assign calls (n:add calls 1))
+    (assign requested-size size)
+    (assign requested-alignment alignment)
+    (match (n:eq budget 0)
+      (true (a:failure (oom)))
+      (false
+        (do
+          (assign budget (n:sub budget 1))
+          (match (a:allocate (system:create) size alignment)
+            ((failed reason) (a:failure reason))
+            ((allocated p)
+             (let ((i u64 (free-slot 0)))
+               (match (n:eq i 256)
+                 (true
+                   (do
+                     (assign mistakes (n:add mistakes 1))
+                     (a:deallocate (system:create) p size alignment)
+                     (a:failure (oom))))
+                 (false
+                   (do
+                     (store (deref (record-at i)) (allocation p size alignment true))
+                     (assign live (n:add live 1))
+                     (a:success p))))))))))))
+
+(base:function release ((context (pointer void)) (p (pointer u8)) (size u64) (alignment u64)) unit
+  (let ((i u64 (find-slot p 0)))
+    (match (n:eq i 256)
+      (true (do (assign mistakes (n:add mistakes 1)) unit))
+      (false
+        (let ((record allocation (deref (record-at i))))
+          (do
+            (match (n:eq size (field record size))
+              (true unit)
+              (false (do (assign mistakes (n:add mistakes 1)) unit)))
+            (match (n:eq alignment (field record alignment))
+              (true unit)
+              (false (do (assign mistakes (n:add mistakes 1)) unit)))
+            (store (deref (record-at i)) (allocation p size alignment false))
+            (assign live (n:sub live 1))
+            (assign frees (n:add frees 1))
+            (a:deallocate (system:create) p (field record size) (field record alignment))))))))
+
+(base:function backend () a:backend
+  (a:backend (cast (pointer void) "") acquire release))
+
+; Every named test starts with fresh instrumentation and ends with zero live owners.
+(base:function start () testing:result
+  (let ((clean testing:result (testing:check (n:eq live 0))))
+    (do
+      (assign budget (base:maxBound))
+      (assign calls 0)
+      (assign frees 0)
+      (assign mistakes 0)
+      (assign requested-size 0)
+      (assign requested-alignment 0)
+      clean)))
+
+(base:function finish () testing:result
+  (testing:checks (testing:check (n:eq live 0)) (testing:check (n:eq mistakes 0))))
+
+(base:function remainder ((x u64) (divisor u64)) u64
+  (n:sub x (n:mul (n:div x divisor) divisor)))
+
+(base:function pattern ((i u64)) u8
+  (base:convert (remainder (n:add (n:mul i 17) 3) 251)))
+
+(base:function fill ((p (pointer u8)) (count u64) (i u64)) unit
+  (match (n:eq i count)
+    (true unit)
+    (false (do (store (deref (pointer-offset p i)) (pattern i)) (fill p count (n:add i 1))))))
+
+(base:function verify ((p (pointer u8)) (count u64) (i u64)) testing:result
+  (match (n:eq i count)
+    (true (testing:empty))
+    (false
+      (let
+        ((actual u64 (base:convert (deref (pointer-offset p i))))
+         (expected u64 (base:convert (pattern i))))
+        (testing:checks (testing:check (n:eq actual expected)) (verify p count (n:add i 1)))))))
+
+(base:function status-ok ((value error:status)) testing:result
+  (testing:check (match value ((ok) true) (_ false))))
+
+(export
+  allocation
+  initialize
+  limit
+  outstanding
+  attempts
+  released
+  last-size
+  last-alignment
+  pairing-errors
+  backend
+  start
+  finish
+  remainder
+  pattern
+  fill
+  verify
+  status-ok)

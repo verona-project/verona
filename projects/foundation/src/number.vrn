@@ -1,0 +1,57 @@
+(import base)
+(import allocator :as a)
+(import foundation.compat.arithmetic :as n)
+(import data :as d)
+(import error :as e)
+
+; Primitive numbers remain unboxed. Results distinguish malformed text from overflow.
+(base:type result (sum (value u64) (invalid) (overflow)))
+
+(base:type signed-result (sum (signed i64) (overflow)))
+
+(base:function parse-at ((p (pointer u8)) (count u64) (acc u64)) result
+  (match (n:eq count 0)
+    (true (value acc))
+    (false
+      (let ((digit u64 (base:convert (deref p))))
+        (match (n:lt digit 48)
+          (true (invalid))
+          (false
+            (match (n:gt digit 57)
+              (true (invalid))
+              (false
+                (match (a:checked-multiply-size acc 10)
+                  ((tuple false _) (overflow))
+                  ((tuple valid product)
+                   (match (a:checked-add-size product (n:sub digit 48))
+                     ((tuple false _) (overflow))
+                     ((tuple valid sum) (parse-at (pointer-offset p 1) (n:sub count 1) sum)))))))))))))
+
+(base:function parse-u64 ((source d:view)) result
+  (match (n:eq (field source length) 0)
+    (true (invalid))
+    (false (parse-at (field source bytes) (field source length) 0))))
+
+(base:function to-i64 ((number u64)) signed-result
+  (let ((signed-limit i64 (base:maxBound)))
+    (match (n:gt number (base:convert signed-limit))
+      (true (overflow))
+      (false (signed (base:convert number))))))
+
+(base:function format-digits ((number u64) (owner (pointer d:data))) e:status
+  (match (n:ge number 10)
+    (true
+      (match (format-digits (n:div number 10) owner)
+        ((ok)
+         (let ((digit u8 (base:convert (n:add 48 (n:sub number (n:mul (n:div number 10) 10))))))
+           (d:append owner digit)))
+        (reason reason)))
+    (false (let ((digit u8 (base:convert (n:add 48 number)))) (d:append owner digit)))))
+
+(base:function format-u64 ((number u64) (owner (pointer d:data))) e:status
+  ; Reserve all 20 possible decimal digits before changing the destination.
+  (match (d:resize owner 20)
+    ((ok) (match (d:resize owner 0) ((ok) (format-digits number owner)) (reason reason)))
+    (reason reason)))
+
+(export result signed-result parse-u64 to-i64 format-u64)

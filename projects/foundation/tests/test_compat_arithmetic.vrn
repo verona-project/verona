@@ -1,0 +1,110 @@
+(import base)
+(import testing)
+(import foundation.compat.arithmetic :as u)
+(import foundation.compat.signed_arithmetic :as s)
+
+(testing:test unsigned-add
+  (testing:check (u:eq (u:add 20 22) 42)))
+
+(testing:test unsigned-subtract
+  (testing:check (u:eq (u:sub 43 1) 42)))
+
+(testing:test unsigned-multiply
+  (testing:check (u:eq (u:mul 6 7) 42)))
+
+(testing:test unsigned-divide
+  (testing:check (u:eq (u:div 85 2) 42)))
+
+(testing:test unsigned-high-bit
+  (testing:check (u:eq (u:add (u:add (u:div (base:maxBound) 2) 1) 1) (u:add (u:div (base:maxBound) 2) 2))))
+
+(testing:test unsigned-maximum
+  (testing:check (u:eq (u:sub (base:maxBound) 0) (base:maxBound))))
+
+(testing:test unsigned-eq-true
+  (testing:check (u:eq 42 42)))
+
+(testing:test unsigned-lt-true
+  (testing:check (u:lt 0 (base:maxBound))))
+
+(testing:test unsigned-gt-true
+  (testing:check (u:gt (base:maxBound) 0)))
+
+(testing:test unsigned-le-true
+  (testing:check (u:le 42 42)))
+
+(testing:test unsigned-ge-true
+  (testing:check (u:ge 42 42)))
+
+(testing:test unsigned-eq-false
+  (testing:check (match (u:eq 42 43) (true false) (false true))))
+
+(testing:test unsigned-lt-false
+  (testing:check (match (u:lt 42 42) (true false) (false true))))
+
+(testing:test unsigned-gt-false
+  (testing:check (match (u:gt 42 42) (true false) (false true))))
+
+(testing:test unsigned-le-false
+  (testing:check (match (u:le 43 42) (true false) (false true))))
+
+(testing:test unsigned-ge-false
+  (testing:check (match (u:ge 41 42) (true false) (false true))))
+
+(testing:test signed-add
+  (testing:check (s:eq (s:add -43 1) -42)))
+
+(testing:test signed-subtract
+  (testing:check (s:eq (s:sub -41 1) -42)))
+
+(testing:test signed-minimum
+  (testing:check (s:eq (s:add (base:minBound) 0) (base:minBound))))
+
+(testing:test signed-maximum
+  (testing:check (s:eq (s:sub (base:maxBound) 0) (base:maxBound))))
+
+(testing:test signed-eq-true
+  (testing:check (s:eq -42 -42)))
+
+(testing:test signed-lt-true
+  (testing:check (s:lt (base:minBound) 0)))
+
+(testing:test signed-gt-true
+  (testing:check (s:gt 0 (base:minBound))))
+
+(testing:test signed-eq-false
+  (testing:check (match (s:eq -42 42) (true false) (false true))))
+
+(testing:test signed-lt-false
+  (testing:check (match (s:lt 42 -42) (true false) (false true))))
+
+(testing:test signed-gt-false
+  (testing:check (match (s:gt -42 42) (true false) (false true))))
+
+(export
+  unsigned-add
+  unsigned-subtract
+  unsigned-multiply
+  unsigned-divide
+  unsigned-high-bit
+  unsigned-maximum
+  unsigned-eq-true
+  unsigned-lt-true
+  unsigned-gt-true
+  unsigned-le-true
+  unsigned-ge-true
+  unsigned-eq-false
+  unsigned-lt-false
+  unsigned-gt-false
+  unsigned-le-false
+  unsigned-ge-false
+  signed-add
+  signed-subtract
+  signed-minimum
+  signed-maximum
+  signed-eq-true
+  signed-lt-true
+  signed-gt-true
+  signed-eq-false
+  signed-lt-false
+  signed-gt-false)

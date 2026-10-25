@@ -1,0 +1,31 @@
+(import base)
+(import allocator :as a)
+
+(base:type status (sum (ok) (allocation-error a:error) (bounds) (invalid-input) (overflow)))
+
+(base:type context (product (code i32) (description (pointer u8)) (detail (pointer u8))))
+
+(base:function success () status
+  (ok))
+
+(base:function invalid () status
+  (invalid-input))
+
+(base:function out-of-bounds () status
+  (bounds))
+
+(base:function too-large () status
+  (overflow))
+
+(base:function allocation ((e a:error)) status
+  (allocation-error e))
+
+(base:function description ((e status)) (pointer u8)
+  (match e
+    ((ok) "success")
+    ((allocation-error reason) "allocation failed")
+    ((bounds) "index out of bounds")
+    ((invalid-input) "invalid input")
+    ((overflow) "arithmetic overflow")))
+
+(export status context success invalid out-of-bounds too-large allocation description)

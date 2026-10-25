@@ -1,0 +1,406 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import support)
+(import array)
+(import dictionary)
+(import set)
+
+(base:function hash ((key u64)) u64
+  (base:maxBound))
+
+(base:function equal ((left u64) (right u64)) bool
+  (n:eq left right))
+
+(set:define values u64 hash equal 32 8)
+
+(base:function populate ((owner (pointer values-table)) (i u64) (count u64)) testing:result
+  (match (n:eq i count)
+    (true (testing:empty))
+    (false
+      (match (values-add owner i) ((ok) (populate owner (n:add i 1) count)) (_ (testing:fail))))))
+
+(base:function check-members ((table values-table) (i u64) (count u64)) testing:result
+  (match (n:eq i count)
+    (true (testing:empty))
+    (false
+      (testing:checks
+        (testing:check (values-contains table i))
+        (check-members table (n:add i 1) count)))))
+
+(base:function remove-all ((owner (pointer values-table)) (i u64) (count u64) (acc testing:result))
+  testing:result
+  (match (n:eq i count)
+    (true acc)
+    (false
+      (remove-all
+        owner
+        (n:add i 1)
+        count
+        (testing:checks
+          acc
+          (testing:check (values-remove owner i))
+          (testing:check (match (values-contains (deref owner) i) (true false) (false true))))))))
+
+(base:function model-check ((table values-table) (model (pointer u64)) (i u64)) testing:result
+  (match (n:eq i 64)
+    (true (testing:empty))
+    (false
+      (testing:checks
+        (testing:check
+          (match (n:eq (deref (pointer-offset model i)) 0)
+            (true (match (values-contains table i) (true false) (false true)))
+            (false (values-contains table i))))
+        (model-check table model (n:add i 1))))))
+
+(base:function mixed
+  ((owner (pointer values-table)) (model (pointer u64)) (step u64) (seed u64) (acc testing:result))
+  testing:result
+  (match (n:eq step 2048)
+    (true acc)
+    (false
+      (let
+        ((next u64 (support:remainder (n:add (n:mul seed 48271) 17) 2147483647))
+         (key u64 (support:remainder next 64))
+         (action u64 (support:remainder (n:div next 64) 2))
+         (result
+           testing:result
+           (match (n:eq action 0)
+             (true
+               (do
+                 (values-remove owner key)
+                 (store (deref (pointer-offset model key)) 0)
+                 (testing:pass)))
+             (false
+               (match (values-add owner key)
+                 ((ok) (do (store (deref (pointer-offset model key)) 1) (testing:pass)))
+                 (_ (testing:fail)))))))
+        (mixed
+          owner
+          model
+          (n:add step 1)
+          next
+          (testing:checks acc result (model-check (deref owner) model 0)))))))
+
+(base:variable seen (pointer u8) "")
+
+(base:function seen-at ((i u64)) (pointer u64)
+  (pointer-offset (cast (pointer u64) (cast (pointer void) seen)) i))
+
+(base:variable visit-errors u64 0)
+
+(base:function reset-seen ((i u64)) unit
+  (match (n:eq i 64)
+    (true unit)
+    (false (do (store (deref (seen-at i)) 0) (reset-seen (n:add i 1))))))
+
+(base:function visit ((key u64) (payload bool)) unit
+  (do
+    (match payload (true unit) (false (do (assign visit-errors (n:add visit-errors 1)) unit)))
+    (match (n:lt key 64)
+      (true (do (store (deref (seen-at key)) (n:add (deref (seen-at key)) 1)) unit))
+      (false (do (assign visit-errors (n:add visit-errors 1)) unit)))))
+
+(base:function verify-seen ((i u64)) testing:result
+  (match (n:eq i 64)
+    (true (testing:empty))
+    (false (testing:checks (testing:check (n:eq (deref (seen-at i)) 1)) (verify-seen (n:add i 1))))))
+
+(testing:test empty-membership-and-removal
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (n:eq (values-count items) 0))
+           (testing:check (match (values-contains items 0) (true false) (false true)))
+           (testing:check (match (values-remove (& items) 0) (true false) (false true)))
+           (testing:check (n:eq (support:attempts) 0)))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test duplicate-add-does-not-grow-count
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (values-add (& items) 42) ((ok) true) (_ false)))
+           (testing:check (match (values-add (& items) 42) ((ok) true) (_ false)))
+           (testing:check (n:eq (values-count items) 1)))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test hundreds-of-colliding-values-survive-growth
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (populate (& items) 0 512)
+           (check-members items 0 512)
+           (testing:check (n:eq (values-count items) 512)))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test remove-all-colliding-values
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (populate (& items) 0 512)
+           (remove-all (& items) 0 512 (testing:empty))
+           (testing:check (n:eq (values-count items) 0)))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test duplicate-after-tombstone-does-not-add-entry
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (populate (& items) 0 4)
+           (testing:check (values-remove (& items) 0))
+           (testing:check (match (values-add (& items) 3) ((ok) true) (_ false)))
+           (testing:check (n:eq (values-count items) 3)))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test reinsert-removed-value
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (values-add (& items) 42) ((ok) true) (_ false)))
+           (testing:check (values-remove (& items) 42))
+           (testing:check (match (values-add (& items) 42) ((ok) true) (_ false)))
+           (testing:check (n:eq (values-count items) 1))
+           (testing:check (values-contains items 42)))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test clear-retains-storage-for-reuse
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (populate (& items) 0 512)
+           (do (values-clear (& items)) (testing:check (n:eq (values-count items) 0)))
+           (do (support:limit 0) (populate (& items) 0 512))
+           (check-members items 0 512))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test visitor-yields-each-member-once
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (populate (& items) 0 64)
+           (let
+             ((marks
+                (array u64 64)
+                (array-of
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0
+                  0)))
+             (do
+               (assign seen (cast (pointer u8) (cast (pointer void) (& (index marks 0)))))
+               (reset-seen 0)
+               (assign visit-errors 0)
+               (values-visit items visit)
+               (verify-seen 0)))
+           (testing:check (n:eq visit-errors 0)))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test initial-allocation-failure
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (values-add (& items) 1) ((allocation-error reason) true) (_ false))))
+           (testing:check (n:eq (values-count items) 0)))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test failed-growth-preserves-membership
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (populate (& items) 0 4)
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (values-add (& items) 4) ((allocation-error reason) true) (_ false))))
+           (check-members items 0 4)
+           (testing:check (n:eq (values-count items) 4))
+           (testing:check (match (values-contains items 4) (true false) (false true))))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test mixed-operations-match-direct-membership-model
+  (let
+    ((items values-table (values-empty (support:backend)))
+     (model
+       (array u64 64)
+       (array-of
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0
+         0)))
+    (let ((observed testing:result (mixed (& items) (& (index model 0)) 0 918273 (testing:empty))))
+      (do (values-destroy (& items)) observed))))
+
+(testing:test extreme-numeric-members
+  (let ((items values-table (values-empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (values-add (& items) 0) ((ok) true) (_ false)))
+           (testing:check (match (values-add (& items) (base:maxBound)) ((ok) true) (_ false)))
+           (testing:check (values-contains items 0))
+           (testing:check (values-contains items (base:maxBound)))
+           (testing:check (n:eq (values-count items) 2)))))
+      (do (values-destroy (& items)) observed))))
+
+(export
+  empty-membership-and-removal
+  duplicate-add-does-not-grow-count
+  hundreds-of-colliding-values-survive-growth
+  remove-all-colliding-values
+  duplicate-after-tombstone-does-not-add-entry
+  reinsert-removed-value
+  clear-retains-storage-for-reuse
+  visitor-yields-each-member-once
+  initial-allocation-failure
+  failed-growth-preserves-membership
+  mixed-operations-match-direct-membership-model
+  extreme-numeric-members)

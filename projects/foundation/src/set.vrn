@@ -1,0 +1,12 @@
+(import base)
+(import dictionary)
+
+; Sets specialize the dictionary with a boolean payload and share its hash table.
+(base:macro define (prefix element hash equal size alignment)
+  (definitions
+    `(dictionary:define ,prefix ,element bool ,hash ,equal ,size ,alignment)
+    `(base:function ,(symbol-concat prefix "-add")
+       ((owner (pointer ,(symbol-concat prefix "-table"))) (value ,element)) error:status
+       (,(symbol-concat prefix "-insert") owner value true))))
+
+(export define)

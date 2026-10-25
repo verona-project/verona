@@ -1,0 +1,56 @@
+(import base)
+(import foundation.compat.signed_arithmetic :as n)
+
+(base:type instant (product (seconds i64)))
+
+(base:type duration (product (seconds i64)))
+
+(base:type result (sum (at instant) (overflow) (clock-error)))
+
+(base:type duration-result (sum (elapsed duration) (overflow)))
+
+; time_t is signed 64-bit on supported Darwin/Linux targets.
+(base:external-function system-time "time" ((pointer i64)) i64)
+
+(base:function now () result
+  (let ((output i64 0) (value i64 (system-time (& output))))
+    (match (n:eq value -1) (true (clock-error)) (false (at (instant value))))))
+
+(base:function before ((left instant) (right instant)) bool
+  (n:lt (field left seconds) (field right seconds)))
+
+(base:function add-seconds ((x i64) (y i64)) result
+  (match (n:gt y 0)
+    (true
+      (match (n:gt x (n:sub (base:maxBound) y))
+        (true (overflow))
+        (false (at (instant (n:add x y))))))
+    (false
+      (match (n:lt x (n:sub (base:minBound) y))
+        (true (overflow))
+        (false (at (instant (n:add x y))))))))
+
+(base:function add ((value instant) (delta duration)) result
+  (add-seconds (field value seconds) (field delta seconds)))
+
+(base:function subtract-seconds ((x i64) (y i64)) result
+  (match (n:gt y 0)
+    (true
+      (match (n:lt x (n:add (base:minBound) y))
+        (true (overflow))
+        (false (at (instant (n:sub x y))))))
+    (false
+      (match (n:gt x (n:add (base:maxBound) y))
+        (true (overflow))
+        (false (at (instant (n:sub x y))))))))
+
+(base:function subtract ((value instant) (delta duration)) result
+  (subtract-seconds (field value seconds) (field delta seconds)))
+
+(base:function between ((start instant) (end instant)) duration-result
+  (match (subtract-seconds (field end seconds) (field start seconds))
+    ((at value) (elapsed (duration (field value seconds))))
+    ((overflow) (overflow))
+    ((clock-error) (overflow))))
+
+(export instant duration result duration-result now before add subtract between)

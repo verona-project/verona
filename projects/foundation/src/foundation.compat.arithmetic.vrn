@@ -1,0 +1,61 @@
+; Temporary project-local compatibility shim pending Base/compiler review.
+; Not part of the public Foundation API.
+; Concrete operand types contextualize numeric literals before protocol dispatch.
+; Operations forward to base protocols; they do not add overflow checking.
+(import base)
+
+(base:function add-generic (for (a) ((base:numeric a))) ((x a) (y a)) a
+  (+ x y))
+
+(base:function add ((x u64) (y u64)) u64
+  (add-generic x y))
+
+(base:function sub-generic (for (a) ((base:numeric a))) ((x a) (y a)) a
+  (- x y))
+
+(base:function sub ((x u64) (y u64)) u64
+  (sub-generic x y))
+
+(base:function mul-generic (for (a) ((base:numeric a))) ((x a) (y a)) a
+  (* x y))
+
+(base:function mul ((x u64) (y u64)) u64
+  (mul-generic x y))
+
+(base:function div-generic (for (a) ((base:numeric a))) ((x a) (y a)) a
+  (/ x y))
+
+(base:function div ((x u64) (y u64)) u64
+  (div-generic x y))
+
+(base:function eq-generic (for (a) ((base:equality a))) ((x a) (y a)) bool
+  (= x y))
+
+(base:function eq ((x u64) (y u64)) bool
+  (eq-generic x y))
+
+(base:function lt-generic (for (a) ((base:ordering a))) ((x a) (y a)) bool
+  (< x y))
+
+(base:function lt ((x u64) (y u64)) bool
+  (lt-generic x y))
+
+(base:function gt-generic (for (a) ((base:ordering a))) ((x a) (y a)) bool
+  (> x y))
+
+(base:function gt ((x u64) (y u64)) bool
+  (gt-generic x y))
+
+(base:function le-generic (for (a) ((base:ordering a))) ((x a) (y a)) bool
+  (<= x y))
+
+(base:function le ((x u64) (y u64)) bool
+  (le-generic x y))
+
+(base:function ge-generic (for (a) ((base:ordering a))) ((x a) (y a)) bool
+  (>= x y))
+
+(base:function ge ((x u64) (y u64)) bool
+  (ge-generic x y))
+
+(export add sub mul div eq lt gt le ge)

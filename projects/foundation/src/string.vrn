@@ -1,0 +1,212 @@
+(import base)
+(import allocator :as a)
+(import foundation.compat.arithmetic :as n)
+(import data :as d)
+(import error :as e)
+
+(base:type string (product (storage d:data) (scalars u64)))
+
+(base:function byte ((p (pointer u8)) (i u64)) u64
+  (base:convert (deref (pointer-offset p i))))
+
+(base:function continuation ((p (pointer u8)) (i u64)) bool
+  (match (n:ge (byte p i) 128) (false false) (true (n:le (byte p i) 191))))
+
+(base:function width ((p (pointer u8)) (remaining u64)) u64
+  (match (n:eq remaining 0)
+    (true 0)
+    (false
+      (let ((first u64 (byte p 0)))
+        (match (n:lt first 128)
+          (true 1)
+          (false
+            (match (n:lt first 194)
+              (true 0)
+              (false
+                (match (n:lt first 224)
+                  (true
+                    (match (n:ge remaining 2)
+                      (false 0)
+                      (true (match (continuation p 1) (true 2) (false 0)))))
+                  (false
+                    (match (n:lt first 240)
+                      (true
+                        (match (n:ge remaining 3)
+                          (false 0)
+                          (true
+                            (match (continuation p 1)
+                              (false 0)
+                              (true
+                                (match (continuation p 2)
+                                  (false 0)
+                                  (true
+                                    (match (n:eq first 224)
+                                      (true (match (n:ge (byte p 1) 160) (true 3) (false 0)))
+                                      (false
+                                        (match (n:eq first 237)
+                                          (true (match (n:lt (byte p 1) 160) (true 3) (false 0)))
+                                          (false 3)))))))))))
+                      (false
+                        (match (n:le first 244)
+                          (false 0)
+                          (true
+                            (match (n:ge remaining 4)
+                              (false 0)
+                              (true
+                                (match (continuation p 1)
+                                  (false 0)
+                                  (true
+                                    (match (continuation p 2)
+                                      (false 0)
+                                      (true
+                                        (match (continuation p 3)
+                                          (false 0)
+                                          (true
+                                            (match (n:eq first 240)
+                                              (true
+                                                (match (n:ge (byte p 1) 144) (true 4) (false 0)))
+                                              (false
+                                                (match (n:eq first 244)
+                                                  (true
+                                                    (match (n:le (byte p 1) 143) (true 4) (false 0)))
+                                                  (false 4))))))))))))))))))))))))))
+
+(base:function validate-small ((p (pointer u8)) (remaining u64) (count u64)) (tuple bool u64)
+  (match (n:eq remaining 0)
+    (true (tuple true count))
+    (false
+      (let ((step u64 (width p remaining)))
+        (match (n:eq step 0)
+          (true (tuple false count))
+          (false (validate-small (pointer-offset p step) (n:sub remaining step) (n:add count 1))))))))
+
+; Split large UTF-8 spans at a scalar boundary; leaf walks stay bounded.
+(base:function split-boundary ((p (pointer u8)) (i u64) (remaining u64)) u64
+  (match (n:eq remaining 0)
+    (true i)
+    (false
+      (match (continuation p i) (false i) (true (split-boundary p (n:add i 1) (n:sub remaining 1)))))))
+
+(base:function validate-at ((p (pointer u8)) (remaining u64) (count u64)) (tuple bool u64)
+  (match (n:le remaining 128)
+    (true (validate-small p remaining count))
+    (false
+      (let ((split u64 (split-boundary p (n:div remaining 2) 3)))
+        (match (validate-at p split count)
+          ((tuple false valid) (tuple false valid))
+          ((tuple ok valid) (validate-at (pointer-offset p split) (n:sub remaining split) valid)))))))
+
+(base:function validate ((source d:view)) (tuple bool u64)
+  (validate-at (field source bytes) (field source length) 0))
+
+(base:function empty ((allocator a:backend)) string
+  (string (d:empty allocator) 0))
+
+(base:function from-utf8 ((owner (pointer string)) (source d:view)) e:status
+  (match (validate source)
+    ((tuple false _) (e:invalid))
+    ((tuple valid count)
+     (let ((storage d:data (field (deref owner) storage)))
+       (match (d:assign-bytes (& storage) source)
+         ((ok) (do (store (deref owner) (string storage count)) (e:success)))
+         (reason reason))))))
+
+(base:function bytes ((value string)) d:view
+  (d:borrow (field value storage)))
+
+(base:function byte-length ((value string)) u64
+  (d:length (field value storage)))
+
+(base:function scalar-length ((value string)) u64
+  (field value scalars))
+
+(base:function equal ((left string) (right string)) bool
+  (d:equal (bytes left) (bytes right)))
+
+(base:function offset ((p (pointer u8)) (remaining u64) (count u64) (at u64)) u64
+  (match (n:eq count 0)
+    (true at)
+    (false
+      (let ((step u64 (width p remaining)))
+        (offset (pointer-offset p step) (n:sub remaining step) (n:sub count 1) (n:add at step))))))
+
+(base:function substring ((value string) (start u64) (count u64)) (tuple bool d:view)
+  (let ((source d:view (bytes value)))
+    (match (n:le start (scalar-length value))
+      (false (tuple false source))
+      (true
+        (match (n:le count (n:sub (scalar-length value) start))
+          (false (tuple false source))
+          (true
+            (let
+              ((first u64 (offset (field source bytes) (byte-length value) start 0))
+               (size
+                 u64
+                 (offset
+                   (pointer-offset (field source bytes) first)
+                   (n:sub (byte-length value) first)
+                   count
+                   0)))
+              (tuple true (d:view (pointer-offset (field source bytes) first) size)))))))))
+
+(base:function search-at ((haystack d:view) (needle d:view) (position u64)) (tuple bool u64)
+  (match (n:gt (field needle length) (field haystack length))
+    (true (tuple false 0))
+    (false
+      (match (d:equal (d:view (field haystack bytes) (field needle length)) needle)
+        (true (tuple true position))
+        (false
+          (match (n:eq (field haystack length) 0)
+            (true (tuple false 0))
+            (false
+              (let ((step u64 (width (field haystack bytes) (field haystack length))))
+                (search-at
+                  (d:view
+                    (pointer-offset (field haystack bytes) step)
+                    (n:sub (field haystack length) step))
+                  needle
+                  (n:add position 1))))))))))
+
+(base:function find ((haystack string) (needle string)) (tuple bool u64)
+  (search-at (bytes haystack) (bytes needle) 0))
+
+(base:function copy ((source string) (owner (pointer string))) e:status
+  (from-utf8 owner (bytes source)))
+
+(base:function concat ((left string) (right string) (owner (pointer string))) e:status
+  (match (a:checked-add-size (byte-length left) (byte-length right))
+    ((tuple false _) (e:too-large))
+    ((tuple valid total)
+     (let ((storage d:data (field (deref owner) storage)))
+       (match (d:resize (& storage) total)
+         ((ok)
+          (do
+            (a:copy-bytes (d:bytes storage) (field (bytes left) bytes) (byte-length left))
+            (a:copy-bytes
+              (pointer-offset (d:bytes storage) (byte-length left))
+              (field (bytes right) bytes)
+              (byte-length right))
+            (store
+              (deref owner)
+              (string storage (n:add (scalar-length left) (scalar-length right))))
+            (e:success)))
+         (reason reason))))))
+
+(base:function destroy ((owner (pointer string))) unit
+  (let ((storage d:data (field (deref owner) storage)))
+    (do (d:destroy (& storage)) (store (deref owner) (string storage 0)) unit)))
+
+(export
+  string
+  empty
+  validate
+  from-utf8
+  bytes
+  byte-length
+  scalar-length
+  equal
+  substring
+  find
+  copy
+  concat
+  destroy)

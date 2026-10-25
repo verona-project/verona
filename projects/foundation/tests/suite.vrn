@@ -1,0 +1,817 @@
+(import base)
+(import testing)
+(import foundation.compat.arithmetic :as n)
+(import support)
+(import test_allocator :as allocator)
+(import test_system_allocator :as system_allocator)
+(import test_arena :as arena)
+(import test_data :as data)
+(import test_string :as string)
+(import test_number :as number)
+(import test_array :as array)
+(import test_dictionary :as dictionary)
+(import test_set :as set)
+(import test_date :as date)
+(import test_error :as error)
+(import test_integration :as integration)
+(import test_compat_arithmetic :as compat)
+
+(base:external-function puts "puts" ((pointer u8)) i32)
+
+(base:external-function putchar "putchar" (i32) i32)
+
+(base:function text-length ((text (pointer u8)) (length u64)) u64
+  (let ((value u64 (base:convert (deref text))))
+    (match (n:eq value 0)
+      (true length)
+      (false (text-length (pointer-offset text 1) (n:add length 1))))))
+
+(base:external-function strncmp "strncmp" ((pointer u8) (pointer u8) u64) i32)
+
+(base:variable selection (pointer u8) "")
+
+(base:variable selected u64 0)
+
+(base:function write-text ((text (pointer u8))) unit
+  (let ((value u64 (base:convert (deref text))))
+    (match (n:eq value 0)
+      (true unit)
+      (false
+        (let ((character i32 (base:convert value)))
+          (do (putchar character) (write-text (pointer-offset text 1))))))))
+
+(base:function print-count ((value u64)) unit
+  (do
+    (match (n:ge value 10) (true (print-count (n:div value 10))) (false unit))
+    (let ((digit i32 (base:convert (n:add 48 (n:sub value (n:mul (n:div value 10) 10))))))
+      (do (putchar digit) unit))))
+
+(base:function matches ((name (pointer u8))) bool
+  (let ((length u64 (text-length selection 0)))
+    (match (n:eq length 0)
+      (true true)
+      (false
+        (match (strncmp name selection length)
+          (0
+            (let ((next u64 (base:convert (deref (pointer-offset name length)))))
+              (match (n:eq next 0) (true true) (false (n:eq next 47)))))
+          (_ false))))))
+
+(base:function run-case ((name (pointer u8)) (test testing:test-function)) testing:result
+  (match (matches name)
+    (false (testing:empty))
+    (true
+      (let
+        ((before testing:result (support:start))
+         (body testing:result (testing:execute test))
+         (after testing:result (support:finish))
+         (result testing:result (testing:checks before body after))
+         (failed u64 (base:convert (field result failed))))
+        (do
+          (assign selected (n:add selected 1))
+          (match (n:eq failed 0) (true unit) (false (do (write-text "FAIL ") (puts name) unit)))
+          result)))))
+
+(base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (let
+    ((ledger
+       (array support:allocation 256)
+       (array-of
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)
+         (support:allocation "" 0 0 false)))
+     (initialized
+       unit
+       (support:initialize (cast (pointer u8) (cast (pointer void) (& (index ledger 0))))))
+     (arguments u64 (base:convert argc))
+     (configured
+       unit
+       (match (n:gt arguments 1)
+         (true (do (assign selection (deref (pointer-offset argv 1))) unit))
+         (false unit)))
+     (result
+       testing:result
+       (testing:checks
+         (run-case "compat/unsigned-add" compat:unsigned-add)
+          (run-case "compat/unsigned-subtract" compat:unsigned-subtract)
+          (run-case "compat/unsigned-multiply" compat:unsigned-multiply)
+          (run-case "compat/unsigned-divide" compat:unsigned-divide)
+          (run-case "compat/unsigned-high-bit" compat:unsigned-high-bit)
+          (run-case "compat/unsigned-maximum" compat:unsigned-maximum)
+          (run-case "compat/unsigned-eq-true" compat:unsigned-eq-true)
+          (run-case "compat/unsigned-lt-true" compat:unsigned-lt-true)
+          (run-case "compat/unsigned-gt-true" compat:unsigned-gt-true)
+          (run-case "compat/unsigned-le-true" compat:unsigned-le-true)
+          (run-case "compat/unsigned-ge-true" compat:unsigned-ge-true)
+          (run-case "compat/unsigned-eq-false" compat:unsigned-eq-false)
+          (run-case "compat/unsigned-lt-false" compat:unsigned-lt-false)
+          (run-case "compat/unsigned-gt-false" compat:unsigned-gt-false)
+          (run-case "compat/unsigned-le-false" compat:unsigned-le-false)
+          (run-case "compat/unsigned-ge-false" compat:unsigned-ge-false)
+          (run-case "compat/signed-add" compat:signed-add)
+          (run-case "compat/signed-subtract" compat:signed-subtract)
+          (run-case "compat/signed-minimum" compat:signed-minimum)
+          (run-case "compat/signed-maximum" compat:signed-maximum)
+          (run-case "compat/signed-eq-true" compat:signed-eq-true)
+          (run-case "compat/signed-lt-true" compat:signed-lt-true)
+          (run-case "compat/signed-gt-true" compat:signed-gt-true)
+          (run-case "compat/signed-eq-false" compat:signed-eq-false)
+          (run-case "compat/signed-lt-false" compat:signed-lt-false)
+          (run-case "compat/signed-gt-false" compat:signed-gt-false)
+          (run-case "allocator/alignment-one" allocator:alignment-one)
+         (run-case "allocator/alignment-zero-rejected" allocator:alignment-zero-rejected)
+         (run-case "allocator/odd-alignment-rejected" allocator:odd-alignment-rejected)
+         (run-case "allocator/even-non-power-rejected" allocator:even-non-power-rejected)
+         (run-case "allocator/largest-power-alignment" allocator:largest-power-alignment)
+         (run-case "allocator/add-zero" allocator:add-zero)
+         (run-case "allocator/add-at-maximum" allocator:add-at-maximum)
+         (run-case "allocator/multiply-zero-left" allocator:multiply-zero-left)
+         (run-case "allocator/multiply-zero-right" allocator:multiply-zero-right)
+         (run-case "allocator/multiply-at-maximum" allocator:multiply-at-maximum)
+         (run-case "allocator/multiply-boundary" allocator:multiply-boundary)
+         (run-case "allocator/add-overflow" allocator:add-overflow)
+         (run-case "allocator/multiply-overflow" allocator:multiply-overflow)
+         (run-case
+           "allocator/invalid-layout-never-calls-backend"
+           allocator:invalid-layout-never-calls-backend)
+         (run-case
+           "allocator/allocation-failure-is-explicit"
+           allocator:allocation-failure-is-explicit)
+         (run-case
+           "allocator/resize-grow-preserves-entire-prefix"
+           allocator:resize-grow-preserves-entire-prefix)
+         (run-case
+           "allocator/resize-shrink-preserves-entire-prefix"
+           allocator:resize-shrink-preserves-entire-prefix)
+         (run-case
+           "allocator/resize-same-size-preserves-bytes"
+           allocator:resize-same-size-preserves-bytes)
+         (run-case
+           "allocator/resize-to-zero-releases-old-storage"
+           allocator:resize-to-zero-releases-old-storage)
+         (run-case
+           "allocator/failed-resize-preserves-all-original-bytes"
+           allocator:failed-resize-preserves-all-original-bytes)
+         (run-case
+           "allocator/copy-zero-does-not-touch-destination"
+           allocator:copy-zero-does-not-touch-destination)
+         (run-case
+           "system_allocator/alignment-1-allocation"
+           system_allocator:alignment-1-allocation)
+         (run-case
+           "system_allocator/alignment-2-allocation"
+           system_allocator:alignment-2-allocation)
+         (run-case
+           "system_allocator/alignment-4-allocation"
+           system_allocator:alignment-4-allocation)
+         (run-case
+           "system_allocator/alignment-8-allocation"
+           system_allocator:alignment-8-allocation)
+         (run-case
+           "system_allocator/alignment-16-allocation"
+           system_allocator:alignment-16-allocation)
+         (run-case
+           "system_allocator/alignment-32-allocation"
+           system_allocator:alignment-32-allocation)
+         (run-case
+           "system_allocator/alignment-64-allocation"
+           system_allocator:alignment-64-allocation)
+         (run-case
+           "system_allocator/alignment-256-allocation"
+           system_allocator:alignment-256-allocation)
+         (run-case
+           "system_allocator/alignment-4096-allocation"
+           system_allocator:alignment-4096-allocation)
+         (run-case
+           "system_allocator/zero-size-storage-is-freeable"
+           system_allocator:zero-size-storage-is-freeable)
+         (run-case
+           "system_allocator/many-native-allocation-free-cycles"
+           system_allocator:many-native-allocation-free-cycles)
+         (run-case "arena/creation-is-lazy" arena:creation-is-lazy)
+         (run-case "arena/empty-reset-and-repeated-destroy" arena:empty-reset-and-repeated-destroy)
+         (run-case
+           "arena/invalid-alignment-leaves-arena-empty"
+           arena:invalid-alignment-leaves-arena-empty)
+         (run-case
+           "arena/metadata-allocation-failure-rolls-back"
+           arena:metadata-allocation-failure-rolls-back)
+         (run-case
+           "arena/payload-allocation-failure-releases-metadata"
+           arena:payload-allocation-failure-releases-metadata)
+         (run-case "arena/zero-size-consumes-one-byte" arena:zero-size-consumes-one-byte)
+         (run-case
+           "arena/default-capacity-when-initial-is-zero"
+           arena:default-capacity-when-initial-is-zero)
+         (run-case
+           "arena/padding-is-counted-and-base-alignment-reused"
+           arena:padding-is-counted-and-base-alignment-reused)
+         (run-case "arena/exact-fit-keeps-one-segment" arena:exact-fit-keeps-one-segment)
+         (run-case
+           "arena/growth-preserves-previous-segment-bytes"
+           arena:growth-preserves-previous-segment-bytes)
+         (run-case
+           "arena/growth-failure-preserves-live-allocation"
+           arena:growth-failure-preserves-live-allocation)
+         (run-case
+           "arena/many-segments-and-reset-cycles-reuse-blocks"
+           arena:many-segments-and-reset-cycles-reuse-blocks)
+         (run-case
+           "arena/destroy-reclaims-all-segments-and-allows-reuse"
+           arena:destroy-reclaims-all-segments-and-allows-reuse)
+         (run-case
+           "data/reserve-preserves-length-and-content"
+           data:reserve-preserves-length-and-content)
+         (run-case "data/reserve-failure-preserves-owner" data:reserve-failure-preserves-owner)
+         (run-case
+           "data/empty-has-zero-length-without-allocation"
+           data:empty-has-zero-length-without-allocation)
+         (run-case
+           "data/construction-copies-embedded-nul-and-high-bytes"
+           data:construction-copies-embedded-nul-and-high-bytes)
+         (run-case
+           "data/construction-does-not-borrow-source"
+           data:construction-does-not-borrow-source)
+         (run-case
+           "data/append-many-bytes-preserves-entire-sequence"
+           data:append-many-bytes-preserves-entire-sequence)
+         (run-case "data/resize-growth-zero-fills-new-tail" data:resize-growth-zero-fills-new-tail)
+         (run-case
+           "data/shrink-then-grow-zeroes-previously-visible-tail"
+           data:shrink-then-grow-zeroes-previously-visible-tail)
+         (run-case
+           "data/resize-to-zero-keeps-reusable-capacity"
+           data:resize-to-zero-keeps-reusable-capacity)
+         (run-case "data/slice-full" data:slice-full)
+         (run-case "data/slice-middle" data:slice-middle)
+         (run-case "data/slice-last-byte" data:slice-last-byte)
+         (run-case "data/slice-empty-at-end" data:slice-empty-at-end)
+         (run-case "data/slice-start-past-end" data:slice-start-past-end)
+         (run-case "data/slice-count-past-end" data:slice-count-past-end)
+         (run-case "data/slice-overflow-sized-count" data:slice-overflow-sized-count)
+         (run-case "data/slice-overflow-sized-start" data:slice-overflow-sized-start)
+         (run-case
+           "data/equality-rejects-prefix-only-match"
+           data:equality-rejects-prefix-only-match)
+         (run-case "data/equality-checks-final-byte" data:equality-checks-final-byte)
+         (run-case
+           "data/copy-remains-valid-after-source-destruction"
+           data:copy-remains-valid-after-source-destruction)
+         (run-case "data/failed-resize-keeps-content" data:failed-resize-keeps-content)
+         (run-case "data/failed-append-keeps-content" data:failed-append-keeps-content)
+         (run-case "data/failed-assignment-keeps-content" data:failed-assignment-keeps-content)
+         (run-case
+           "data/failed-copy-keeps-destination-content"
+           data:failed-copy-keeps-destination-content)
+         (run-case
+           "data/repeated-destruction-does-not-double-free"
+           data:repeated-destruction-does-not-double-free)
+         (run-case
+           "string/large-unicode-validation-counts-scalars"
+           string:large-unicode-validation-counts-scalars)
+         (run-case
+           "string/large-unicode-validation-rejects-bad-tail"
+           string:large-unicode-validation-rejects-bad-tail)
+         (run-case "string/validate-empty" string:validate-empty)
+         (run-case "string/validate-ascii-nul" string:validate-ascii-nul)
+         (run-case "string/validate-ascii-maximum" string:validate-ascii-maximum)
+         (run-case "string/validate-two-byte-minimum" string:validate-two-byte-minimum)
+         (run-case "string/validate-two-byte-maximum" string:validate-two-byte-maximum)
+         (run-case "string/validate-three-byte-minimum" string:validate-three-byte-minimum)
+         (run-case "string/validate-before-surrogates" string:validate-before-surrogates)
+         (run-case "string/validate-after-surrogates" string:validate-after-surrogates)
+         (run-case "string/validate-three-byte-maximum" string:validate-three-byte-maximum)
+         (run-case "string/validate-four-byte-minimum" string:validate-four-byte-minimum)
+         (run-case "string/validate-maximum-unicode-scalar" string:validate-maximum-unicode-scalar)
+         (run-case "string/validate-mixed-widths" string:validate-mixed-widths)
+         (run-case "string/reject-lone-continuation" string:reject-lone-continuation)
+         (run-case "string/reject-highest-continuation" string:reject-highest-continuation)
+         (run-case "string/reject-overlong-two-byte" string:reject-overlong-two-byte)
+         (run-case
+           "string/reject-overlong-two-byte-lead-c1"
+           string:reject-overlong-two-byte-lead-c1)
+         (run-case "string/reject-overlong-three-byte" string:reject-overlong-three-byte)
+         (run-case "string/reject-overlong-four-byte" string:reject-overlong-four-byte)
+         (run-case "string/reject-first-surrogate" string:reject-first-surrogate)
+         (run-case "string/reject-last-surrogate" string:reject-last-surrogate)
+         (run-case "string/reject-above-unicode-maximum" string:reject-above-unicode-maximum)
+         (run-case "string/reject-invalid-leading-f5" string:reject-invalid-leading-f5)
+         (run-case "string/reject-invalid-leading-ff" string:reject-invalid-leading-ff)
+         (run-case "string/reject-truncated-two-byte" string:reject-truncated-two-byte)
+         (run-case "string/reject-truncated-three-byte-one" string:reject-truncated-three-byte-one)
+         (run-case "string/reject-truncated-three-byte-two" string:reject-truncated-three-byte-two)
+         (run-case "string/reject-truncated-four-byte-one" string:reject-truncated-four-byte-one)
+         (run-case "string/reject-truncated-four-byte-two" string:reject-truncated-four-byte-two)
+         (run-case
+           "string/reject-truncated-four-byte-three"
+           string:reject-truncated-four-byte-three)
+         (run-case "string/reject-ascii-in-continuation" string:reject-ascii-in-continuation)
+         (run-case "string/reject-lead-in-continuation" string:reject-lead-in-continuation)
+         (run-case
+           "string/reject-invalid-after-valid-prefix"
+           string:reject-invalid-after-valid-prefix)
+         (run-case "string/empty-string-lengths" string:empty-string-lengths)
+         (run-case "string/substring-first" string:substring-first)
+         (run-case "string/substring-two-byte-scalar" string:substring-two-byte-scalar)
+         (run-case "string/substring-three-byte-scalar" string:substring-three-byte-scalar)
+         (run-case "string/substring-four-byte-scalar" string:substring-four-byte-scalar)
+         (run-case "string/substring-multiscalar" string:substring-multiscalar)
+         (run-case "string/substring-empty-at-end" string:substring-empty-at-end)
+         (run-case "string/substring-rejects-start" string:substring-rejects-start)
+         (run-case "string/substring-rejects-count" string:substring-rejects-count)
+         (run-case
+           "string/substring-rejects-overflow-count"
+           string:substring-rejects-overflow-count)
+         (run-case
+           "string/byte-length-differs-from-scalar-length"
+           string:byte-length-differs-from-scalar-length)
+         (run-case
+           "string/invalid-replacement-preserves-original"
+           string:invalid-replacement-preserves-original)
+         (run-case
+           "string/allocation-failure-preserves-original"
+           string:allocation-failure-preserves-original)
+         (run-case "string/copy-is-independent" string:copy-is-independent)
+         (run-case "string/find-first-match" string:find-first-match)
+         (run-case "string/find-empty-needle" string:find-empty-needle)
+         (run-case "string/find-equal-string" string:find-equal-string)
+         (run-case "string/find-at-end" string:find-at-end)
+         (run-case "string/find-missing" string:find-missing)
+         (run-case "string/find-longer-needle" string:find-longer-needle)
+         (run-case "string/find-in-empty-haystack" string:find-in-empty-haystack)
+         (run-case
+           "string/find-reports-scalar-position-after-multibyte-prefix"
+           string:find-reports-scalar-position-after-multibyte-prefix)
+         (run-case
+           "string/concatenation-preserves-unicode-bytes-and-lengths"
+           string:concatenation-preserves-unicode-bytes-and-lengths)
+         (run-case
+           "string/failed-concatenation-preserves-destination"
+           string:failed-concatenation-preserves-destination)
+         (run-case
+           "string/long-string-substrings-check-every-position"
+           string:long-string-substrings-check-every-position)
+         (run-case "number/parse-zero" number:parse-zero)
+         (run-case "number/parse-leading-zeroes" number:parse-leading-zeroes)
+         (run-case "number/parse-maximum" number:parse-maximum)
+         (run-case "number/parse-signed-maximum" number:parse-signed-maximum)
+         (run-case "number/parse-above-signed-maximum" number:parse-above-signed-maximum)
+         (run-case "number/parse-rejects-empty" number:parse-rejects-empty)
+         (run-case "number/parse-rejects-negative" number:parse-rejects-negative)
+         (run-case "number/parse-rejects-positive-sign" number:parse-rejects-positive-sign)
+         (run-case "number/parse-rejects-leading-space" number:parse-rejects-leading-space)
+         (run-case "number/parse-rejects-trailing-space" number:parse-rejects-trailing-space)
+         (run-case "number/parse-rejects-decimal-point" number:parse-rejects-decimal-point)
+         (run-case "number/parse-rejects-hex-prefix" number:parse-rejects-hex-prefix)
+         (run-case "number/parse-rejects-invalid-last-byte" number:parse-rejects-invalid-last-byte)
+         (run-case "number/parse-overflow-maximum-plus-one" number:parse-overflow-maximum-plus-one)
+         (run-case "number/parse-overflow-very-long-input" number:parse-overflow-very-long-input)
+         (run-case "number/parse-rejects-embedded-nul" number:parse-rejects-embedded-nul)
+         (run-case "number/checked-conversion-0" number:checked-conversion-0)
+         (run-case "number/checked-conversion-1" number:checked-conversion-1)
+         (run-case
+           "number/checked-conversion-signed-maximum"
+           number:checked-conversion-signed-maximum)
+         (run-case
+           "number/checked-conversion-above-signed-maximum"
+           number:checked-conversion-above-signed-maximum)
+         (run-case
+           "number/checked-conversion-unsigned-maximum"
+           number:checked-conversion-unsigned-maximum)
+         (run-case "number/format-0" number:format-0)
+         (run-case "number/format-1" number:format-1)
+         (run-case "number/format-9" number:format-9)
+         (run-case "number/format-10" number:format-10)
+         (run-case "number/format-99" number:format-99)
+         (run-case "number/format-100" number:format-100)
+         (run-case "number/format-999" number:format-999)
+         (run-case "number/format-1000" number:format-1000)
+         (run-case "number/format-10000000000000000000" number:format-10000000000000000000)
+         (run-case "number/format-unsigned-maximum" number:format-unsigned-maximum)
+         (run-case
+           "number/format-replaces-longer-previous-number"
+           number:format-replaces-longer-previous-number)
+         (run-case
+           "number/format-failure-preserves-destination"
+           number:format-failure-preserves-destination)
+         (run-case
+           "number/thousands-of-format-parse-roundtrips"
+           number:thousands-of-format-parse-roundtrips)
+         (run-case "array/empty-does-not-allocate" array:empty-does-not-allocate)
+         (run-case
+           "array/reserve-preserves-zero-logical-length"
+           array:reserve-preserves-zero-logical-length)
+         (run-case
+           "array/smaller-reserve-does-not-reallocate"
+           array:smaller-reserve-does-not-reallocate)
+         (run-case
+           "array/append-4096-elements-verifies-every-value"
+           array:append-4096-elements-verifies-every-value)
+         (run-case
+           "array/prepend-512-elements-preserves-reverse-order"
+           array:prepend-512-elements-preserves-reverse-order)
+         (run-case
+           "array/remove-every-front-element-preserves-order"
+           array:remove-every-front-element-preserves-order)
+         (run-case "array/empty-rejects-get" array:empty-rejects-get)
+         (run-case "array/empty-rejects-remove" array:empty-rejects-remove)
+         (run-case "array/empty-rejects-replace" array:empty-rejects-replace)
+         (run-case "array/empty-rejects-insert-past-end" array:empty-rejects-insert-past-end)
+         (run-case "array/get-rejects-index-3" array:get-rejects-index-3)
+         (run-case
+           "array/get-rejects-maximum-index"
+           array:get-rejects-maximum-index)
+         (run-case "array/insert-at-end-is-append" array:insert-at-end-is-append)
+         (run-case "array/insert-middle-shifts-entire-tail" array:insert-middle-shifts-entire-tail)
+         (run-case
+           "array/replace-changes-only-selected-element"
+           array:replace-changes-only-selected-element)
+         (run-case "array/clear-retains-capacity-for-reuse" array:clear-retains-capacity-for-reuse)
+         (run-case "array/copy-owns-independent-storage" array:copy-owns-independent-storage)
+         (run-case
+           "array/visitor-sees-each-element-once-in-order"
+           array:visitor-sees-each-element-once-in-order)
+         (run-case "array/empty-visitor-is-not-called" array:empty-visitor-is-not-called)
+         (run-case
+           "array/failed-growth-preserves-length-capacity-and-values"
+           array:failed-growth-preserves-length-capacity-and-values)
+         (run-case "array/failed-insert-preserves-contents" array:failed-insert-preserves-contents)
+         (run-case
+           "array/overflowing-reserve-never-calls-allocator"
+           array:overflowing-reserve-never-calls-allocator)
+         (run-case
+           "array/failed-copy-preserves-existing-destination"
+           array:failed-copy-preserves-existing-destination)
+         (run-case
+           "array/destroy-is-idempotent-and-owner-can-be-reused"
+           array:destroy-is-idempotent-and-owner-can-be-reused)
+         (run-case
+           "dictionary/empty-has-no-entries-or-allocation"
+           dictionary:empty-has-no-entries-or-allocation)
+         (run-case
+           "dictionary/absent-get-does-not-change-output"
+           dictionary:absent-get-does-not-change-output)
+         (run-case "dictionary/single-entry-get-and-remove" dictionary:single-entry-get-and-remove)
+         (run-case
+           "dictionary/duplicate-update-does-not-increase-count"
+           dictionary:duplicate-update-does-not-increase-count)
+         (run-case
+           "dictionary/hundreds-of-collisions-survive-multiple-rehashes"
+           dictionary:hundreds-of-collisions-survive-multiple-rehashes)
+         (run-case
+           "dictionary/update-at-growth-threshold-needs-no-allocation"
+           dictionary:update-at-growth-threshold-needs-no-allocation)
+         (run-case "dictionary/remove-collision-chain-head" dictionary:remove-collision-chain-head)
+         (run-case
+           "dictionary/remove-collision-chain-middle"
+           dictionary:remove-collision-chain-middle)
+         (run-case "dictionary/remove-collision-chain-tail" dictionary:remove-collision-chain-tail)
+         (run-case
+           "dictionary/duplicate-beyond-tombstone-is-updated-not-inserted"
+           dictionary:duplicate-beyond-tombstone-is-updated-not-inserted)
+         (run-case
+           "dictionary/reinsertion-reuses-tombstones"
+           dictionary:reinsertion-reuses-tombstones)
+         (run-case
+           "dictionary/all-tombstones-lookup-terminates-and-can-reinsert"
+           dictionary:all-tombstones-lookup-terminates-and-can-reinsert)
+         (run-case
+           "dictionary/clear-removes-entries-and-reuses-allocation"
+           dictionary:clear-removes-entries-and-reuses-allocation)
+         (run-case
+           "dictionary/visitor-covers-every-entry-exactly-once"
+           dictionary:visitor-covers-every-entry-exactly-once)
+         (run-case
+           "dictionary/initial-allocation-failure-leaves-empty-table"
+           dictionary:initial-allocation-failure-leaves-empty-table)
+         (run-case
+           "dictionary/failed-rehash-preserves-every-key-and-value"
+           dictionary:failed-rehash-preserves-every-key-and-value)
+         (run-case
+           "dictionary/mixed-operations-match-independent-model"
+           dictionary:mixed-operations-match-independent-model)
+         (run-case
+           "dictionary/repeated-destroy-and-recreation"
+           dictionary:repeated-destroy-and-recreation)
+         (run-case "set/empty-membership-and-removal" set:empty-membership-and-removal)
+         (run-case "set/duplicate-add-does-not-grow-count" set:duplicate-add-does-not-grow-count)
+         (run-case
+           "set/hundreds-of-colliding-values-survive-growth"
+           set:hundreds-of-colliding-values-survive-growth)
+         (run-case "set/remove-all-colliding-values" set:remove-all-colliding-values)
+         (run-case
+           "set/duplicate-after-tombstone-does-not-add-entry"
+           set:duplicate-after-tombstone-does-not-add-entry)
+         (run-case "set/reinsert-removed-value" set:reinsert-removed-value)
+         (run-case "set/clear-retains-storage-for-reuse" set:clear-retains-storage-for-reuse)
+         (run-case "set/visitor-yields-each-member-once" set:visitor-yields-each-member-once)
+         (run-case "set/initial-allocation-failure" set:initial-allocation-failure)
+         (run-case "set/failed-growth-preserves-membership" set:failed-growth-preserves-membership)
+         (run-case
+           "set/mixed-operations-match-direct-membership-model"
+           set:mixed-operations-match-direct-membership-model)
+         (run-case "set/extreme-numeric-members" set:extreme-numeric-members)
+         (run-case "date/before-across-epoch" date:before-across-epoch)
+         (run-case "date/before-minimum-to-maximum" date:before-minimum-to-maximum)
+         (run-case "date/equal-instants-are-not-before" date:equal-instants-are-not-before)
+         (run-case "date/later-instant-is-not-before" date:later-instant-is-not-before)
+         (run-case "date/add-zero" date:add-zero)
+         (run-case "date/add-to-maximum" date:add-to-maximum)
+         (run-case "date/add-to-minimum" date:add-to-minimum)
+         (run-case "date/add-minimum-duration" date:add-minimum-duration)
+         (run-case "date/add-opposite-extremes" date:add-opposite-extremes)
+         (run-case "date/subtract-zero" date:subtract-zero)
+         (run-case "date/subtract-negative" date:subtract-negative)
+         (run-case "date/subtract-minimum-from-minimum" date:subtract-minimum-from-minimum)
+         (run-case "date/subtract-to-minimum" date:subtract-to-minimum)
+         (run-case "date/addition-positive-overflow" date:addition-positive-overflow)
+         (run-case "date/addition-negative-overflow" date:addition-negative-overflow)
+         (run-case
+           "date/addition-minimum-duration-overflow"
+           date:addition-minimum-duration-overflow)
+         (run-case "date/subtraction-positive-overflow" date:subtraction-positive-overflow)
+         (run-case "date/subtraction-negative-overflow" date:subtraction-negative-overflow)
+         (run-case
+           "date/subtract-minimum-duration-overflow"
+           date:subtract-minimum-duration-overflow)
+         (run-case "date/between-equal" date:between-equal)
+         (run-case "date/between-forward" date:between-forward)
+         (run-case "date/between-reverse" date:between-reverse)
+         (run-case "date/between-minimum-boundary" date:between-minimum-boundary)
+         (run-case "date/between-extremes-overflows" date:between-extremes-overflows)
+         (run-case
+           "date/thousands-of-duration-arithmetic-cases"
+           date:thousands-of-duration-arithmetic-cases)
+         (run-case "date/wall-clock-returns-an-instant" date:wall-clock-returns-an-instant)
+         (run-case "error/description-success" error:description-success)
+         (run-case "error/description-bounds" error:description-bounds)
+         (run-case "error/description-invalid-input" error:description-invalid-input)
+         (run-case "error/description-overflow" error:description-overflow)
+         (run-case "error/description-allocation" error:description-allocation)
+         (run-case
+           "error/allocation-error-preserves-specific-cause"
+           error:allocation-error-preserves-specific-cause)
+         (run-case
+           "error/context-preserves-code-and-borrowed-messages"
+           error:context-preserves-code-and-borrowed-messages)
+         (run-case "integration/shared-arena-collections" integration:shared-arena-collections))))
+    (match (n:eq selected 0)
+      (true (do (puts "Foundation: no tests matched selector") 2))
+      (false
+        ; Normalize the exit code so 256 failed checks cannot wrap back to success.
+        (match (field result failed)
+          (0 (do (write-text "Foundation: ") (print-count selected) (puts " named tests passed") 0))
+          (_ (do (puts "Foundation: unit test failures (names above)") 1)))))))

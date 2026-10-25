@@ -1,0 +1,28 @@
+(import foundation.compat.arithmetic :as n)
+(import base)
+(import allocator :as a)
+
+(base:external-function aligned "posix_memalign" ((pointer (pointer void)) u64 u64) i32)
+
+(base:external-function free "free" ((pointer void)) void)
+
+(base:function oom () a:error
+  (out-of-memory))
+
+(base:function acquire ((context (pointer void)) (size u64) (alignment u64)) a:result
+  (let ((out (pointer void) (cast (pointer void) "")))
+    (match
+      (aligned
+        (& out)
+        (match (n:lt alignment 8) (true 8) (false alignment))
+        (match (n:eq size 0) (true 1) (false size)))
+      (0 (a:success (cast (pointer u8) out)))
+      (_ (a:failure (oom))))))
+
+(base:function release ((context (pointer void)) (p (pointer u8)) (size u64) (alignment u64)) unit
+  (do (free (cast (pointer void) p)) unit))
+
+(base:function create () a:backend
+  (a:backend (cast (pointer void) "") acquire release))
+
+(export create)

@@ -1,0 +1,177 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import support)
+
+(base:function u32-maximum-as-u64 () u64
+  (let ((limit u32 (base:maxBound))) (base:convert limit)))
+
+(testing:test alignment-one
+  (testing:check (allocator:valid-alignment 1)))
+
+(testing:test alignment-zero-rejected
+  (testing:check (match (allocator:valid-alignment 0) (true false) (false true))))
+
+(testing:test odd-alignment-rejected
+  (testing:check (match (allocator:valid-alignment 3) (true false) (false true))))
+
+(testing:test even-non-power-rejected
+  (testing:check (match (allocator:valid-alignment 24) (true false) (false true))))
+
+(testing:test largest-power-alignment
+  (testing:check (allocator:valid-alignment (n:add (n:div (base:maxBound) 2) 1))))
+
+(testing:test add-zero
+  (testing:check (match (allocator:checked-add-size 0 0) ((tuple true value) (n:eq value 0)) (_ false))))
+
+(testing:test add-at-maximum
+  (testing:check
+    (match (allocator:checked-add-size (n:sub (base:maxBound) 1) 1)
+      ((tuple true value) (n:eq value (base:maxBound)))
+      (_ false))))
+
+(testing:test multiply-zero-left
+  (testing:check
+    (match (allocator:checked-multiply-size 0 (base:maxBound))
+      ((tuple true value) (n:eq value 0))
+      (_ false))))
+
+(testing:test multiply-zero-right
+  (testing:check
+    (match (allocator:checked-multiply-size (base:maxBound) 0)
+      ((tuple true value) (n:eq value 0))
+      (_ false))))
+
+(testing:test multiply-at-maximum
+  (testing:check
+    (match (allocator:checked-multiply-size (base:maxBound) 1)
+      ((tuple true value) (n:eq value (base:maxBound)))
+      (_ false))))
+
+(testing:test multiply-boundary
+  (testing:check
+    (match (allocator:checked-multiply-size (u32-maximum-as-u64) (u32-maximum-as-u64))
+      ((tuple true value) (n:eq value 18446744065119617025))
+      (_ false))))
+
+(testing:test add-overflow
+  (testing:check (match (allocator:checked-add-size (base:maxBound) 1) ((tuple false _) true) (_ false))))
+
+(testing:test multiply-overflow
+  (testing:check
+    (match (allocator:checked-multiply-size (n:add (u32-maximum-as-u64) 1) (n:add (u32-maximum-as-u64) 1)) ((tuple false _) true) (_ false))))
+
+(testing:test invalid-layout-never-calls-backend
+  (testing:check
+    (match (allocator:allocate (support:backend) 8 3)
+      ((failed cause) (match cause ((invalid-layout) true) (_ false)))
+      (_ false)))
+  (testing:check (n:eq (support:attempts) 0)))
+
+(testing:test allocation-failure-is-explicit
+  (do
+    (support:limit 0)
+    (testing:check
+      (match (allocator:allocate (support:backend) 81 32)
+        ((failed cause) (match cause ((out-of-memory) true) (_ false)))
+        (_ false))))
+  (testing:check (n:eq (support:last-size) 81))
+  (testing:check (n:eq (support:last-alignment) 32)))
+
+(testing:test resize-grow-preserves-entire-prefix
+  (match (allocator:allocate (support:backend) 257 64)
+    ((failed reason) (testing:fail))
+    ((allocated p)
+     (do
+       (support:fill p 257 0)
+       (match (allocator:resize (support:backend) p 257 4096 64)
+         ((failed reason) (do (allocator:deallocate (support:backend) p 257 64) (testing:fail)))
+         ((allocated q)
+          (let ((result testing:result (support:verify q 257 0)))
+            (do (allocator:deallocate (support:backend) q 4096 64) result))))))))
+
+(testing:test resize-shrink-preserves-entire-prefix
+  (match (allocator:allocate (support:backend) 4096 64)
+    ((failed reason) (testing:fail))
+    ((allocated p)
+     (do
+       (support:fill p 4096 0)
+       (match (allocator:resize (support:backend) p 4096 257 64)
+         ((failed reason) (do (allocator:deallocate (support:backend) p 4096 64) (testing:fail)))
+         ((allocated q)
+          (let ((result testing:result (support:verify q 257 0)))
+            (do (allocator:deallocate (support:backend) q 257 64) result))))))))
+
+(testing:test resize-same-size-preserves-bytes
+  (match (allocator:allocate (support:backend) 513 64)
+    ((failed reason) (testing:fail))
+    ((allocated p)
+     (do
+       (support:fill p 513 0)
+       (match (allocator:resize (support:backend) p 513 513 64)
+         ((failed reason) (do (allocator:deallocate (support:backend) p 513 64) (testing:fail)))
+         ((allocated q)
+          (let ((result testing:result (support:verify q 513 0)))
+            (do (allocator:deallocate (support:backend) q 513 64) result))))))))
+
+(testing:test resize-to-zero-releases-old-storage
+  (match (allocator:allocate (support:backend) 257 64)
+    ((failed reason) (testing:fail))
+    ((allocated p)
+     (do
+       (support:fill p 257 0)
+       (match (allocator:resize (support:backend) p 257 0 64)
+         ((failed reason) (do (allocator:deallocate (support:backend) p 257 64) (testing:fail)))
+         ((allocated q)
+          (let ((result testing:result (support:verify q 0 0)))
+            (do (allocator:deallocate (support:backend) q 0 64) result))))))))
+
+(testing:test failed-resize-preserves-all-original-bytes
+  (match (allocator:allocate (support:backend) 257 32)
+    ((failed reason) (testing:fail))
+    ((allocated p)
+     (do
+       (support:fill p 257 0)
+       (support:limit 0)
+       (match (allocator:resize (support:backend) p 257 4096 32)
+         ((failed reason)
+          (let ((result testing:result (support:verify p 257 0)))
+            (do (allocator:deallocate (support:backend) p 257 32) result)))
+         ((allocated q) (do (allocator:deallocate (support:backend) q 4096 32) (testing:fail))))))))
+
+(testing:test copy-zero-does-not-touch-destination
+  (let ((destination (array u8 3) (array-of 7 8 9)))
+    (let
+      ((observed
+         testing:result
+         (do
+           (allocator:copy-bytes (& (index destination 1)) "abc" 0)
+           (testing:check (n:eq (base:convert (index destination 1)) 8)))))
+      (do observed))))
+
+(export
+  alignment-one
+  alignment-zero-rejected
+  odd-alignment-rejected
+  even-non-power-rejected
+  largest-power-alignment
+  add-zero
+  add-at-maximum
+  multiply-zero-left
+  multiply-zero-right
+  multiply-at-maximum
+  multiply-boundary
+  add-overflow
+  multiply-overflow
+  invalid-layout-never-calls-backend
+  allocation-failure-is-explicit
+  resize-grow-preserves-entire-prefix
+  resize-shrink-preserves-entire-prefix
+  resize-same-size-preserves-bytes
+  resize-to-zero-releases-old-storage
+  failed-resize-preserves-all-original-bytes
+  copy-zero-does-not-touch-destination)

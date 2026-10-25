@@ -1,0 +1,196 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import support)
+(import date)
+(import foundation.compat.signed_arithmetic :as signed)
+
+(base:function arithmetic-cases ((i i64) (acc testing:result)) testing:result
+  (match (signed:gt i 4096)
+    (true acc)
+    (false
+      (arithmetic-cases
+        (signed:add i 1)
+        (testing:checks
+          acc
+          (testing:check
+            (match (date:add (date:instant i) (date:duration -73))
+              ((at value) (signed:eq (field value seconds) (signed:sub i 73)))
+              (_ false)))
+          (testing:check
+            (match (date:between (date:instant i) (date:instant (signed:add i 97)))
+              ((elapsed value) (signed:eq (field value seconds) 97))
+              (_ false))))))))
+
+(testing:test before-across-epoch
+  (testing:check (date:before (date:instant -1) (date:instant 0))))
+
+(testing:test before-minimum-to-maximum
+  (testing:check
+    (date:before (date:instant (base:minBound)) (date:instant (base:maxBound)))))
+
+(testing:test equal-instants-are-not-before
+  (testing:check
+    (match (date:before (date:instant 42) (date:instant 42)) (true false) (false true))))
+
+(testing:test later-instant-is-not-before
+  (testing:check
+    (match (date:before (date:instant 42) (date:instant -42)) (true false) (false true))))
+
+(testing:test add-zero
+  (testing:check
+    (match (date:add (date:instant (base:minBound)) (date:duration 0))
+      ((at actual) (signed:eq (field actual seconds) (base:minBound)))
+      (_ false))))
+
+(testing:test add-to-maximum
+  (testing:check
+    (match (date:add (date:instant (signed:sub (base:maxBound) 1)) (date:duration 1))
+      ((at actual) (signed:eq (field actual seconds) (base:maxBound)))
+      (_ false))))
+
+(testing:test add-to-minimum
+  (testing:check
+    (match (date:add (date:instant (signed:add (base:minBound) 1)) (date:duration -1))
+      ((at actual) (signed:eq (field actual seconds) (base:minBound)))
+      (_ false))))
+
+(testing:test add-minimum-duration
+  (testing:check
+    (match (date:add (date:instant 0) (date:duration (base:minBound)))
+      ((at actual) (signed:eq (field actual seconds) (base:minBound)))
+      (_ false))))
+
+(testing:test add-opposite-extremes
+  (testing:check
+    (match (date:add (date:instant (base:maxBound)) (date:duration (base:minBound)))
+      ((at actual) (signed:eq (field actual seconds) -1))
+      (_ false))))
+
+(testing:test subtract-zero
+  (testing:check
+    (match (date:subtract (date:instant (base:maxBound)) (date:duration 0))
+      ((at actual) (signed:eq (field actual seconds) (base:maxBound)))
+      (_ false))))
+
+(testing:test subtract-negative
+  (testing:check
+    (match (date:subtract (date:instant 10) (date:duration -10))
+      ((at actual) (signed:eq (field actual seconds) 20))
+      (_ false))))
+
+(testing:test subtract-minimum-from-minimum
+  (testing:check
+    (match (date:subtract (date:instant (base:minBound)) (date:duration (base:minBound)))
+      ((at actual) (signed:eq (field actual seconds) 0))
+      (_ false))))
+
+(testing:test subtract-to-minimum
+  (testing:check
+    (match (date:subtract (date:instant -1) (date:duration (base:maxBound)))
+      ((at actual) (signed:eq (field actual seconds) (base:minBound)))
+      (_ false))))
+
+(testing:test addition-positive-overflow
+  (testing:check
+    (match (date:add (date:instant (base:maxBound)) (date:duration 1))
+      ((overflow) true)
+      (_ false))))
+
+(testing:test addition-negative-overflow
+  (testing:check
+    (match (date:add (date:instant (base:minBound)) (date:duration -1))
+      ((overflow) true)
+      (_ false))))
+
+(testing:test addition-minimum-duration-overflow
+  (testing:check
+    (match (date:add (date:instant -1) (date:duration (base:minBound)))
+      ((overflow) true)
+      (_ false))))
+
+(testing:test subtraction-positive-overflow
+  (testing:check
+    (match (date:subtract (date:instant (base:maxBound)) (date:duration -1))
+      ((overflow) true)
+      (_ false))))
+
+(testing:test subtraction-negative-overflow
+  (testing:check
+    (match (date:subtract (date:instant (base:minBound)) (date:duration 1))
+      ((overflow) true)
+      (_ false))))
+
+(testing:test subtract-minimum-duration-overflow
+  (testing:check
+    (match (date:subtract (date:instant 0) (date:duration (base:minBound)))
+      ((overflow) true)
+      (_ false))))
+
+(testing:test between-equal
+  (testing:check
+    (match (date:between (date:instant 42) (date:instant 42))
+      ((elapsed actual) (signed:eq (field actual seconds) 0))
+      (_ false))))
+
+(testing:test between-forward
+  (testing:check
+    (match (date:between (date:instant -10) (date:instant 10))
+      ((elapsed actual) (signed:eq (field actual seconds) 20))
+      (_ false))))
+
+(testing:test between-reverse
+  (testing:check
+    (match (date:between (date:instant 10) (date:instant -10))
+      ((elapsed actual) (signed:eq (field actual seconds) -20))
+      (_ false))))
+
+(testing:test between-minimum-boundary
+  (testing:check
+    (match (date:between (date:instant 0) (date:instant (base:minBound)))
+      ((elapsed actual) (signed:eq (field actual seconds) (base:minBound)))
+      (_ false))))
+
+(testing:test between-extremes-overflows
+  (testing:check
+    (match (date:between (date:instant (base:minBound)) (date:instant (base:maxBound)))
+      ((overflow) true)
+      (_ false))))
+
+(testing:test thousands-of-duration-arithmetic-cases
+  (arithmetic-cases -4096 (testing:empty)))
+
+(testing:test wall-clock-returns-an-instant
+  (testing:check (match (date:now) ((at value) true) (_ false))))
+
+(export
+  before-across-epoch
+  before-minimum-to-maximum
+  equal-instants-are-not-before
+  later-instant-is-not-before
+  add-zero
+  add-to-maximum
+  add-to-minimum
+  add-minimum-duration
+  add-opposite-extremes
+  subtract-zero
+  subtract-negative
+  subtract-minimum-from-minimum
+  subtract-to-minimum
+  addition-positive-overflow
+  addition-negative-overflow
+  addition-minimum-duration-overflow
+  subtraction-positive-overflow
+  subtraction-negative-overflow
+  subtract-minimum-duration-overflow
+  between-equal
+  between-forward
+  between-reverse
+  between-minimum-boundary
+  between-extremes-overflows
+  thousands-of-duration-arithmetic-cases
+  wall-clock-returns-an-instant)

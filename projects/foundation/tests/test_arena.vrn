@@ -1,0 +1,237 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import support)
+(import arena)
+
+(base:function allocate-blocks ((owner (pointer arena:arena)) (i u64) (acc testing:result))
+  testing:result
+  (match (n:eq i 96)
+    (true acc)
+    (false
+      (match (arena:allocate owner 33 64)
+        ((failed reason) (testing:checks acc (testing:fail)))
+        ((allocated p)
+         (do
+           (support:fill p 33 0)
+           (allocate-blocks owner (n:add i 1) (testing:checks acc (support:verify p 33 0)))))))))
+
+(base:function reuse-cycles ((owner (pointer arena:arena)) (i u64) (acc testing:result))
+  testing:result
+  (match (n:eq i 64)
+    (true acc)
+    (false
+      (do
+        (arena:reset owner)
+        (reuse-cycles
+          owner
+          (n:add i 1)
+          (testing:checks acc (allocate-blocks owner 0 (testing:empty))))))))
+
+(testing:test creation-is-lazy
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (n:eq (arena:used owner) 0))
+           (testing:check (n:eq (arena:capacity owner) 0))
+           (testing:check (n:eq (support:attempts) 0)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test empty-reset-and-repeated-destroy
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (do
+           (arena:reset (& owner))
+           (arena:destroy (& owner))
+           (arena:destroy (& owner))
+           (testing:check (n:eq (support:released) 0)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test invalid-alignment-leaves-arena-empty
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (arena:allocate (& owner) 10 3)
+               ((failed cause) (match cause ((invalid-layout) true) (_ false)))
+               (_ false)))
+           (testing:check (n:eq (arena:used owner) 0))
+           (testing:check (n:eq (arena:capacity owner) 0))
+           (testing:check (n:eq (support:attempts) 0)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test metadata-allocation-failure-rolls-back
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (arena:allocate (& owner) 10 8)
+                 ((failed cause) (match cause ((out-of-memory) true) (_ false)))
+                 (_ false))))
+           (testing:check (n:eq (support:outstanding) 0))
+           (testing:check (n:eq (arena:capacity owner) 0)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test payload-allocation-failure-releases-metadata
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (do
+             (support:limit 1)
+             (testing:check
+               (match (arena:allocate (& owner) 10 8)
+                 ((failed cause) (match cause ((out-of-memory) true) (_ false)))
+                 (_ false))))
+           (testing:check (n:eq (support:outstanding) 0))
+           (testing:check (n:eq (support:released) 1))
+           (testing:check (n:eq (arena:used owner) 0))
+           (testing:check (n:eq (arena:capacity owner) 0)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test zero-size-consumes-one-byte
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (arena:allocate (& owner) 0 1) ((allocated p) true) (_ false)))
+           (testing:check (n:eq (arena:used owner) 1)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test default-capacity-when-initial-is-zero
+  (let ((owner arena:arena (arena:create (support:backend) 0)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (arena:allocate (& owner) 1 8) ((allocated p) true) (_ false)))
+           (testing:check (n:eq (arena:capacity owner) 4096)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test padding-is-counted-and-base-alignment-reused
+  (let ((owner arena:arena (arena:create (support:backend) 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (match (arena:allocate (& owner) 1 64)
+             ((failed reason) (testing:fail))
+             ((allocated first)
+              (match (arena:allocate (& owner) 1 8)
+                ((failed reason) (testing:fail))
+                ((allocated second)
+                 (testing:checks
+                   (testing:check (== second (pointer-offset first 8)))
+                   (testing:check (n:eq (arena:used owner) 9)))))))
+           (testing:check (n:eq (support:attempts) 2)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test exact-fit-keeps-one-segment
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (arena:allocate (& owner) 16 8) ((allocated p) true) (_ false)))
+           (testing:check (match (arena:allocate (& owner) 16 8) ((allocated p) true) (_ false)))
+           (testing:check (n:eq (arena:used owner) 32))
+           (testing:check (n:eq (support:attempts) 2)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test growth-preserves-previous-segment-bytes
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (match (arena:allocate (& owner) 32 8)
+             ((failed reason) (testing:fail))
+             ((allocated first)
+              (do
+                (support:fill first 32 0)
+                (match (arena:allocate (& owner) 4097 64)
+                  ((failed reason) (testing:fail))
+                  ((allocated second)
+                   (do
+                     (support:fill second 4097 0)
+                     (testing:checks (support:verify first 32 0) (support:verify second 4097 0))))))))
+           (testing:check (n:eq (arena:capacity owner) 4129)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test growth-failure-preserves-live-allocation
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (match (arena:allocate (& owner) 32 8)
+             ((failed reason) (testing:fail))
+             ((allocated first)
+              (do
+                (support:fill first 32 0)
+                (support:limit 1)
+                (testing:checks
+                  (testing:check
+                    (match (arena:allocate (& owner) 100 64) ((failed reason) true) (_ false)))
+                  (support:verify first 32 0)))))
+           (testing:check (n:eq (arena:used owner) 32))
+           (testing:check (n:eq (arena:capacity owner) 32))
+           (testing:check (n:eq (support:outstanding) 2)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test many-segments-and-reset-cycles-reuse-blocks
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (allocate-blocks (& owner) 0 (testing:empty))
+           (testing:check (n:eq (support:attempts) 192))
+           (reuse-cycles (& owner) 0 (testing:empty))
+           (testing:check (n:eq (support:attempts) 192))
+           (testing:check (n:eq (arena:capacity owner) 3168)))))
+      (do (arena:destroy (& owner)) observed))))
+
+(testing:test destroy-reclaims-all-segments-and-allows-reuse
+  (let ((owner arena:arena (arena:create (support:backend) 32)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (allocate-blocks (& owner) 0 (testing:empty))
+           (do (arena:destroy (& owner)) (testing:check (n:eq (support:outstanding) 0)))
+           (testing:check (n:eq (arena:used owner) 0))
+           (testing:check (n:eq (arena:capacity owner) 0))
+           (testing:check (match (arena:allocate (& owner) 4 8) ((allocated p) true) (_ false))))))
+      (do (arena:destroy (& owner)) observed))))
+
+(export
+  creation-is-lazy
+  empty-reset-and-repeated-destroy
+  invalid-alignment-leaves-arena-empty
+  metadata-allocation-failure-rolls-back
+  payload-allocation-failure-releases-metadata
+  zero-size-consumes-one-byte
+  default-capacity-when-initial-is-zero
+  padding-is-counted-and-base-alignment-reused
+  exact-fit-keeps-one-segment
+  growth-preserves-previous-segment-bytes
+  growth-failure-preserves-live-allocation
+  many-segments-and-reset-cycles-reuse-blocks
+  destroy-reclaims-all-segments-and-allows-reuse)

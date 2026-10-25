@@ -1,0 +1,88 @@
+(import foundation.compat.arithmetic :as n)
+(import base)
+
+(base:type error (sum (invalid-layout) (overflow) (out-of-memory)))
+
+(base:type result (sum (allocated (pointer u8)) (failed error)))
+
+(base:type backend
+  (product
+    (context (pointer void))
+    (acquire (pointer (function ((pointer void) u64 u64) result)))
+    (release (pointer (function ((pointer void) (pointer u8) u64 u64) unit)))))
+
+(base:function valid-alignment ((a u64)) bool
+  (match (n:eq a 0)
+    (true false)
+    (false
+      (match (n:eq a 1)
+        (true true)
+        (false
+          (match (n:eq (n:mul (n:div a 2) 2) a) (true (valid-alignment (n:div a 2))) (false false)))))))
+
+(base:function allocate ((b backend) (size u64) (alignment u64)) result
+  (match (valid-alignment alignment)
+    (false (failed (invalid-layout)))
+    (true
+      (let ((f (pointer (function ((pointer void) u64 u64) result)) (field b acquire)))
+        (f (field b context) size alignment)))))
+
+(base:function deallocate ((b backend) (p (pointer u8)) (size u64) (alignment u64)) unit
+  (let ((f (pointer (function ((pointer void) (pointer u8) u64 u64) unit)) (field b release)))
+    (f (field b context) p size alignment)))
+
+(base:function copy-bytes ((to (pointer u8)) (from (pointer u8)) (n u64)) unit
+  (match (n:eq n 0)
+    (true unit)
+    (false
+      (match (n:eq n 1)
+        (true (do (store (deref to) (deref from)) unit))
+        (false
+          (let ((half u64 (n:div n 2)))
+            (do
+              (copy-bytes to from half)
+              (copy-bytes (pointer-offset to half) (pointer-offset from half) (n:sub n half)))))))))
+
+(base:function success ((p (pointer u8))) result
+  (allocated p))
+
+(base:function failure ((e error)) result
+  (failed e))
+
+(base:function resize ((b backend) (old (pointer u8)) (old-size u64) (new-size u64) (alignment u64))
+  result
+  (match (allocate b new-size alignment)
+    ((failed e) (failed e))
+    ((allocated p)
+     (do
+       (copy-bytes p old (match (n:lt old-size new-size) (true old-size) (false new-size)))
+       (deallocate b old old-size alignment)
+       (success p)))))
+
+; Checked size arithmetic returns (tuple success value); overflow returns (false, 0).
+(base:function checked-add-size ((a u64) (b u64)) (tuple bool u64)
+  (match (n:gt b (n:sub (base:maxBound) a))
+    (true (tuple false 0))
+    (false (tuple true (n:add a b)))))
+
+(base:function checked-multiply-size ((a u64) (b u64)) (tuple bool u64)
+  (match (n:eq a 0)
+    (true (tuple true 0))
+    (false
+      (match (n:gt b (n:div (base:maxBound) a))
+        (true (tuple false 0))
+        (false (tuple true (n:mul a b)))))))
+
+(export
+  success
+  failure
+  error
+  result
+  backend
+  valid-alignment
+  allocate
+  deallocate
+  resize
+  copy-bytes
+  checked-add-size
+  checked-multiply-size)

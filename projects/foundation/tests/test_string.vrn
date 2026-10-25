@@ -1,0 +1,671 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import support)
+(import string)
+(import data)
+
+(base:function validate-count ((p (pointer u8)) (length u64) (count u64)) testing:result
+  (testing:check
+    (match (string:validate (data:view p length))
+      ((tuple true actual) (n:eq actual count))
+      (_ false))))
+
+(base:function reject ((p (pointer u8)) (length u64)) testing:result
+  (testing:check (match (string:validate (data:view p length)) ((tuple false _) true) (_ false))))
+
+(base:function verify-substrings ((text string:string) (i u64) (acc testing:result)) testing:result
+  (match (n:eq i 2048)
+    (true acc)
+    (false
+      (verify-substrings
+        text
+        (n:add i 1)
+        (testing:checks
+          acc
+          (testing:check
+            (match (string:substring text i 1)
+              ((tuple true view) (data:equal view (data:view "x" 1)))
+              (_ false))))))))
+
+(base:function fill-x ((p (pointer u8)) (count u64)) unit
+  (match (n:eq count 0)
+    (true unit)
+    (false (do (store (deref p) 120) (fill-x (pointer-offset p 1) (n:sub count 1))))))
+
+(testing:test validate-empty
+  (validate-count "" 0 0))
+
+(testing:test validate-ascii-nul
+  (let ((input (array u8 1) (array-of 0))) (validate-count (& (index input 0)) 1 1)))
+
+(testing:test validate-ascii-maximum
+  (let ((maximum char (base:maxBound)))
+    (let ((input (array u8 1) (array-of maximum))) (validate-count (& (index input 0)) 1 1))))
+
+(testing:test validate-two-byte-minimum
+  (let ((input (array u8 2) (array-of 194 128))) (validate-count (& (index input 0)) 2 1)))
+
+(testing:test validate-two-byte-maximum
+  (let ((input (array u8 2) (array-of 223 191))) (validate-count (& (index input 0)) 2 1)))
+
+(testing:test validate-three-byte-minimum
+  (let ((input (array u8 3) (array-of 224 160 128))) (validate-count (& (index input 0)) 3 1)))
+
+(testing:test validate-before-surrogates
+  (let ((input (array u8 3) (array-of 237 159 191))) (validate-count (& (index input 0)) 3 1)))
+
+(testing:test validate-after-surrogates
+  (let ((input (array u8 3) (array-of 238 128 128))) (validate-count (& (index input 0)) 3 1)))
+
+(testing:test validate-three-byte-maximum
+  (let ((input (array u8 3) (array-of 239 191 191))) (validate-count (& (index input 0)) 3 1)))
+
+(testing:test validate-four-byte-minimum
+  (let ((input (array u8 4) (array-of 240 144 128 128))) (validate-count (& (index input 0)) 4 1)))
+
+(testing:test validate-maximum-unicode-scalar
+  (let ((input (array u8 4) (array-of 244 143 191 191))) (validate-count (& (index input 0)) 4 1)))
+
+(testing:test validate-mixed-widths
+  (let ((input (array u8 11) (array-of 0 65 194 128 226 130 172 240 159 152 128)))
+    (validate-count (& (index input 0)) 11 5)))
+
+(testing:test reject-lone-continuation
+  (let ((input (array u8 1) (array-of 128))) (reject (& (index input 0)) 1)))
+
+(testing:test reject-highest-continuation
+  (let ((input (array u8 1) (array-of 191))) (reject (& (index input 0)) 1)))
+
+(testing:test reject-overlong-two-byte
+  (let ((input (array u8 2) (array-of 192 128))) (reject (& (index input 0)) 2)))
+
+(testing:test reject-overlong-two-byte-lead-c1
+  (let ((input (array u8 2) (array-of 193 191))) (reject (& (index input 0)) 2)))
+
+(testing:test reject-overlong-three-byte
+  (let ((input (array u8 3) (array-of 224 159 191))) (reject (& (index input 0)) 3)))
+
+(testing:test reject-overlong-four-byte
+  (let ((input (array u8 4) (array-of 240 143 191 191))) (reject (& (index input 0)) 4)))
+
+(testing:test reject-first-surrogate
+  (let ((input (array u8 3) (array-of 237 160 128))) (reject (& (index input 0)) 3)))
+
+(testing:test reject-last-surrogate
+  (let ((input (array u8 3) (array-of 237 191 191))) (reject (& (index input 0)) 3)))
+
+(testing:test reject-above-unicode-maximum
+  (let ((input (array u8 4) (array-of 244 144 128 128))) (reject (& (index input 0)) 4)))
+
+(testing:test reject-invalid-leading-f5
+  (let ((input (array u8 4) (array-of 245 128 128 128))) (reject (& (index input 0)) 4)))
+
+(testing:test reject-invalid-leading-ff
+  (let ((input (array u8 1) (array-of 255))) (reject (& (index input 0)) 1)))
+
+(testing:test reject-truncated-two-byte
+  (let ((input (array u8 1) (array-of 194))) (reject (& (index input 0)) 1)))
+
+(testing:test reject-truncated-three-byte-one
+  (let ((input (array u8 1) (array-of 226))) (reject (& (index input 0)) 1)))
+
+(testing:test reject-truncated-three-byte-two
+  (let ((input (array u8 2) (array-of 226 130))) (reject (& (index input 0)) 2)))
+
+(testing:test reject-truncated-four-byte-one
+  (let ((input (array u8 1) (array-of 240))) (reject (& (index input 0)) 1)))
+
+(testing:test reject-truncated-four-byte-two
+  (let ((input (array u8 2) (array-of 240 159))) (reject (& (index input 0)) 2)))
+
+(testing:test reject-truncated-four-byte-three
+  (let ((input (array u8 3) (array-of 240 159 152))) (reject (& (index input 0)) 3)))
+
+(testing:test reject-ascii-in-continuation
+  (let ((input (array u8 3) (array-of 226 65 128))) (reject (& (index input 0)) 3)))
+
+(testing:test reject-lead-in-continuation
+  (let ((input (array u8 4) (array-of 240 194 128 128))) (reject (& (index input 0)) 4)))
+
+(testing:test reject-invalid-after-valid-prefix
+  (let ((input (array u8 4) (array-of 65 195 169 128))) (reject (& (index input 0)) 4)))
+
+(testing:test empty-string-lengths
+  (let ((text string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (n:eq (string:byte-length text) 0))
+           (testing:check (n:eq (string:scalar-length text) 0)))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test substring-first
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match (string:substring text 0 1)
+               ((tuple true view)
+                (data:equal view (data:view (pointer-offset (& (index input 0)) 0) 1)))
+               (_ false))))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test substring-two-byte-scalar
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match (string:substring text 1 1)
+               ((tuple true view)
+                (data:equal view (data:view (pointer-offset (& (index input 0)) 1) 2)))
+               (_ false))))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test substring-three-byte-scalar
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match (string:substring text 2 1)
+               ((tuple true view)
+                (data:equal view (data:view (pointer-offset (& (index input 0)) 3) 3)))
+               (_ false))))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test substring-four-byte-scalar
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match (string:substring text 3 1)
+               ((tuple true view)
+                (data:equal view (data:view (pointer-offset (& (index input 0)) 6) 4)))
+               (_ false))))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test substring-multiscalar
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match (string:substring text 1 2)
+               ((tuple true view)
+                (data:equal view (data:view (pointer-offset (& (index input 0)) 1) 5)))
+               (_ false))))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test substring-empty-at-end
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match (string:substring text 4 0)
+               ((tuple true view)
+                (data:equal view (data:view (pointer-offset (& (index input 0)) 10) 0)))
+               (_ false))))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test substring-rejects-start
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check (match (string:substring text 5 0) ((tuple false _) true) (_ false))))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test substring-rejects-count
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check (match (string:substring text 3 2) ((tuple false _) true) (_ false))))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test substring-rejects-overflow-count
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match (string:substring text 1 (base:maxBound)) ((tuple false _) true) (_ false))))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test byte-length-differs-from-scalar-length
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check (n:eq (string:byte-length text) 10))
+           (testing:check (n:eq (string:scalar-length text) 4)))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test invalid-replacement-preserves-original
+  (let ((text string:string (string:empty (support:backend))) (bad (array u8 2) (array-of 192 128)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "original" 8)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index bad 0)) 2))
+               ((invalid-input) true)
+               (_ false)))
+           (testing:check (data:equal (string:bytes text) (data:view "original" 8)))
+           (testing:check (n:eq (string:scalar-length text) 8)))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test allocation-failure-preserves-original
+  (let ((text string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "old" 3)) ((ok) true) (_ false)))
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (string:from-utf8 (& text) (data:view "long replacement" 16))
+                 ((allocation-error reason) true)
+                 (_ false))))
+           (testing:check (data:equal (string:bytes text) (data:view "old" 3)))
+           (testing:check (n:eq (string:scalar-length text) 3)))))
+      (do (string:destroy (& text)) observed))))
+
+(testing:test copy-is-independent
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (copy string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "hello" 5)) ((ok) true) (_ false)))
+           (testing:check (match (string:copy text (& copy)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "other" 5)) ((ok) true) (_ false)))
+           (testing:check (data:equal (string:bytes copy) (data:view "hello" 5))))))
+      (do (string:destroy (& text)) (string:destroy (& copy)) observed))))
+
+(testing:test find-first-match
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (needle string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "banana" 6)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& needle) (data:view "ana" 3)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:find text needle) ((tuple true index) (n:eq index 1)) (_ false))))))
+      (do (string:destroy (& text)) (string:destroy (& needle)) observed))))
+
+(testing:test find-empty-needle
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (needle string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "abc" 3)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& needle) (data:view "" 0)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:find text needle) ((tuple true index) (n:eq index 0)) (_ false))))))
+      (do (string:destroy (& text)) (string:destroy (& needle)) observed))))
+
+(testing:test find-equal-string
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (needle string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "abc" 3)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& needle) (data:view "abc" 3)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:find text needle) ((tuple true index) (n:eq index 0)) (_ false))))))
+      (do (string:destroy (& text)) (string:destroy (& needle)) observed))))
+
+(testing:test find-at-end
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (needle string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "abc" 3)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& needle) (data:view "c" 1)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:find text needle) ((tuple true index) (n:eq index 2)) (_ false))))))
+      (do (string:destroy (& text)) (string:destroy (& needle)) observed))))
+
+(testing:test find-missing
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (needle string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "abc" 3)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& needle) (data:view "z" 1)) ((ok) true) (_ false)))
+           (testing:check (match (string:find text needle) ((tuple false _) true) (_ false))))))
+      (do (string:destroy (& text)) (string:destroy (& needle)) observed))))
+
+(testing:test find-longer-needle
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (needle string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "a" 1)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& needle) (data:view "abc" 3)) ((ok) true) (_ false)))
+           (testing:check (match (string:find text needle) ((tuple false _) true) (_ false))))))
+      (do (string:destroy (& text)) (string:destroy (& needle)) observed))))
+
+(testing:test find-in-empty-haystack
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (needle string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "" 0)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& needle) (data:view "x" 1)) ((ok) true) (_ false)))
+           (testing:check (match (string:find text needle) ((tuple false _) true) (_ false))))))
+      (do (string:destroy (& text)) (string:destroy (& needle)) observed))))
+
+(testing:test find-reports-scalar-position-after-multibyte-prefix
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128))
+     (needle string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match
+               (string:from-utf8 (& needle) (data:view (pointer-offset (& (index input 0)) 6) 4))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match (string:find text needle) ((tuple true index) (n:eq index 3)) (_ false))))))
+      (do (string:destroy (& text)) (string:destroy (& needle)) observed))))
+
+(testing:test concatenation-preserves-unicode-bytes-and-lengths
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (input (array u8 10) (array-of 65 195 169 226 130 172 240 159 152 128))
+     (joined string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view (& (index input 0)) 10))
+               ((ok) true)
+               (_ false)))
+           (testing:check (match (string:concat text text (& joined)) ((ok) true) (_ false)))
+           (testing:check (n:eq (string:scalar-length joined) 8))
+           (testing:check (n:eq (string:byte-length joined) 20))
+           (testing:check
+             (match (string:substring joined 4 4)
+               ((tuple true view) (data:equal view (string:bytes text)))
+               (_ false))))))
+      (do (string:destroy (& text)) (string:destroy (& joined)) observed))))
+
+(testing:test failed-concatenation-preserves-destination
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (joined string:string (string:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (string:from-utf8 (& text) (data:view "long text" 9)) ((ok) true) (_ false)))
+           (testing:check
+             (match (string:from-utf8 (& joined) (data:view "old" 3)) ((ok) true) (_ false)))
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (string:concat text text (& joined))
+                 ((allocation-error reason) true)
+                 (_ false))))
+           (testing:check (data:equal (string:bytes joined) (data:view "old" 3))))))
+      (do (string:destroy (& text)) (string:destroy (& joined)) observed))))
+
+(testing:test long-string-substrings-check-every-position
+  (let
+    ((text string:string (string:empty (support:backend)))
+     (source data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (data:resize (& source) 2048) ((ok) true) (_ false)))
+           (do
+             (fill-x (data:bytes source) 2048)
+             (testing:check
+               (match (string:from-utf8 (& text) (data:borrow source)) ((ok) true) (_ false))))
+           (verify-substrings text 0 (testing:empty)))))
+      (do (data:destroy (& source)) (string:destroy (& text)) observed))))
+
+(base:function fill-emoji ((bytes (pointer u8)) (count u64)) unit
+  (match (n:eq count 0)
+    (true unit)
+    (false
+      (match (n:eq count 1)
+        (true
+          (do
+            (store (deref bytes) 240)
+            (store (deref (pointer-offset bytes 1)) 159)
+            (store (deref (pointer-offset bytes 2)) 152)
+            (store (deref (pointer-offset bytes 3)) 128)
+            unit))
+        (false
+          (let ((half u64 (n:div count 2)))
+            (do
+              (fill-emoji bytes half)
+              (fill-emoji (pointer-offset bytes (n:mul half 4)) (n:sub count half)))))))))
+
+(base:function large-unicode () data:data
+  (let ((value data:data (data:empty (support:backend))))
+    (do
+      (match (data:resize (& value) 16385)
+        ((ok)
+         (do
+           (store (deref (data:bytes value)) 65)
+           (fill-emoji (pointer-offset (data:bytes value) 1) 4096)))
+        (_ unit))
+      value)))
+
+(base:function release-unicode ((value data:data)) unit
+  (data:destroy (& value)))
+
+(testing:test large-unicode-validation-counts-scalars
+  (testing:with-fixture (value data:data (large-unicode) release-unicode)
+    (testing:check (n:eq (data:length value) 16385))
+    (testing:check
+      (match (string:validate (data:borrow value)) ((tuple true count) (n:eq count 4097)) (_ false)))))
+
+(testing:test large-unicode-validation-rejects-bad-tail
+  (testing:with-fixture (value data:data (large-unicode) release-unicode)
+    (match (n:eq (data:length value) 16385)
+      (false (testing:fail))
+      (true
+        (do
+          (store (deref (pointer-offset (data:bytes value) 16384)) 255)
+          (testing:check
+            (match (string:validate (data:borrow value)) ((tuple false _) true) (_ false))))))))
+
+(export
+  large-unicode-validation-counts-scalars
+  large-unicode-validation-rejects-bad-tail
+  validate-empty
+  validate-ascii-nul
+  validate-ascii-maximum
+  validate-two-byte-minimum
+  validate-two-byte-maximum
+  validate-three-byte-minimum
+  validate-before-surrogates
+  validate-after-surrogates
+  validate-three-byte-maximum
+  validate-four-byte-minimum
+  validate-maximum-unicode-scalar
+  validate-mixed-widths
+  reject-lone-continuation
+  reject-highest-continuation
+  reject-overlong-two-byte
+  reject-overlong-two-byte-lead-c1
+  reject-overlong-three-byte
+  reject-overlong-four-byte
+  reject-first-surrogate
+  reject-last-surrogate
+  reject-above-unicode-maximum
+  reject-invalid-leading-f5
+  reject-invalid-leading-ff
+  reject-truncated-two-byte
+  reject-truncated-three-byte-one
+  reject-truncated-three-byte-two
+  reject-truncated-four-byte-one
+  reject-truncated-four-byte-two
+  reject-truncated-four-byte-three
+  reject-ascii-in-continuation
+  reject-lead-in-continuation
+  reject-invalid-after-valid-prefix
+  empty-string-lengths
+  substring-first
+  substring-two-byte-scalar
+  substring-three-byte-scalar
+  substring-four-byte-scalar
+  substring-multiscalar
+  substring-empty-at-end
+  substring-rejects-start
+  substring-rejects-count
+  substring-rejects-overflow-count
+  byte-length-differs-from-scalar-length
+  invalid-replacement-preserves-original
+  allocation-failure-preserves-original
+  copy-is-independent
+  find-first-match
+  find-empty-needle
+  find-equal-string
+  find-at-end
+  find-missing
+  find-longer-needle
+  find-in-empty-haystack
+  find-reports-scalar-position-after-multibyte-prefix
+  concatenation-preserves-unicode-bytes-and-lengths
+  failed-concatenation-preserves-destination
+  long-string-substrings-check-every-position)

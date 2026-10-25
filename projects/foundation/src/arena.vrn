@@ -1,0 +1,208 @@
+(import base)
+(import foundation.compat.arithmetic :as n)
+(import allocator :as a)
+
+; Metadata layout is five 8-byte fields on supported 64-bit targets.
+(base:type block
+  (product (next (pointer void)) (bytes (pointer u8)) (capacity u64) (used u64) (alignment u64)))
+
+(base:type arena
+  (product
+    (head (pointer void))
+    (blocks u64)
+    (used u64)
+    (capacity u64)
+    (initial u64)
+    (backing a:backend)))
+
+(base:function create ((backing a:backend) (initial u64)) arena
+  (arena
+    (cast (pointer void) "")
+    0
+    0
+    0
+    (match (n:eq initial 0) (true 4096) (false initial))
+    backing))
+
+(base:function block-pointer ((p (pointer void))) (pointer block)
+  (cast (pointer block) p))
+
+(base:function find-space
+  ((p (pointer void)) (count u64) (size u64) (alignment u64) (owner (pointer arena))) a:result
+  (match (n:eq count 0)
+    (true (a:failure (oom)))
+    (false
+      (let
+        ((b (pointer block) (block-pointer p))
+         (used u64 (field (deref b) used))
+         (rem u64 (n:sub used (n:mul (n:div used alignment) alignment)))
+         (pad u64 (match (n:eq rem 0) (true 0) (false (n:sub alignment rem))))
+         (room u64 (n:sub (field (deref b) capacity) used)))
+        (match (n:ge (field (deref b) alignment) alignment)
+          (false (find-space (field (deref b) next) (n:sub count 1) size alignment owner))
+          (true
+            (match (n:le pad room)
+              (false (find-space (field (deref b) next) (n:sub count 1) size alignment owner))
+              (true
+                (match (n:le size (n:sub room pad))
+                  (false (find-space (field (deref b) next) (n:sub count 1) size alignment owner))
+                  (true
+                    (let ((offset u64 (n:add used pad)))
+                      (do
+                        (store
+                          (deref b)
+                          (block
+                            (field (deref b) next)
+                            (field (deref b) bytes)
+                            (field (deref b) capacity)
+                            (n:add offset size)
+                            (field (deref b) alignment)))
+                        (store
+                          (deref owner)
+                          (arena
+                            (field (deref owner) head)
+                            (field (deref owner) blocks)
+                            (n:add (field (deref owner) used) (n:add pad size))
+                            (field (deref owner) capacity)
+                            (field (deref owner) initial)
+                            (field (deref owner) backing)))
+                        (a:success (pointer-offset (field (deref b) bytes) offset))))))))))))))
+
+(base:function oom () a:error
+  (out-of-memory))
+
+(base:function overflow-error () a:error
+  (overflow))
+
+(base:function invalid-error () a:error
+  (invalid-layout))
+
+(base:function grow ((owner (pointer arena)) (size u64) (alignment u64)) a:result
+  (let
+    ((backing a:backend (field (deref owner) backing))
+     (capacity
+       u64
+       (match (n:gt size (field (deref owner) initial))
+         (true size)
+         (false (field (deref owner) initial)))))
+    (match (a:checked-add-size (field (deref owner) capacity) capacity)
+      ((tuple false _) (a:failure (overflow-error)))
+      ((tuple ok total)
+       (match (a:allocate backing 40 8)
+         ((failed e) (a:failure e))
+         ((allocated metadata)
+          (match (a:allocate backing capacity alignment)
+            ((failed e) (do (a:deallocate backing metadata 40 8) (a:failure e)))
+            ((allocated bytes)
+             (let ((b (pointer block) (cast (pointer block) (cast (pointer void) metadata))))
+               (do
+                 (store (deref b) (block (field (deref owner) head) bytes capacity 0 alignment))
+                 (store
+                   (deref owner)
+                   (arena
+                     (cast (pointer void) b)
+                     (field (deref owner) blocks)
+                     (field (deref owner) used)
+                     (field (deref owner) capacity)
+                     (field (deref owner) initial)
+                     (field (deref owner) backing)))
+                 (store
+                   (deref owner)
+                   (arena
+                     (field (deref owner) head)
+                     (n:add (field (deref owner) blocks) 1)
+                     (field (deref owner) used)
+                     (field (deref owner) capacity)
+                     (field (deref owner) initial)
+                     (field (deref owner) backing)))
+                 (store
+                   (deref owner)
+                   (arena
+                     (field (deref owner) head)
+                     (field (deref owner) blocks)
+                     (field (deref owner) used)
+                     total
+                     (field (deref owner) initial)
+                     (field (deref owner) backing)))
+                 (find-space (cast (pointer void) b) 1 size alignment owner)))))))))))
+
+(base:function allocate ((owner (pointer arena)) (size u64) (alignment u64)) a:result
+  (match (a:valid-alignment alignment)
+    (false (a:failure (invalid-error)))
+    (true
+      (let ((actual u64 (match (n:eq size 0) (true 1) (false size))))
+        (match
+          (find-space
+            (field (deref owner) head)
+            (field (deref owner) blocks)
+            actual
+            alignment
+            owner)
+          ((allocated p) (a:success p))
+          ((failed e) (grow owner actual alignment)))))))
+
+(base:function reset-blocks ((p (pointer void)) (count u64)) unit
+  (match (n:eq count 0)
+    (true unit)
+    (false
+      (let ((b (pointer block) (block-pointer p)))
+        (do
+          (store
+            (deref b)
+            (block
+              (field (deref b) next)
+              (field (deref b) bytes)
+              (field (deref b) capacity)
+              0
+              (field (deref b) alignment)))
+          (reset-blocks (field (deref b) next) (n:sub count 1)))))))
+
+(base:function reset ((owner (pointer arena))) unit
+  (do
+    (reset-blocks (field (deref owner) head) (field (deref owner) blocks))
+    (store
+      (deref owner)
+      (arena
+        (field (deref owner) head)
+        (field (deref owner) blocks)
+        0
+        (field (deref owner) capacity)
+        (field (deref owner) initial)
+        (field (deref owner) backing)))
+    unit))
+
+(base:function destroy-blocks ((p (pointer void)) (count u64) (backing a:backend)) unit
+  (match (n:eq count 0)
+    (true unit)
+    (false
+      (let ((b block (deref (block-pointer p))))
+        (do
+          (a:deallocate backing (field b bytes) (field b capacity) (field b alignment))
+          (a:deallocate backing (cast (pointer u8) p) 40 8)
+          (destroy-blocks (field b next) (n:sub count 1) backing))))))
+
+(base:function destroy ((owner (pointer arena))) unit
+  (do
+    (destroy-blocks
+      (field (deref owner) head)
+      (field (deref owner) blocks)
+      (field (deref owner) backing))
+    (store (deref owner) (create (field (deref owner) backing) (field (deref owner) initial)))
+    unit))
+
+(base:function acquire ((context (pointer void)) (size u64) (alignment u64)) a:result
+  (allocate (cast (pointer arena) context) size alignment))
+
+(base:function release ((context (pointer void)) (p (pointer u8)) (size u64) (alignment u64)) unit
+  unit)
+
+(base:function allocator ((owner (pointer arena))) a:backend
+  (a:backend (cast (pointer void) owner) acquire release))
+
+(base:function used ((owner arena)) u64
+  (field owner used))
+
+(base:function capacity ((owner arena)) u64
+  (field owner capacity))
+
+(export arena create allocate reset destroy allocator used capacity)

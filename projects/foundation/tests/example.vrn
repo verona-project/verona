@@ -1,0 +1,7 @@
+; Runs the arena-backed Array<String>, Dictionary<String,u64>, Set<u64>,
+; and mutable Data integration example. Exit 0 indicates success.
+(import testing)
+(import test_integration :as integration)
+
+(testing:runner main
+  (integration:shared-arena-collections))

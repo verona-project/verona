@@ -1,0 +1,86 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import array)
+(import dictionary)
+(import set)
+(import arena)
+(import string)
+(import data)
+
+; On 64-bit targets: String is 72 bytes; its dictionary slot is 96 bytes.
+(array:define texts string:string)
+
+(base:function hash-string ((key string:string)) u64
+  (string:byte-length key))
+
+(base:function equal-string ((left string:string) (right string:string)) bool
+  (string:equal left right))
+
+(dictionary:define names string:string u64 hash-string equal-string 96 8)
+
+(base:function hash-number ((key u64)) u64
+  key)
+
+(base:function equal-number ((left u64) (right u64)) bool
+  (n:eq left right))
+
+(set:define ids u64 hash-number equal-number 32 8)
+
+(testing:test shared-arena-collections
+  (let
+    ((owner arena:arena (arena:create (system:create) 128))
+     (backing allocator:backend (arena:allocator (& owner)))
+     (text string:string (string:empty backing))
+     (key string:string (string:empty backing))
+     (bytes data:data (data:empty backing))
+     (items
+       (tuple (pointer string:string) u64 u64 array:layout)
+       (texts-empty
+         (cast (pointer string:string) (cast (pointer void) ""))
+         (array:layout 72 8 backing)))
+     (table names-table (names-empty backing))
+     (numbers ids-table (ids-empty backing))
+     (out u64 0))
+    (let
+      ((result
+         testing:result
+         (match (string:from-utf8 (& text) (data:view "Verona" 6))
+           ((ok)
+            (match (string:copy text (& key))
+              ((ok)
+               (match (texts-append (& items) text)
+                 ((ok)
+                  (match (names-insert (& table) text 42)
+                    ((ok)
+                     (match (ids-add (& numbers) 42)
+                       ((ok)
+                        (match (data:assign-bytes (& bytes) (string:bytes text))
+                          ((ok)
+                           (testing:checks
+                             (testing:check (names-get table key (& out)))
+                             (testing:check (n:eq out 42))
+                             (testing:check (ids-contains numbers 42))
+                             (testing:check (data:equal (data:borrow bytes) (data:view "Verona" 6)))))
+                          (_ (testing:fail))))
+                       (_ (testing:fail))))
+                    (_ (testing:fail))))
+                 (_ (testing:fail))))
+              (_ (testing:fail))))
+           (_ (testing:fail)))))
+      (do
+        (texts-destroy (& items))
+        (names-destroy (& table))
+        (ids-destroy (& numbers))
+        (string:destroy (& text))
+        (string:destroy (& key))
+        (data:destroy (& bytes))
+        (arena:reset (& owner))
+        (arena:destroy (& owner))
+        result))))
+
+(export shared-arena-collections)

@@ -1,0 +1,320 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import support)
+(import data)
+
+(base:function append-pattern ((owner (pointer data:data)) (i u64) (count u64) (acc testing:result))
+  testing:result
+  (match (n:eq i count)
+    (true acc)
+    (false
+      (match (data:append owner (support:pattern i))
+        ((ok) (append-pattern owner (n:add i 1) count acc))
+        (_ (testing:checks acc (testing:fail)))))))
+
+(base:function zeroes ((p (pointer u8)) (start u64) (end u64)) testing:result
+  (match (n:eq start end)
+    (true (testing:empty))
+    (false
+      (let ((value u64 (base:convert (deref (pointer-offset p start)))))
+        (testing:checks (testing:check (n:eq value 0)) (zeroes p (n:add start 1) end))))))
+
+(testing:test empty-has-zero-length-without-allocation
+  (let ((bytes data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (n:eq (data:length bytes) 0))
+           (testing:check (n:eq (support:attempts) 0))
+           (testing:check (data:equal (data:borrow bytes) (data:view "" 0))))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test construction-copies-embedded-nul-and-high-bytes
+  (let
+    ((bytes data:data (data:empty (support:backend))) (input (array u8 5) (array-of 0 255 1 128 0)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (data:assign-bytes (& bytes) (data:view (& (index input 0)) 5))
+               ((ok) true)
+               (_ false)))
+           (testing:check (data:equal (data:borrow bytes) (data:view (& (index input 0)) 5))))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test construction-does-not-borrow-source
+  (let ((bytes data:data (data:empty (support:backend))) (input (array u8 3) (array-of 97 98 99)))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (data:assign-bytes (& bytes) (data:view (& (index input 0)) 3))
+               ((ok) true)
+               (_ false)))
+           (do
+             (store (deref (& (index input 0))) 99)
+             (testing:check (data:equal (data:borrow bytes) (data:view "abc" 3)))))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test append-many-bytes-preserves-entire-sequence
+  (let ((bytes data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (append-pattern (& bytes) 0 8192 (testing:empty))
+           (testing:check (n:eq (data:length bytes) 8192))
+           (support:verify (data:bytes bytes) 8192 0))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test resize-growth-zero-fills-new-tail
+  (let ((bytes data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (data:resize (& bytes) 257) ((ok) true) (_ false)))
+           (do
+             (support:fill (data:bytes bytes) 257 0)
+             (testing:check (match (data:resize (& bytes) 4096) ((ok) true) (_ false))))
+           (support:verify (data:bytes bytes) 257 0)
+           (zeroes (data:bytes bytes) 257 4096))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test shrink-then-grow-zeroes-previously-visible-tail
+  (let ((bytes data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (data:resize (& bytes) 1024) ((ok) true) (_ false)))
+           (do
+             (support:fill (data:bytes bytes) 1024 0)
+             (testing:check (match (data:resize (& bytes) 17) ((ok) true) (_ false))))
+           (testing:check (match (data:resize (& bytes) 1024) ((ok) true) (_ false)))
+           (support:verify (data:bytes bytes) 17 0)
+           (zeroes (data:bytes bytes) 17 1024)
+           (testing:check (n:eq (support:attempts) 1)))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test resize-to-zero-keeps-reusable-capacity
+  (let ((bytes data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (data:resize (& bytes) 100) ((ok) true) (_ false)))
+           (testing:check (match (data:resize (& bytes) 0) ((ok) true) (_ false)))
+           (testing:check (n:eq (data:length bytes) 0))
+           (testing:check (match (data:resize (& bytes) 100) ((ok) true) (_ false)))
+           (testing:check (n:eq (support:attempts) 1)))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test slice-full
+  (testing:check
+    (match (data:slice (data:view "abcdef" 6) 0 6)
+      ((tuple true view) (data:equal view (data:view "abcdef" 6)))
+      (_ false))))
+
+(testing:test slice-middle
+  (testing:check
+    (match (data:slice (data:view "abcdef" 6) 2 3)
+      ((tuple true view) (data:equal view (data:view "cde" 3)))
+      (_ false))))
+
+(testing:test slice-last-byte
+  (testing:check
+    (match (data:slice (data:view "abcdef" 6) 5 1)
+      ((tuple true view) (data:equal view (data:view "f" 1)))
+      (_ false))))
+
+(testing:test slice-empty-at-end
+  (testing:check
+    (match (data:slice (data:view "abcdef" 6) 6 0)
+      ((tuple true view) (data:equal view (data:view "" 0)))
+      (_ false))))
+
+(testing:test slice-start-past-end
+  (testing:check (match (data:slice (data:view "abcdef" 6) 7 0) ((tuple false _) true) (_ false))))
+
+(testing:test slice-count-past-end
+  (testing:check (match (data:slice (data:view "abcdef" 6) 3 4) ((tuple false _) true) (_ false))))
+
+(testing:test slice-overflow-sized-count
+  (testing:check
+    (match (data:slice (data:view "abcdef" 6) 1 (base:maxBound))
+      ((tuple false _) true)
+      (_ false))))
+
+(testing:test slice-overflow-sized-start
+  (testing:check
+    (match (data:slice (data:view "abcdef" 6) (base:maxBound) 1)
+      ((tuple false _) true)
+      (_ false))))
+
+(testing:test equality-rejects-prefix-only-match
+  (testing:check
+    (match (data:equal (data:view "abc" 3) (data:view "abcd" 4)) (true false) (false true))))
+
+(testing:test equality-checks-final-byte
+  (testing:check
+    (match (data:equal (data:view "abcd" 4) (data:view "abce" 4)) (true false) (false true))))
+
+(testing:test copy-remains-valid-after-source-destruction
+  (let
+    ((bytes data:data (data:empty (support:backend)))
+     (copy data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (data:assign-bytes (& bytes) (data:view "original" 8)) ((ok) true) (_ false)))
+           (testing:check (match (data:copy bytes (& copy)) ((ok) true) (_ false)))
+           (do
+             (data:destroy (& bytes))
+             (testing:check (data:equal (data:borrow copy) (data:view "original" 8)))))))
+      (do (data:destroy (& bytes)) (data:destroy (& copy)) observed))))
+
+(testing:test failed-resize-keeps-content
+  (let ((bytes data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (data:assign-bytes (& bytes) (data:view "abc" 3)) ((ok) true) (_ false)))
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (data:resize (& bytes) 4096) ((allocation-error reason) true) (_ false))))
+           (testing:check (n:eq (data:length bytes) 3))
+           (testing:check (data:equal (data:borrow bytes) (data:view "abc" 3))))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test failed-append-keeps-content
+  (let ((bytes data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (data:assign-bytes (& bytes) (data:view "abc" 3)) ((ok) true) (_ false)))
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (data:append (& bytes) 120) ((allocation-error reason) true) (_ false))))
+           (testing:check (n:eq (data:length bytes) 3))
+           (testing:check (data:equal (data:borrow bytes) (data:view "abc" 3))))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test failed-assignment-keeps-content
+  (let ((bytes data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (data:assign-bytes (& bytes) (data:view "abc" 3)) ((ok) true) (_ false)))
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (data:assign-bytes (& bytes) (data:view "longer replacement" 18))
+                 ((allocation-error reason) true)
+                 (_ false))))
+           (testing:check (n:eq (data:length bytes) 3))
+           (testing:check (data:equal (data:borrow bytes) (data:view "abc" 3))))))
+      (do (data:destroy (& bytes)) observed))))
+
+(testing:test failed-copy-keeps-destination-content
+  (let
+    ((bytes data:data (data:empty (support:backend)))
+     (copy data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (data:assign-bytes (& bytes) (data:view "longer source" 13))
+               ((ok) true)
+               (_ false)))
+           (testing:check
+             (match (data:assign-bytes (& copy) (data:view "old" 3)) ((ok) true) (_ false)))
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (data:copy bytes (& copy)) ((allocation-error reason) true) (_ false))))
+           (testing:check (data:equal (data:borrow copy) (data:view "old" 3))))))
+      (do (data:destroy (& bytes)) (data:destroy (& copy)) observed))))
+
+(testing:test repeated-destruction-does-not-double-free
+  (let ((bytes data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (data:resize (& bytes) 100) ((ok) true) (_ false)))
+           (do
+             (data:destroy (& bytes))
+             (data:destroy (& bytes))
+             (testing:check (n:eq (support:released) 1))))))
+      (do (data:destroy (& bytes)) observed))))
+
+(base:function release-data ((value data:data)) unit
+  (data:destroy (& value)))
+
+(testing:test reserve-preserves-length-and-content
+  (testing:with-fixture (bytes data:data (data:empty (support:backend)) release-data)
+    (testing:check (match (data:reserve (& bytes) 128) ((ok) true) (_ false)))
+    (testing:check (n:eq (data:length bytes) 0))
+    (testing:check (match (data:assign-bytes (& bytes) (data:view "abc" 3)) ((ok) true) (_ false)))
+    (testing:check (match (data:reserve (& bytes) 256) ((ok) true) (_ false)))
+    (testing:check (n:eq (data:length bytes) 3))
+    (testing:check (data:equal (data:borrow bytes) (data:view "abc" 3)))
+    (testing:check (n:eq (support:outstanding) 1))))
+
+(testing:test reserve-failure-preserves-owner
+  (testing:with-fixture (bytes data:data (data:empty (support:backend)) release-data)
+    (testing:check (match (data:assign-bytes (& bytes) (data:view "abc" 3)) ((ok) true) (_ false)))
+    (do
+      (support:limit 0)
+      (testing:check
+        (match (data:reserve (& bytes) 256) ((allocation-error reason) true) (_ false))))
+    (testing:check (n:eq (data:length bytes) 3))
+    (testing:check (data:equal (data:borrow bytes) (data:view "abc" 3)))
+    (testing:check (n:eq (support:outstanding) 1))))
+
+(export
+  reserve-preserves-length-and-content
+  reserve-failure-preserves-owner
+  empty-has-zero-length-without-allocation
+  construction-copies-embedded-nul-and-high-bytes
+  construction-does-not-borrow-source
+  append-many-bytes-preserves-entire-sequence
+  resize-growth-zero-fills-new-tail
+  shrink-then-grow-zeroes-previously-visible-tail
+  resize-to-zero-keeps-reusable-capacity
+  slice-full
+  slice-middle
+  slice-last-byte
+  slice-empty-at-end
+  slice-start-past-end
+  slice-count-past-end
+  slice-overflow-sized-count
+  slice-overflow-sized-start
+  equality-rejects-prefix-only-match
+  equality-checks-final-byte
+  copy-remains-valid-after-source-destruction
+  failed-resize-keeps-content
+  failed-append-keeps-content
+  failed-assignment-keeps-content
+  failed-copy-keeps-destination-content
+  repeated-destruction-does-not-double-free)

@@ -1,0 +1,290 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import support)
+(import number)
+(import data)
+(import foundation.compat.signed_arithmetic :as signed)
+
+(base:function roundtrips ((owner (pointer data:data)) (i u64) (acc testing:result)) testing:result
+  (match (n:eq i 4096)
+    (true acc)
+    (false
+      (let ((expected u64 (n:add (n:mul i 104729) 97)))
+        (match (number:format-u64 expected owner)
+          ((ok)
+           (roundtrips
+             owner
+             (n:add i 1)
+             (testing:checks
+               acc
+               (testing:check
+                 (match (number:parse-u64 (data:borrow (deref owner)))
+                   ((value actual) (n:eq actual expected))
+                   (_ false))))))
+          (_ (testing:checks acc (testing:fail))))))))
+
+(base:function signed-maximum-as-u64 () u64
+  (let ((limit i64 (base:maxBound))) (base:convert limit)))
+
+(testing:test parse-zero
+  (testing:check
+    (match (number:parse-u64 (data:view "0" 1)) ((value actual) (n:eq actual 0)) (_ false))))
+
+(testing:test parse-leading-zeroes
+  (testing:check
+    (match (number:parse-u64 (data:view "0000042" 7)) ((value actual) (n:eq actual 42)) (_ false))))
+
+(testing:test parse-maximum
+  (testing:check
+    (match (number:parse-u64 (data:view "18446744073709551615" 20))
+      ((value actual) (n:eq actual (base:maxBound)))
+      (_ false))))
+
+(testing:test parse-signed-maximum
+  (testing:check
+    (match (number:parse-u64 (data:view "9223372036854775807" 19))
+      ((value actual) (n:eq actual (signed-maximum-as-u64)))
+      (_ false))))
+
+(testing:test parse-above-signed-maximum
+  (testing:check
+    (match (number:parse-u64 (data:view "9223372036854775808" 19))
+      ((value actual) (n:eq actual (n:add (signed-maximum-as-u64) 1)))
+      (_ false))))
+
+(testing:test parse-rejects-empty
+  (testing:check (match (number:parse-u64 (data:view "" 0)) ((invalid) true) (_ false))))
+
+(testing:test parse-rejects-negative
+  (testing:check (match (number:parse-u64 (data:view "-1" 2)) ((invalid) true) (_ false))))
+
+(testing:test parse-rejects-positive-sign
+  (testing:check (match (number:parse-u64 (data:view "+1" 2)) ((invalid) true) (_ false))))
+
+(testing:test parse-rejects-leading-space
+  (testing:check (match (number:parse-u64 (data:view " 1" 2)) ((invalid) true) (_ false))))
+
+(testing:test parse-rejects-trailing-space
+  (testing:check (match (number:parse-u64 (data:view "1 " 2)) ((invalid) true) (_ false))))
+
+(testing:test parse-rejects-decimal-point
+  (testing:check (match (number:parse-u64 (data:view "1.0" 3)) ((invalid) true) (_ false))))
+
+(testing:test parse-rejects-hex-prefix
+  (testing:check (match (number:parse-u64 (data:view "0xff" 4)) ((invalid) true) (_ false))))
+
+(testing:test parse-rejects-invalid-last-byte
+  (testing:check (match (number:parse-u64 (data:view "123x" 4)) ((invalid) true) (_ false))))
+
+(testing:test parse-overflow-maximum-plus-one
+  (testing:check
+    (match (number:parse-u64 (data:view "18446744073709551616" 20)) ((overflow) true) (_ false))))
+
+(testing:test parse-overflow-very-long-input
+  (testing:check
+    (match (number:parse-u64 (data:view "99999999999999999999999999999999999999999999999999" 50))
+      ((overflow) true)
+      (_ false))))
+
+(testing:test parse-rejects-embedded-nul
+  (let ((input (array u8 3) (array-of 49 0 50)))
+    (testing:check
+      (match (number:parse-u64 (data:view (& (index input 0)) 3)) ((invalid) true) (_ false)))))
+
+(testing:test checked-conversion-0
+  (testing:check (match (number:to-i64 0) ((signed actual) (signed:eq actual 0)) (_ false))))
+
+(testing:test checked-conversion-1
+  (testing:check (match (number:to-i64 1) ((signed actual) (signed:eq actual 1)) (_ false))))
+
+(testing:test checked-conversion-signed-maximum
+  (testing:check
+    (match (number:to-i64 (signed-maximum-as-u64))
+      ((signed actual) (signed:eq actual (base:maxBound)))
+      (_ false))))
+
+(testing:test checked-conversion-above-signed-maximum
+  (testing:check (match (number:to-i64 (n:add (signed-maximum-as-u64) 1)) ((overflow) true) (_ false))))
+
+(testing:test checked-conversion-unsigned-maximum
+  (testing:check (match (number:to-i64 (base:maxBound)) ((overflow) true) (_ false))))
+
+(testing:test format-0
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (number:format-u64 0 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "0" 1))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-1
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (number:format-u64 1 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "1" 1))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-9
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (number:format-u64 9 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "9" 1))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-10
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (number:format-u64 10 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "10" 2))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-99
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (number:format-u64 99 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "99" 2))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-100
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (number:format-u64 100 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "100" 3))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-999
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (number:format-u64 999 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "999" 3))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-1000
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check (match (number:format-u64 1000 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "1000" 4))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-10000000000000000000
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (number:format-u64 10000000000000000000 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "10000000000000000000" 20))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-unsigned-maximum
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (number:format-u64 (base:maxBound) (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "18446744073709551615" 20))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-replaces-longer-previous-number
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (number:format-u64 (base:maxBound) (& out)) ((ok) true) (_ false)))
+           (testing:check (match (number:format-u64 7 (& out)) ((ok) true) (_ false)))
+           (testing:check (data:equal (data:borrow out) (data:view "7" 1))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test format-failure-preserves-destination
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (testing:check
+             (match (data:assign-bytes (& out) (data:view "old" 3)) ((ok) true) (_ false)))
+           (do
+             (support:limit 0)
+             (testing:check
+               (match (number:format-u64 42 (& out)) ((allocation-error reason) true) (_ false))))
+           (testing:check (data:equal (data:borrow out) (data:view "old" 3))))))
+      (do (data:destroy (& out)) observed))))
+
+(testing:test thousands-of-format-parse-roundtrips
+  (let ((out data:data (data:empty (support:backend))))
+    (let
+      ((observed
+         testing:result
+         (testing:checks
+           (roundtrips (& out) 0 (testing:empty))
+           (testing:check (n:eq (support:attempts) 1)))))
+      (do (data:destroy (& out)) observed))))
+
+(export
+  parse-zero
+  parse-leading-zeroes
+  parse-maximum
+  parse-signed-maximum
+  parse-above-signed-maximum
+  parse-rejects-empty
+  parse-rejects-negative
+  parse-rejects-positive-sign
+  parse-rejects-leading-space
+  parse-rejects-trailing-space
+  parse-rejects-decimal-point
+  parse-rejects-hex-prefix
+  parse-rejects-invalid-last-byte
+  parse-overflow-maximum-plus-one
+  parse-overflow-very-long-input
+  parse-rejects-embedded-nul
+  checked-conversion-0
+  checked-conversion-1
+  checked-conversion-signed-maximum
+  checked-conversion-above-signed-maximum
+  checked-conversion-unsigned-maximum
+  format-0
+  format-1
+  format-9
+  format-10
+  format-99
+  format-100
+  format-999
+  format-1000
+  format-10000000000000000000
+  format-unsigned-maximum
+  format-replaces-longer-previous-number
+  format-failure-preserves-destination
+  thousands-of-format-parse-roundtrips)

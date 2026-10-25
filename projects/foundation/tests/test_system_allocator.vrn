@@ -1,0 +1,71 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import support)
+
+(base:function exercise ((size u64) (alignment u64)) testing:result
+  (match (allocator:allocate (support:backend) size alignment)
+    ((failed reason) (testing:fail))
+    ((allocated p)
+     (do
+       (support:fill p size 0)
+       (let ((result testing:result (support:verify p size 0)))
+         (do (allocator:deallocate (support:backend) p size alignment) result))))))
+
+(base:function cycle ((i u64) (acc testing:result)) testing:result
+  (match (n:eq i 512)
+    (true acc)
+    (false
+      (cycle (n:add i 1) (testing:checks acc (exercise (support:remainder (n:mul i 73) 2049) 64))))))
+
+(testing:test alignment-1-allocation
+  (exercise 513 1))
+
+(testing:test alignment-2-allocation
+  (exercise 513 2))
+
+(testing:test alignment-4-allocation
+  (exercise 513 4))
+
+(testing:test alignment-8-allocation
+  (exercise 513 8))
+
+(testing:test alignment-16-allocation
+  (exercise 513 16))
+
+(testing:test alignment-32-allocation
+  (exercise 513 32))
+
+(testing:test alignment-64-allocation
+  (exercise 513 64))
+
+(testing:test alignment-256-allocation
+  (exercise 513 256))
+
+(testing:test alignment-4096-allocation
+  (exercise 513 4096))
+
+(testing:test zero-size-storage-is-freeable
+  (exercise 0 64))
+
+(testing:test many-native-allocation-free-cycles
+  (cycle 0 (testing:empty))
+  (testing:check (n:eq (support:attempts) 512))
+  (testing:check (n:eq (support:released) 512)))
+
+(export
+  alignment-1-allocation
+  alignment-2-allocation
+  alignment-4-allocation
+  alignment-8-allocation
+  alignment-16-allocation
+  alignment-32-allocation
+  alignment-64-allocation
+  alignment-256-allocation
+  alignment-4096-allocation
+  zero-size-storage-is-freeable
+  many-native-allocation-free-cycles)

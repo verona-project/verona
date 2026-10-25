@@ -1,0 +1,116 @@
+(import base)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import error)
+(import array)
+(import allocator :as a)
+(import array :as ar)
+(import foundation.compat.arithmetic :as n)
+(import error :as e)
+
+(ar:define byte u8)
+
+(base:type data (tuple (pointer u8) u64 u64 ar:layout))
+
+(base:type view (product (bytes (pointer u8)) (length u64)))
+
+(base:function empty ((allocator a:backend)) data
+  (byte-empty "" (ar:layout 1 1 allocator)))
+
+(base:function length ((value data)) u64
+  (byte-length value))
+
+(base:function bytes ((value data)) (pointer u8)
+  (tuple-get value 0))
+
+(base:function borrow ((value data)) view
+  (view (bytes value) (length value)))
+
+(base:function slice ((value view) (start u64) (count u64)) (tuple bool view)
+  (match (n:le start (field value length))
+    (false (tuple false value))
+    (true
+      (match (n:le count (n:sub (field value length) start))
+        (false (tuple false value))
+        (true (tuple true (view (pointer-offset (field value bytes) start) count)))))))
+
+(base:function fill ((p (pointer u8)) (count u64)) unit
+  (match (n:eq count 0)
+    (true unit)
+    (false
+      (match (n:eq count 1)
+        (true (do (store (deref p) 0) unit))
+        (false
+          (let ((half u64 (n:div count 2)))
+            (do (fill p half) (fill (pointer-offset p half) (n:sub count half)))))))))
+
+(base:function reserve ((owner (pointer data)) (capacity u64)) e:status
+  (byte-reserve owner capacity))
+
+(base:function resize ((owner (pointer data)) (count u64)) e:status
+  (match (byte-reserve owner count)
+    ((ok)
+     (let ((value data (deref owner)))
+       (do
+         (match (n:gt count (length value))
+           (true (fill (pointer-offset (bytes value) (length value)) (n:sub count (length value))))
+           (false unit))
+         (store (deref owner) (tuple (bytes value) count (byte-capacity value) (tuple-get value 3)))
+         (e:success))))
+    (reason reason)))
+
+(base:function append ((owner (pointer data)) (byte u8)) e:status
+  (byte-append owner byte))
+
+(base:function assign-bytes ((owner (pointer data)) (source view)) e:status
+  (match (resize owner (field source length))
+    ((ok)
+     (do
+       (a:copy-bytes (bytes (deref owner)) (field source bytes) (field source length))
+       (e:success)))
+    (reason reason)))
+
+(base:function copy ((source data) (out (pointer data))) e:status
+  (byte-copy-into source out))
+
+(base:function equal-bytes ((left (pointer u8)) (right (pointer u8)) (count u64)) bool
+  (match (n:eq count 0)
+    (true true)
+    (false
+      (match (n:eq count 1)
+        (true
+          (let ((x u64 (base:convert (deref left))) (y u64 (base:convert (deref right))))
+            (n:eq x y)))
+        (false
+          (let ((half u64 (n:div count 2)))
+            (match (equal-bytes left right half)
+              (false false)
+              (true
+                (equal-bytes
+                  (pointer-offset left half)
+                  (pointer-offset right half)
+                  (n:sub count half))))))))))
+
+(base:function equal ((left view) (right view)) bool
+  (match (n:eq (field left length) (field right length))
+    (false false)
+    (true (equal-bytes (field left bytes) (field right bytes) (field left length)))))
+
+(base:function destroy ((owner (pointer data))) unit
+  (byte-destroy owner))
+
+(export
+  data
+  view
+  empty
+  length
+  bytes
+  borrow
+  slice
+  reserve
+  resize
+  append
+  assign-bytes
+  copy
+  equal
+  destroy)

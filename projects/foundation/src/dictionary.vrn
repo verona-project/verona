@@ -1,0 +1,258 @@
+(import base)
+(import allocator)
+(import array)
+(import foundation.compat.arithmetic)
+(import error)
+
+(base:macro define (prefix key value hash equal size alignment)
+  (definitions
+    `(base:type ,(symbol-concat prefix "-slot") (sum (vacant) (deleted) (occupied ,key ,value u64)))
+    `(array:define ,(symbol-concat prefix "-slots") ,(symbol-concat prefix "-slot"))
+    `(base:type ,(symbol-concat prefix "-table")
+       (product
+         (storage (tuple (pointer ,(symbol-concat prefix "-slot")) u64 u64 array:layout))
+         (count u64)))
+    `(base:function ,(symbol-concat prefix "-empty") ((backing allocator:backend))
+       ,(symbol-concat prefix "-table")
+       (,(symbol-concat prefix "-table")
+        (,(symbol-concat prefix "-slots-empty")
+         (cast (pointer ,(symbol-concat prefix "-slot")) (cast (pointer void) ""))
+         (array:layout ,size ,alignment backing))
+        0))
+    `(base:function ,(symbol-concat prefix "-count") ((table ,(symbol-concat prefix "-table"))) u64
+       (field table count))
+    `(base:function ,(symbol-concat prefix "-capacity") ((table ,(symbol-concat prefix "-table")))
+       u64
+       (,(symbol-concat prefix "-slots-capacity") (field table storage)))
+    `(base:function ,(symbol-concat prefix "-slot-at")
+       ((table ,(symbol-concat prefix "-table")) (i u64)) (pointer ,(symbol-concat prefix "-slot"))
+       (pointer-offset (tuple-get (field table storage) 0) i))
+    `(base:function ,(symbol-concat prefix "-next") ((i u64) (capacity u64)) u64
+       (match (foundation.compat.arithmetic:eq (foundation.compat.arithmetic:add i 1) capacity) (true 0) (false (foundation.compat.arithmetic:add i 1))))
+    `(base:function ,(symbol-concat prefix "-lookup-at")
+       ((table ,(symbol-concat prefix "-table")) (key ,key) (hash u64) (i u64) (remaining u64))
+       (tuple bool u64)
+       (match (foundation.compat.arithmetic:eq remaining 0)
+         (true (tuple false 0))
+         (false
+           (match (deref (,(symbol-concat prefix "-slot-at") table i))
+             ((vacant) (tuple false i))
+             ((deleted)
+              (,(symbol-concat prefix "-lookup-at")
+               table
+               key
+               hash
+               (,(symbol-concat prefix "-next") i (,(symbol-concat prefix "-capacity") table))
+               (foundation.compat.arithmetic:sub remaining 1)))
+             ((occupied stored value code)
+              (match (foundation.compat.arithmetic:eq code hash)
+                (false
+                  (,(symbol-concat prefix "-lookup-at")
+                   table
+                   key
+                   hash
+                   (,(symbol-concat prefix "-next") i (,(symbol-concat prefix "-capacity") table))
+                   (foundation.compat.arithmetic:sub remaining 1)))
+                (true
+                  (match (,equal key stored)
+                    (true (tuple true i))
+                    (false
+                      (,(symbol-concat prefix "-lookup-at")
+                       table
+                       key
+                       hash
+                       (,(symbol-concat prefix "-next")
+                        i
+                        (,(symbol-concat prefix "-capacity") table))
+                       (foundation.compat.arithmetic:sub remaining 1)))))))))))
+    `(base:function ,(symbol-concat prefix "-lookup")
+       ((table ,(symbol-concat prefix "-table")) (key ,key)) (tuple bool u64)
+       (match (foundation.compat.arithmetic:eq (,(symbol-concat prefix "-capacity") table) 0)
+         (true (tuple false 0))
+         (false
+           (let ((hash u64 (,hash key)))
+             (,(symbol-concat prefix "-lookup-at")
+              table
+              key
+              hash
+              (foundation.compat.arithmetic:sub
+                hash
+                (foundation.compat.arithmetic:mul
+                  (foundation.compat.arithmetic:div hash (,(symbol-concat prefix "-capacity") table))
+                  (,(symbol-concat prefix "-capacity") table)))
+              (,(symbol-concat prefix "-capacity") table))))))
+    `(base:function ,(symbol-concat prefix "-get")
+       ((table ,(symbol-concat prefix "-table")) (key ,key) (output (pointer ,value))) bool
+       (match (,(symbol-concat prefix "-lookup") table key)
+         ((tuple false _) false)
+         ((tuple found i)
+          (match (deref (,(symbol-concat prefix "-slot-at") table i))
+            ((occupied stored value hash) (do (store (deref output) value) true))
+            (_ false)))))
+    `(base:function ,(symbol-concat prefix "-contains")
+       ((table ,(symbol-concat prefix "-table")) (key ,key)) bool
+       (tuple-get (,(symbol-concat prefix "-lookup") table key) 0))
+    `(base:function ,(symbol-concat prefix "-vacancy")
+       ((table ,(symbol-concat prefix "-table")) (i u64) (remaining u64)) u64
+       (match (foundation.compat.arithmetic:eq remaining 0)
+         (true i)
+         (false
+           (match (deref (,(symbol-concat prefix "-slot-at") table i))
+             ((occupied key value hash)
+              (,(symbol-concat prefix "-vacancy")
+               table
+               (,(symbol-concat prefix "-next") i (,(symbol-concat prefix "-capacity") table))
+               (foundation.compat.arithmetic:sub remaining 1)))
+             (_ i)))))
+    `(base:function ,(symbol-concat prefix "-put-raw")
+       ((owner (pointer ,(symbol-concat prefix "-table"))) (key ,key) (value ,value) (hash u64))
+       unit
+       (let
+         ((table ,(symbol-concat prefix "-table") (deref owner))
+          (i
+            u64
+            (,(symbol-concat prefix "-vacancy")
+             table
+             (foundation.compat.arithmetic:sub
+               hash
+               (foundation.compat.arithmetic:mul
+                 (foundation.compat.arithmetic:div hash (,(symbol-concat prefix "-capacity") table))
+                 (,(symbol-concat prefix "-capacity") table)))
+             (,(symbol-concat prefix "-capacity") table)))
+          (entry ,(symbol-concat prefix "-slot") (occupied key value hash)))
+         (do
+           (store (deref (,(symbol-concat prefix "-slot-at") table i)) entry)
+           (store
+             (deref owner)
+             (,(symbol-concat prefix "-table")
+              (field table storage)
+              (foundation.compat.arithmetic:add (,(symbol-concat prefix "-count") table) 1)))
+           unit)))
+    `(base:function ,(symbol-concat prefix "-initialize")
+       ((table ,(symbol-concat prefix "-table")) (i u64)) unit
+       (match (foundation.compat.arithmetic:eq i (,(symbol-concat prefix "-capacity") table))
+         (true unit)
+         (false
+           (let ((empty ,(symbol-concat prefix "-slot") (vacant)))
+             (do
+               (store (deref (,(symbol-concat prefix "-slot-at") table i)) empty)
+               (,(symbol-concat prefix "-initialize") table (foundation.compat.arithmetic:add i 1)))))))
+    `(base:function ,(symbol-concat prefix "-rehash")
+       ((old ,(symbol-concat prefix "-table"))
+        (fresh (pointer ,(symbol-concat prefix "-table")))
+        (i u64)) unit
+       (match (foundation.compat.arithmetic:eq i (,(symbol-concat prefix "-capacity") old))
+         (true unit)
+         (false
+           (do
+             (match (deref (,(symbol-concat prefix "-slot-at") old i))
+               ((occupied key value hash) (,(symbol-concat prefix "-put-raw") fresh key value hash))
+               (_ unit))
+             (,(symbol-concat prefix "-rehash") old fresh (foundation.compat.arithmetic:add i 1))))))
+    `(base:function ,(symbol-concat prefix "-grow")
+       ((owner (pointer ,(symbol-concat prefix "-table")))) error:status
+       (let
+         ((old ,(symbol-concat prefix "-table") (deref owner))
+          (storage
+            (tuple (pointer ,(symbol-concat prefix "-slot")) u64 u64 array:layout)
+            (field old storage))
+          (fresh
+            ,(symbol-concat prefix "-table")
+            (,(symbol-concat prefix "-empty") (field (tuple-get storage 3) allocator))))
+         (match
+           (foundation.compat.arithmetic:gt
+             (,(symbol-concat prefix "-capacity") old)
+             (foundation.compat.arithmetic:div (base:maxBound) 2))
+           (true (error:too-large))
+           (false
+             (let
+               ((new-storage
+                  (tuple (pointer ,(symbol-concat prefix "-slot")) u64 u64 array:layout)
+                  (field fresh storage)))
+               (match
+                 (,(symbol-concat prefix "-slots-reserve")
+                  (& new-storage)
+                  (match (foundation.compat.arithmetic:eq (,(symbol-concat prefix "-capacity") old) 0)
+                    (true 8)
+                    (false (foundation.compat.arithmetic:mul (,(symbol-concat prefix "-capacity") old) 2))))
+                 ((ok)
+                  (let
+                    ((new
+                       ,(symbol-concat prefix "-table")
+                       (,(symbol-concat prefix "-table") new-storage 0)))
+                    (do
+                      (,(symbol-concat prefix "-initialize") new 0)
+                      (,(symbol-concat prefix "-rehash") old (& new) 0)
+                      (,(symbol-concat prefix "-slots-destroy") (& storage))
+                      (store (deref owner) new)
+                      (error:success))))
+                 (reason reason)))))))
+    `(base:function ,(symbol-concat prefix "-insert")
+       ((owner (pointer ,(symbol-concat prefix "-table"))) (key ,key) (value ,value)) error:status
+       (match (,(symbol-concat prefix "-lookup") (deref owner) key)
+         ((tuple true i)
+          (let ((entry ,(symbol-concat prefix "-slot") (occupied key value (,hash key))))
+            (do
+              (store (deref (,(symbol-concat prefix "-slot-at") (deref owner) i)) entry)
+              (error:success))))
+         ((tuple found _)
+          (match
+            (match
+              (foundation.compat.arithmetic:ge
+                (,(symbol-concat prefix "-count") (deref owner))
+                (foundation.compat.arithmetic:div (,(symbol-concat prefix "-capacity") (deref owner)) 2))
+              (true (,(symbol-concat prefix "-grow") owner))
+              (false (error:success)))
+            ((ok)
+             (do (,(symbol-concat prefix "-put-raw") owner key value (,hash key)) (error:success)))
+            (reason reason)))))
+    `(base:function ,(symbol-concat prefix "-remove")
+       ((owner (pointer ,(symbol-concat prefix "-table"))) (key ,key)) bool
+       (match (,(symbol-concat prefix "-lookup") (deref owner) key)
+         ((tuple false _) false)
+         ((tuple found i)
+          (let
+            ((entry ,(symbol-concat prefix "-slot") (deleted))
+             (table ,(symbol-concat prefix "-table") (deref owner)))
+            (do
+              (store (deref (,(symbol-concat prefix "-slot-at") table i)) entry)
+              (store
+                (deref owner)
+                (,(symbol-concat prefix "-table")
+                 (field table storage)
+                 (foundation.compat.arithmetic:sub (,(symbol-concat prefix "-count") table) 1)))
+              true)))))
+    `(base:function ,(symbol-concat prefix "-clear")
+       ((owner (pointer ,(symbol-concat prefix "-table")))) unit
+       (do
+         (,(symbol-concat prefix "-initialize") (deref owner) 0)
+         (store (deref owner) (,(symbol-concat prefix "-table") (field (deref owner) storage) 0))
+         unit))
+    `(base:function ,(symbol-concat prefix "-visit-at")
+       ((table ,(symbol-concat prefix "-table"))
+        (i u64)
+        (visitor (pointer (function (,key ,value) unit)))) unit
+       (match (foundation.compat.arithmetic:eq i (,(symbol-concat prefix "-capacity") table))
+         (true unit)
+         (false
+           (do
+             (match (deref (,(symbol-concat prefix "-slot-at") table i))
+               ((occupied key value hash) (visitor key value))
+               (_ unit))
+             (,(symbol-concat prefix "-visit-at") table (foundation.compat.arithmetic:add i 1) visitor)))))
+    `(base:function ,(symbol-concat prefix "-visit")
+       ((table ,(symbol-concat prefix "-table")) (visitor (pointer (function (,key ,value) unit))))
+       unit
+       (,(symbol-concat prefix "-visit-at") table 0 visitor))
+    `(base:function ,(symbol-concat prefix "-destroy")
+       ((owner (pointer ,(symbol-concat prefix "-table")))) unit
+       (let
+         ((storage
+            (tuple (pointer ,(symbol-concat prefix "-slot")) u64 u64 array:layout)
+            (field (deref owner) storage)))
+         (do
+           (,(symbol-concat prefix "-slots-destroy") (& storage))
+           (store (deref owner) (,(symbol-concat prefix "-table") storage 0))
+           unit)))))
+
+(export define)

@@ -1,0 +1,59 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import error)
+(import system_allocator :as system)
+(import support)
+(import data)
+(import foundation.compat.signed_arithmetic :as signed)
+
+(base:external-function strlen "strlen" ((pointer u8)) u64)
+
+(base:function description-is ((value error:status) (expected (pointer u8)) (length u64))
+  testing:result
+  (let ((description (pointer u8) (error:description value)))
+    (testing:checks
+      (testing:check (n:eq (strlen description) length))
+      (testing:check (data:equal (data:view description length) (data:view expected length))))))
+
+(base:function oom () allocator:error
+  (out-of-memory))
+
+(testing:test description-success
+  (description-is (error:success) "success" 7))
+
+(testing:test description-bounds
+  (description-is (error:out-of-bounds) "index out of bounds" 19))
+
+(testing:test description-invalid-input
+  (description-is (error:invalid) "invalid input" 13))
+
+(testing:test description-overflow
+  (description-is (error:too-large) "arithmetic overflow" 19))
+
+(testing:test description-allocation
+  (description-is (error:allocation (oom)) "allocation failed" 17))
+
+(testing:test allocation-error-preserves-specific-cause
+  (testing:check
+    (match (error:allocation (oom))
+      ((allocation-error cause) (match cause ((out-of-memory) true) (_ false)))
+      (_ false))))
+
+(testing:test context-preserves-code-and-borrowed-messages
+  (let ((value error:context (error:context 73 "failure" "request 42")))
+    (testing:checks
+      (testing:check (signed:eq (base:convert (field value code)) 73))
+      (testing:check (data:equal (data:view (field value description) 7) (data:view "failure" 7)))
+      (testing:check (data:equal (data:view (field value detail) 10) (data:view "request 42" 10))))))
+
+(export
+  description-success
+  description-bounds
+  description-invalid-input
+  description-overflow
+  description-allocation
+  allocation-error-preserves-specific-cause
+  context-preserves-code-and-borrowed-messages)

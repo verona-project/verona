@@ -1,0 +1,239 @@
+(import base)
+(import allocator :as a)
+(import foundation.compat.arithmetic :as n)
+(import error :as e)
+
+(base:type layout (product (size u64) (alignment u64) (allocator a:backend)))
+
+; Descriptor: (pointer T, logical length, capacity, layout). Never duplicate ownership.
+(base:macro define (prefix element)
+  (definitions
+    `(base:function ,(symbol-concat prefix "-empty")
+       ((witness (pointer ,element)) (storage array:layout))
+       (tuple (pointer ,element) u64 u64 array:layout)
+       (tuple witness 0 0 storage))
+    `(base:function ,(symbol-concat prefix "-length")
+       ((items (tuple (pointer ,element) u64 u64 array:layout))) u64
+       (tuple-get items 1))
+    `(base:function ,(symbol-concat prefix "-capacity")
+       ((items (tuple (pointer ,element) u64 u64 array:layout))) u64
+       (tuple-get items 2))
+    `(base:function ,(symbol-concat prefix "-copy-elements")
+       ((to (pointer ,element)) (from (pointer ,element)) (count u64)) unit
+       (match (foundation.compat.arithmetic:eq count 0)
+         (true unit)
+         (false
+           (match (foundation.compat.arithmetic:eq count 1)
+             (true (do (store (deref to) (deref from)) unit))
+             (false
+               (let ((half u64 (foundation.compat.arithmetic:div count 2)))
+                 (do
+                   (,(symbol-concat prefix "-copy-elements") to from half)
+                   (,(symbol-concat prefix "-copy-elements")
+                    (pointer-offset to half)
+                    (pointer-offset from half)
+                    (foundation.compat.arithmetic:sub count half)))))))))
+    `(base:function ,(symbol-concat prefix "-reserve")
+       ((owner (pointer (tuple (pointer ,element) u64 u64 array:layout))) (requested u64))
+       error:status
+       (let
+         ((items (tuple (pointer ,element) u64 u64 array:layout) (deref owner))
+          (l array:layout (tuple-get items 3)))
+         (match (foundation.compat.arithmetic:le requested (,(symbol-concat prefix "-capacity") items))
+           (true (error:success))
+           (false
+             (match (foundation.compat.arithmetic:eq (field l size) 0)
+               (true (error:invalid))
+               (false
+                 (match (allocator:checked-multiply-size requested (field l size))
+                   ((tuple false _) (error:too-large))
+                   ((tuple valid bytes)
+                    (match (allocator:allocate (field l allocator) bytes (field l alignment))
+                      ((failed reason) (error:allocation reason))
+                      ((allocated raw)
+                       (let
+                         ((p (pointer ,element) (cast (pointer ,element) (cast (pointer void) raw))))
+                         (do
+                           (,(symbol-concat prefix "-copy-elements")
+                            p
+                            (tuple-get items 0)
+                            (,(symbol-concat prefix "-length") items))
+                           (match (foundation.compat.arithmetic:eq (,(symbol-concat prefix "-capacity") items) 0)
+                             (true unit)
+                             (false
+                               (allocator:deallocate
+                                 (field l allocator)
+                                 (cast (pointer u8) (cast (pointer void) (tuple-get items 0)))
+                                 (foundation.compat.arithmetic:mul
+                                   (,(symbol-concat prefix "-capacity") items)
+                                   (field l size))
+                                 (field l alignment))))
+                           (store
+                             (deref owner)
+                             (tuple p (,(symbol-concat prefix "-length") items) requested l))
+                           (error:success)))))))))))))
+    `(base:function ,(symbol-concat prefix "-get")
+       ((items (tuple (pointer ,element) u64 u64 array:layout)) (i u64))
+       (tuple bool (pointer ,element))
+       (match (foundation.compat.arithmetic:lt i (,(symbol-concat prefix "-length") items))
+         (true (tuple true (pointer-offset (tuple-get items 0) i)))
+         (false (tuple false (tuple-get items 0)))))
+    `(base:function ,(symbol-concat prefix "-append")
+       ((owner (pointer (tuple (pointer ,element) u64 u64 array:layout))) (value ,element))
+       error:status
+       (let ((items (tuple (pointer ,element) u64 u64 array:layout) (deref owner)))
+         (match (allocator:checked-add-size (,(symbol-concat prefix "-length") items) 1)
+           ((tuple false _) (error:too-large))
+           ((tuple valid count)
+            (let
+              ((target
+                 u64
+                 (match (foundation.compat.arithmetic:eq (,(symbol-concat prefix "-capacity") items) 0)
+                   (true 4)
+                   (false
+                     (match
+                       (foundation.compat.arithmetic:gt
+                         (,(symbol-concat prefix "-capacity") items)
+                         (foundation.compat.arithmetic:div (base:maxBound) 2))
+                       (true count)
+                       (false (foundation.compat.arithmetic:mul (,(symbol-concat prefix "-capacity") items) 2)))))))
+              (match
+                (,(symbol-concat prefix "-reserve")
+                 owner
+                 (match (foundation.compat.arithmetic:le count (,(symbol-concat prefix "-capacity") items))
+                   (true (,(symbol-concat prefix "-capacity") items))
+                   (false target)))
+                ((ok)
+                 (let ((fresh (tuple (pointer ,element) u64 u64 array:layout) (deref owner)))
+                   (do
+                     (store
+                       (deref
+                         (pointer-offset
+                           (tuple-get fresh 0)
+                           (,(symbol-concat prefix "-length") items)))
+                       value)
+                     (store
+                       (deref owner)
+                       (tuple
+                         (tuple-get fresh 0)
+                         count
+                         (,(symbol-concat prefix "-capacity") fresh)
+                         (tuple-get fresh 3)))
+                     (error:success))))
+                (reason reason)))))))
+    `(base:function ,(symbol-concat prefix "-shift-right")
+       ((p (pointer ,element)) (end u64) (start u64)) unit
+       (match (foundation.compat.arithmetic:eq end start)
+         (true unit)
+         (false
+           (do
+             (store
+               (deref (pointer-offset p end))
+               (deref (pointer-offset p (foundation.compat.arithmetic:sub end 1))))
+             (,(symbol-concat prefix "-shift-right") p (foundation.compat.arithmetic:sub end 1) start)))))
+    `(base:function ,(symbol-concat prefix "-insert")
+       ((owner (pointer (tuple (pointer ,element) u64 u64 array:layout))) (i u64) (value ,element))
+       error:status
+       (match (foundation.compat.arithmetic:le i (,(symbol-concat prefix "-length") (deref owner)))
+         (false (error:out-of-bounds))
+         (true
+           (let ((old u64 (,(symbol-concat prefix "-length") (deref owner))))
+             (match (,(symbol-concat prefix "-append") owner value)
+               ((ok)
+                (do
+                  (,(symbol-concat prefix "-shift-right") (tuple-get (deref owner) 0) old i)
+                  (store (deref (pointer-offset (tuple-get (deref owner) 0) i)) value)
+                  (error:success)))
+               (reason reason))))))
+    `(base:function ,(symbol-concat prefix "-remove")
+       ((owner (pointer (tuple (pointer ,element) u64 u64 array:layout))) (i u64)) error:status
+       (let
+         ((items (tuple (pointer ,element) u64 u64 array:layout) (deref owner))
+          (p (pointer ,element) (tuple-get items 0)))
+         (match (foundation.compat.arithmetic:lt i (,(symbol-concat prefix "-length") items))
+           (false (error:out-of-bounds))
+           (true
+             (do
+               (,(symbol-concat prefix "-copy-elements")
+                (pointer-offset p i)
+                (pointer-offset p (foundation.compat.arithmetic:add i 1))
+                (foundation.compat.arithmetic:sub (foundation.compat.arithmetic:sub (,(symbol-concat prefix "-length") items) i) 1))
+               (store
+                 (deref owner)
+                 (tuple
+                   p
+                   (foundation.compat.arithmetic:sub (,(symbol-concat prefix "-length") items) 1)
+                   (,(symbol-concat prefix "-capacity") items)
+                   (tuple-get items 3)))
+               (error:success))))))
+    `(base:function ,(symbol-concat prefix "-replace")
+       ((items (tuple (pointer ,element) u64 u64 array:layout)) (i u64) (value ,element))
+       error:status
+       (match (,(symbol-concat prefix "-get") items i)
+         ((tuple false _) (error:out-of-bounds))
+         ((tuple valid p) (do (store (deref p) value) (error:success)))))
+    `(base:function ,(symbol-concat prefix "-clear")
+       ((owner (pointer (tuple (pointer ,element) u64 u64 array:layout)))) unit
+       (let ((items (tuple (pointer ,element) u64 u64 array:layout) (deref owner)))
+         (do
+           (store
+             (deref owner)
+             (tuple
+               (tuple-get items 0)
+               0
+               (,(symbol-concat prefix "-capacity") items)
+               (tuple-get items 3)))
+           unit)))
+    `(base:function ,(symbol-concat prefix "-destroy")
+       ((owner (pointer (tuple (pointer ,element) u64 u64 array:layout)))) unit
+       (let
+         ((items (tuple (pointer ,element) u64 u64 array:layout) (deref owner))
+          (l array:layout (tuple-get items 3)))
+         (do
+           (match (foundation.compat.arithmetic:eq (,(symbol-concat prefix "-capacity") items) 0)
+             (true unit)
+             (false
+               (allocator:deallocate
+                 (field l allocator)
+                 (cast (pointer u8) (cast (pointer void) (tuple-get items 0)))
+                 (foundation.compat.arithmetic:mul (,(symbol-concat prefix "-capacity") items) (field l size))
+                 (field l alignment))))
+           (store (deref owner) (,(symbol-concat prefix "-empty") (tuple-get items 0) l))
+           unit)))
+    `(base:function ,(symbol-concat prefix "-copy-into")
+       ((source (tuple (pointer ,element) u64 u64 array:layout))
+        (destination (pointer (tuple (pointer ,element) u64 u64 array:layout)))) error:status
+       (match
+         (,(symbol-concat prefix "-reserve") destination (,(symbol-concat prefix "-length") source))
+         ((ok)
+          (let ((out (tuple (pointer ,element) u64 u64 array:layout) (deref destination)))
+            (do
+              (,(symbol-concat prefix "-copy-elements")
+               (tuple-get out 0)
+               (tuple-get source 0)
+               (,(symbol-concat prefix "-length") source))
+              (store
+                (deref destination)
+                (tuple
+                  (tuple-get out 0)
+                  (,(symbol-concat prefix "-length") source)
+                  (,(symbol-concat prefix "-capacity") out)
+                  (tuple-get out 3)))
+              (error:success))))
+         (reason reason)))
+    `(base:function ,(symbol-concat prefix "-visit-at")
+       ((items (tuple (pointer ,element) u64 u64 array:layout))
+        (i u64)
+        (visitor (pointer (function (,element) unit)))) unit
+       (match (foundation.compat.arithmetic:eq i (,(symbol-concat prefix "-length") items))
+         (true unit)
+         (false
+           (do
+             (visitor (deref (pointer-offset (tuple-get items 0) i)))
+             (,(symbol-concat prefix "-visit-at") items (foundation.compat.arithmetic:add i 1) visitor)))))
+    `(base:function ,(symbol-concat prefix "-visit")
+       ((items (tuple (pointer ,element) u64 u64 array:layout))
+        (visitor (pointer (function (,element) unit)))) unit
+       (,(symbol-concat prefix "-visit-at") items 0 visitor))))
+
+(export layout define)
