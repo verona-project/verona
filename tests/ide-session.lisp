@@ -1454,11 +1454,14 @@
     (let ((verona::*expansion-observer* (lambda (&rest args) (declare (ignore args)) (error "Unexpected expansion"))))
       (let ((first (verona.ide:inspect-expansion store id key :offset (search "(keep 1" text)))
             (second (verona.ide:inspect-expansion store id key :offset (search "(keep 2" text)))
-            (whole (verona.ide:inspect-expansion store id key :offset (search "(function" text))))
+            (whole (verona.ide:inspect-expansion store id key :offset (search "(function" text)))
+            (body (verona.ide:inspect-expansion store id key :offset (search "(do" text))))
         (is (= 1 (getf first :after)))
         (is (= 2 (getf second :after)))
         (is (= 1 (length (getf first :steps))))
         (is (= 1 (length (getf second :steps))))
+        (is (equal '("do" 1 2) (getf body :after)))
+        (is (= 2 (length (getf body :steps))))
         (is (equal '("do" 1 2) (second (fourth (getf whole :after)))))))))
 
 (test ide-session-store-survives-loading-into-a-running-server
@@ -1501,3 +1504,47 @@
     (verona.ide:configure-session store id (verona.ide:make-configuration :reader-features '("registry")))
     (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main))))
     (verona.ide:close-session store id)))
+
+(test ide-inspection-preserves-symbols-versus-string-literals
+  (let* ((store (verona.ide:make-session-store))
+         (id (verona.ide:create-session store (verona.ide:make-configuration)))
+         (text "(macro keep (x) x) (function f () i32 (keep 17))")
+         (source (verona.ide:open-buffer store id "symbol-display" text :module "symbol-display"))
+         (key (list "symbol-display" (verona.ide:source-id source))))
+    (verona.ide:evaluate-module store id source)
+    (let ((result (verona.ide:inspect-expansion store id key
+                   :offset (search "(function" text) :preserve-names t)))
+      (is (equal '(:kind :symbol :value "%function") (first (getf result :after)))))
+    (let* ((verona.ide::*inspection-preserve-names* t)
+           (form (first (verona:read-source
+                         (verona:make-source "display.vrn" "(name name \"name\" stdio:puts true false unit)"))))
+           (data (verona.ide::inspection-form-data form (cons 4096 nil))))
+      (is (equal '(:kind :symbol :value "name") (first data)))
+      (is (equal "name" (third data)))
+      (is (equal '(:kind :symbol :value "stdio:puts") (fourth data))))))
+
+(test ide-inspection-surface-expansion-once-and-full
+  (let* ((store (verona.ide:make-session-store))
+         (id (verona.ide:create-session store (verona.ide:make-configuration)))
+         (text "(macro keep (x) x) (keep (keep (function f () i32 (keep 17))))")
+         (source (verona.ide:open-buffer store id "surface-display" text :module "surface-display"))
+         (key (list "surface-display" (verona.ide:source-id source))))
+    (verona.ide:evaluate-module store id source)
+    (let ((verona::*expansion-observer* (lambda (&rest args) (declare (ignore args)) (error "Query expanded macro"))))
+      (let ((once (verona.ide:inspect-expansion store id key :offset (search "(keep (keep" text) :mode :once))
+            (full (verona.ide:inspect-expansion store id key :offset (search "(keep (keep" text) :mode :full)))
+        (is (equal '("keep" ("function" "f" nil "i32" ("keep" 17))) (getf once :after)))
+        (is (equal '("function" "f" nil "i32" ("keep" 17)) (getf full :after)))
+        (is (= 1 (length (getf once :steps))))
+        (is (= 2 (length (getf full :steps))))))))
+
+(test ide-inspection-surface-definition-stays-surface
+  (let* ((store (verona.ide:make-session-store))
+         (id (verona.ide:create-session store (verona.ide:make-configuration)))
+         (source (verona.ide:open-buffer store id "surface-function" "(function f () i32 17)" :module "surface-function"))
+         (key (list "surface-function" (verona.ide:source-id source))))
+    (verona.ide:evaluate-module store id source)
+    (dolist (mode '(:once :full))
+      (let ((result (verona.ide:inspect-expansion store id key :offset 0 :mode mode)))
+        (is (equal '("function" "f" nil "i32" 17) (getf result :after)))
+        (is (null (getf result :steps)))))))

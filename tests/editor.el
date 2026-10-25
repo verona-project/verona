@@ -91,6 +91,97 @@
              (button-activate (button-at (1- (point)))))
            (should (equal (car calls) '(:list-definitions (:limit 2 :offset 2)))))
        (when (get-buffer "*Verona Acceptance*") (kill-buffer "*Verona Acceptance*"))))))
+(ert-deftest verona-editor-expansion-and-analysis-have-separate-views ()
+  (verona-test-buffer
+   (let ((source (current-buffer)) (text (buffer-string)) calls)
+     (unwind-protect
+         (cl-letf (((symbol-function 'display-buffer) #'ignore)
+                   ((symbol-function 'verona-ide--query)
+                    (lambda (operation arguments callback)
+                      (push (list operation arguments) calls)
+                      (funcall callback
+                               '(:status :found :expansion-availability :complete
+                                 :before ("keep" 17) :after 17
+                                 :steps ((:before ("keep" 17) :after 17))
+                                 :truncated-p nil)))))
+           (verona-ide-expansion)
+           (with-current-buffer "*Verona Expansion*"
+             (should (derived-mode-p 'special-mode))
+             (should (equal (buffer-string) "17\n")))
+           (verona-ide-expansion-analysis)
+           (with-current-buffer "*Verona Expansion analysis*"
+             (should (derived-mode-p 'special-mode))
+             (should (string-match-p ":before" (buffer-string)))
+             (should (string-match-p ":after 17" (buffer-string)))
+             (should (string-match-p ":steps" (buffer-string))))
+           (should (plist-get (cdr (cadr (cadr calls))) :preserve-names))
+           (should (eq (plist-get (cdr (cadr (cadr calls))) :mode) :once))
+           (should-not (plist-get (cdr (cadr (car calls))) :preserve-names))
+           (should (eq (caar calls) :inspect-expansion))
+           (should (equal (buffer-string) text))
+           (should (eq (current-buffer) source)))
+       (dolist (name '("*Verona Expansion*" "*Verona Expansion analysis*"))
+         (when (get-buffer name) (kill-buffer name)))))))
+
+(ert-deftest verona-editor-expansion-buffers-highlight-without-titles ()
+  (verona-test-buffer
+   (unwind-protect
+       (cl-letf (((symbol-function 'display-buffer) #'ignore)
+                 ((symbol-function 'verona-ide--query)
+                  (lambda (_operation _arguments callback)
+                    (funcall callback
+                             '(:status :found :expansion-availability :complete
+                               :after ((:kind :symbol :value "function")
+                                       (:kind :symbol :value "f") nil
+                                       (:kind :symbol :value "string") "hello"))))))
+         (dolist (command '(verona-ide-expansion verona-ide-expansion-full))
+           (funcall command)
+           (with-current-buffer (if (eq command 'verona-ide-expansion)
+                                    "*Verona Expansion*" "*Verona Full expansion*")
+             (should buffer-read-only)
+             (should (derived-mode-p 'verona-ide-expansion-mode))
+             (should (equal (buffer-string) "(function f () string \"hello\")\n"))
+             (font-lock-ensure)
+             (goto-char (point-min))
+             (search-forward "function")
+             (should (eq (get-text-property (1- (point)) 'face) 'font-lock-keyword-face))
+             (search-forward "hello")
+             (should (eq (get-text-property (1- (point)) 'face) 'font-lock-string-face)))))
+     (dolist (name '("*Verona Expansion*" "*Verona Full expansion*"))
+       (when (get-buffer name) (kill-buffer name))))))
+
+(ert-deftest verona-editor-full-expansion-requests-surface-chain ()
+  (verona-test-buffer
+   (let (arguments)
+     (cl-letf (((symbol-function 'verona-ide--view)
+                (lambda (title operation args renderer)
+                  (should (equal title "Full expansion"))
+                  (should (eq operation :inspect-expansion))
+                  (should (eq renderer #'verona-ide--insert-expansion))
+                  (setq arguments (cdr args)))))
+       (verona-ide-expansion-full)
+       (should (eq (plist-get arguments :mode) :full))
+       (should (plist-get arguments :preserve-names))))))
+
+(ert-deftest verona-editor-expansion-distinguishes-nil-unavailable-and-truncated ()
+  (dolist (case '(((:status :found :expansion-availability :complete :after nil) "()\n")
+                  ((:status :unavailable :expansion-availability :complete) "No cached form")
+                  ((:expansion-availability :unavailable) "Evaluate this module first")
+                  ((:status :found :expansion-availability :partial :after 17 :truncated-p t)
+                   "17\n\nExpansion output truncated.")))
+    (with-temp-buffer
+      (verona-ide--insert-expansion (car case))
+      (should (string-match-p (regexp-quote (cadr case)) (buffer-string))))))
+
+(ert-deftest verona-editor-expansion-renders-identifiers-and-real-strings ()
+  (should (equal
+           (verona-ide--expansion-text
+            '((:kind :symbol :value "%call")
+              (:kind :symbol :value "stdio:puts") "hello"
+              ((:kind :symbol :value "name") "name")
+              (:kind :boolean :value nil) (:kind :unit)))
+           "(%call stdio:puts \"hello\" (name \"name\") false unit)")))
+
 (ert-deftest verona-editor-overlay-does-not-evaluate ()
   (verona-test-buffer
    (setq verona-ide--source nil)

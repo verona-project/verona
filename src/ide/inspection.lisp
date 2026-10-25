@@ -80,6 +80,8 @@
              (progn (setf (cdr budget) t) nil)))
         (t data)))
 
+(defvar *inspection-preserve-names* nil)
+
 (defun inspection-form-data (syntax budget &optional replacements)
   ;; Share the output budget across syntax, structured atoms and expansion steps.
   (let ((replacement (assoc syntax replacements :test #'eq)))
@@ -93,7 +95,18 @@
                    (loop for remaining on (verona::verona-list-elements datum)
                          while (plusp (car budget)) collect (inspection-form-data (car remaining) budget replacements)
                          finally (when remaining (setf (cdr budget) t)))
-                   (inspection-atom-data (definition-structure datum nil) budget))))))
+                   (if (and *inspection-preserve-names*
+                            (or (verona::verona-name-p datum)
+                                (verona::qualified-name-p datum)
+                                (verona::module-name-p datum)))
+                       (list :kind :symbol :value
+                             (inspection-atom-data
+                              (typecase datum
+                                (verona::verona-name (verona::verona-name-value datum))
+                                (verona::qualified-name (verona::qualified-name-string datum))
+                                (verona::module-name (verona::module-name-string datum)))
+                              budget))
+                       (inspection-atom-data (definition-structure datum nil) budget)))))))
 
 (defun inspection-same-form-p (left right)
   (let ((a (verona::syntax-datum left)) (b (verona::syntax-datum right)))
@@ -117,12 +130,33 @@
         (push step result)
         (push (second step) forms)))))
 
-(defun inspect-expansion (store id module &key offset definition (limit 4096))
-  "Inspect a cached source form or current definition. LIMIT is a shared node/character budget."
+(defun inspection-lowering-step-p (step)
+  "Recognize bootstrap lowering, retaining the surface invocation for display."
+  (let ((origin (verona::syntax-expansion-origin (second step))))
+    (and origin
+         (null (verona::expansion-origin-macro origin))
+         (member (verona::top-level-form-head (second step))
+                 verona::+definition-form-names+ :test #'equal))))
+
+(defun inspection-surface-steps (selected steps mode)
+  "Follow only the selected form's outer expansion chain, before lowering."
+  (let ((current (and selected (first selected))) (result nil))
+    (dolist (step (and selected (member selected steps :test #'eq)) (nreverse result))
+      (when (eq current (first step))
+        (when (inspection-lowering-step-p step) (return (nreverse result)))
+        (push step result)
+        (setf current (second step))
+        (when (eq mode :once) (return (nreverse result)))))))
+
+(defun inspect-expansion (store id module &key offset definition (limit 4096) preserve-names (mode :analysis))
+  "Inspect cached syntax. PRESERVE-NAMES tags identifiers separately from strings.
+LIMIT is a shared node/character budget."
+  (unless (member mode '(:analysis :once :full)) (reject-request "Invalid expansion MODE"))
   (unless (and (integerp limit) (<= 1 limit 100000)) (reject-request "Invalid expansion LIMIT"))
   (unless (or definition (and (integerp offset) (>= offset 0))) (reject-request "Supply OFFSET or DEFINITION"))
   (serialized (store)
-    (let* ((s (require-session store id)) (record (require-query-module s module)) (state (fourth record))
+    (let* ((*inspection-preserve-names* preserve-names)
+           (s (require-session store id)) (record (require-query-module s module)) (state (fourth record))
            (entry (and definition (find definition (definition-records s) :key #'first :test #'equal)))
            (valid (or (null definition) (and entry (equal module (first (second entry))))))
            (position (if entry (nav-start (verona::declaration-source (third entry))) offset))
@@ -137,9 +171,19 @@
                                           (and (nav-contains (first path) (nav-start (first step)))
                                                (inspection-same-form-p before (first step))))
                                         all-steps)))
-           (steps (and selected-step
-                       (inspection-selected-steps selected-step all-steps)))
-           (after (or (and selected-step (first selected-step)) before))
+           (steps (if (not (eq mode :analysis))
+                      (inspection-surface-steps selected-step all-steps mode)
+                      (if selected-step
+                      (inspection-selected-steps selected-step all-steps)
+                      ;; A surrounding expression need not itself be a macro.
+                      ;; Include expansions of its children in the result.
+                      (and before
+                           (remove-if-not
+                            (lambda (step) (inspection-subform-p (first step) before))
+                            all-steps)))))
+           (after (if (eq mode :analysis)
+                      (or (and selected-step (first selected-step)) before)
+                      (if steps (second (car (last steps))) before)))
            (availability (getf (query-product state :expanded-forms) :availability))
            (budget (cons limit nil)))
       (when (and steps (eq availability :unavailable)) (setf availability :partial))
@@ -154,7 +198,7 @@
                      :steps-availability (if (eq (getf (query-product state :types) :availability) :complete)
                                              :complete (if (eq availability :unavailable) :unavailable :partial))
                      :before (and before (inspection-form-data before budget))
-                     :after (and after (not (eq availability :unavailable)) (inspection-form-data after budget steps))
+                     :after (and after (not (eq availability :unavailable)) (inspection-form-data after budget (and (eq mode :analysis) steps)))
                      :steps (loop for (input output) in steps while (plusp (car budget))
                                   collect (list :before (inspection-form-data input budget)
                                                 :after (inspection-form-data output budget)

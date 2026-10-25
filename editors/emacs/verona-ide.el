@@ -545,7 +545,12 @@ Application code is not executed."
                    (if (eq (plist-get diag :severity) :warning) :warning :error)
                    (plist-get diag :message)))))) (plist-get data :items))))))))
 
-(defun verona-ide--view (title operation arguments)
+(define-derived-mode verona-ide-expansion-mode special-mode "Verona Expansion"
+  "Read-only Verona syntax for macro expansion results."
+  :syntax-table verona-mode-syntax-table
+  (setq-local font-lock-defaults '(verona-font-lock-keywords)))
+
+(defun verona-ide--view (title operation arguments &optional renderer)
   (verona-ide--query operation arguments
    (lambda (data)
      (let ((origin (current-buffer)))
@@ -554,8 +559,11 @@ Application code is not executed."
                verona-ide--connection (buffer-local-value 'verona-ide--connection origin))
          (let ((inhibit-read-only t))
            (erase-buffer)
-           (insert (format "%s — cached analysis\n\n" title))
-           (insert (pp-to-string data))
+           (unless (eq operation :inspect-expansion)
+             (insert (format "%s — cached analysis\n\n" title)))
+           (if renderer
+               (funcall renderer data)
+             (insert (pp-to-string data)))
            (cl-labels ((links (value)
                          (when (consp value)
                            (when (and (keywordp (car value)) (plist-get value :id)
@@ -576,14 +584,17 @@ Application code is not executed."
                                 'action (lambda (_) (find-file (plist-get loc :source))
                                           (goto-char (min (point-max) (1+ (plist-get loc :offset))))))
                                (insert "\n")))
-                           (mapc #'links value)))) (links data))
+                           (mapc #'links value)))) (unless renderer (links data)))
            (when (plist-get data :next-offset)
              (insert-text-button "Next page"
               'action (lambda (_) (with-current-buffer origin
                                     (let ((args (copy-sequence arguments)))
                                       (setq args (plist-put args :offset (plist-get data :next-offset)))
                                       (verona-ide--view title operation args))))))
-           (goto-char (point-min)) (special-mode)))
+           (goto-char (point-min))
+           (if renderer
+               (verona-ide-expansion-mode)
+             (special-mode))))
        (display-buffer (format "*Verona %s*" title))))))
 (defun verona-ide-session ()
   "Inspect the attached session, including its effective project configuration."
@@ -604,8 +615,51 @@ Application code is not executed."
    (lambda (data)
      (dolist (item (plist-get data :items))
        (verona-ide--view "Related definitions and origins" :related-definitions (list (plist-get item :id)))))))
-(defun verona-ide-expansion () (interactive)
-  (verona-ide--view "Expansion" :inspect-expansion (list verona-ide--module :offset (verona-ide--offset) :limit 4096)))
+(defun verona-ide--expansion-text (form)
+  "Render tagged expansion FORM, keeping identifiers distinct from strings."
+  (cond
+   ((eq form :truncated) "…")
+   ((and (consp form) (eq (car form) :kind))
+    (pcase (plist-get form :kind)
+      (:symbol (plist-get form :value))
+      (:unit "unit")
+      (:boolean (if (plist-get form :value) "true" "false"))
+      (_ (prin1-to-string form))))
+   ((listp form)
+    (concat "(" (mapconcat #'verona-ide--expansion-text form " ") ")"))
+   (t (prin1-to-string form))))
+
+(defun verona-ide--insert-expansion (data)
+  "Insert the cached expansion result from DATA."
+  (cond
+   ((eq (plist-get data :status) :unavailable)
+    (insert "No cached form at this position.\n"))
+   ((eq (plist-get data :expansion-availability) :unavailable)
+    (insert "Unavailable. Evaluate this module first.\n"))
+   (t (insert (verona-ide--expansion-text (plist-get data :after)) "\n")))
+  (when (plist-get data :truncated-p)
+    (insert "\nExpansion output truncated.\n")))
+
+(defun verona-ide-expansion ()
+  "Show one macro expansion at point, before compiler lowering."
+  (interactive)
+  (verona-ide--view "Expansion" :inspect-expansion
+                    (list verona-ide--module :offset (verona-ide--offset) :limit 4096 :preserve-names t :mode :once)
+                    #'verona-ide--insert-expansion))
+
+(defun verona-ide-expansion-full ()
+  "Expand the outer macro chain at point, stopping before compiler lowering."
+  (interactive)
+  (verona-ide--view "Full expansion" :inspect-expansion
+                    (list verona-ide--module :offset (verona-ide--offset)
+                          :limit 4096 :preserve-names t :mode :full)
+                    #'verona-ide--insert-expansion))
+
+(defun verona-ide-expansion-analysis ()
+  "Inspect cached expansion steps and analysis metadata at point."
+  (interactive)
+  (verona-ide--view "Expansion analysis" :inspect-expansion
+                    (list verona-ide--module :offset (verona-ide--offset) :limit 4096)))
 (defun verona-ide-type () (interactive)
   (verona-ide--view "Type" :type-at-position (list verona-ide--module (verona-ide--offset))))
 (defun verona-ide-project-diagnostics () (interactive)

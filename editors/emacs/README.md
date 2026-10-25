@@ -133,10 +133,17 @@ the project diagnostic view provides pagination for larger result sets.
 
 Inspection commands: `verona-ide-session` (effective configuration), `verona-ide-modules`, `verona-ide-module`,
 `verona-ide-definition`, `verona-ide-related` (implementations and expansion
-origins), `verona-ide-expansion`, `verona-ide-type`, and
+origins), `verona-ide-expansion`, `verona-ide-expansion-full`, `verona-ide-expansion-analysis`, `verona-ide-type`, and
 `verona-ide-project-diagnostics`. Views retain structured metadata, availability,
 coverage and truncation flags. Valid locations have source buttons; paginated
-views offer a Next page button. Expansion output has a 4096-unit server budget.
+views offer a Next page button. `verona-ide-expansion` shows only the cached
+first-level macro result in `*Verona Expansion*`.
+`verona-ide-expansion-full` follows the outer macro chain in `*Verona Full expansion*`,
+stopping at the surface form before bootstrap/compiler lowering. It leaves macros
+inside that resulting form unchanged; `verona-ide-expansion-analysis` shows
+the before/after forms, steps, and metadata in `*Verona Expansion analysis*`.
+The expansion view prints identifiers without quotes and preserves quotes on string literals.
+Both commands leave source text unchanged. Expansion output has a 4096-unit server budget.
 
 ## Builds and program execution
 
