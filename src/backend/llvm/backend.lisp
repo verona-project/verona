@@ -108,6 +108,10 @@ iteration order."
         ((typep type 'verona:array-type)
          (format nil "a~D_~A" (verona:array-type-length type)
                  (llvm-type-mangle (verona:array-type-element-type type))))
+        ((typep type 'verona:tuple-type)
+         (format nil "t~D_~{~A~^_~}"
+                 (length (verona:tuple-type-element-types type))
+                 (mapcar #'llvm-type-mangle (verona:tuple-type-element-types type))))
         ((typep type 'verona:defined-type)
          (llvm-name (verona:defined-type-declaration type)))
         ;; Function types cannot currently be generic arguments, but retain a

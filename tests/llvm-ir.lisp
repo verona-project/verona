@@ -2,6 +2,21 @@
 
 (in-suite :verona)
 
+(test tuple-instance-mangling-preserves-element-order-and-nesting
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(function first () (tuple i8 bool) (tuple 0 false))
+                 (function second () (tuple bool i8) (tuple false 0))
+                 (function nested () (tuple (tuple i8 bool) i8) (tuple (tuple 0 false) 0))"))
+         (program (compilation-unit-semantic-program unit))
+         (spellings
+           (mapcar (lambda (declaration)
+                     (verona.backend.llvm::llvm-type-mangle
+                      (semantic-function-declaration-return-type
+                       (semantic-program-declaration program declaration))))
+                   (unit-declarations unit))))
+    (is (equal '("t2_i8_bool" "t2_bool_i8" "t2_t2_i8_bool_i8") spellings))))
+
 (test creates-and-prints-an-empty-llvm-module
   (let ((backend (verona.backend.llvm:make-llvm-backend :module-name "empty")))
     (is (search "ModuleID = 'empty'" (verona.backend.llvm:print-llvm-module backend)))
