@@ -1,6 +1,8 @@
 # Verona formatter
 
 `verona-fmt` is a source formatter written in Verona and built on Foundation.
+The default `make build` builds it, and `make install` installs it alongside
+`verona`, `verona-project`, and `verona-server`.
 It reads one file or standard input, preserves every lexeme, and writes formatted
 source to standard output. It also supports a check mode for CI and editors.
 

@@ -1,4 +1,5 @@
 VERONA_EXECUTABLE = $(abs_top_builddir)/build/verona
+VERONA_FORMATTER = $(abs_top_builddir)/build/formatter/verona-fmt
 VERONA_PROJECT = $(abs_top_builddir)/build/project/verona-project
 VERONA_SERVER = $(abs_top_builddir)/build/verona-server
 VERONA_LINKER = @VERONA_LINKER@
@@ -13,6 +14,7 @@ nodist_bin_SCRIPTS = $(VERONA_SERVER)
 # Include the pinned bindings in source archives without Git's metadata pointer.
 cl_llvm_files = $(shell cd $(verona_srcdir) && find vendor/CL-LLVM -type f ! -name .git -print)
 verona_project_files = $(shell find $(verona_srcdir)/projects/project $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
+verona_formatter_files = $(shell find $(verona_srcdir)/projects/formatter/src $(verona_srcdir)/projects/foundation/src $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
 verona_lisp_files = $(shell find $(verona_srcdir)/src -type f -name '*.lisp' -print)
 EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/IDE-WORKFLOWS.md \
 	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/verona-server.el editors/emacs/README.md flake.lock flake.nix license projects readme.md \
@@ -25,7 +27,7 @@ help:
 	@printf '%s\n' '  make bootstrap      Check and run the Verona package-environment tutorial'
 	@printf '%s\n' '  make build          Build Verona and its standalone tools'
 	@printf '%s\n' '  make project        Build the Verona project management tool'
-	@printf '%s\n' '  make install        Install verona (configure --prefix=/path to change it)'
+	@printf '%s\n' '  make install        Install Verona and its tools (configure --prefix=/path)'
 	@printf '%s\n' '  make test           Run every test runner'
 	@printf '%s\n' '  make test-frontend  Run front-end and module-semantic tests'
 	@printf '%s\n' '  make test-llvm      Run LLVM backend integration tests'
@@ -46,7 +48,7 @@ bootstrap: $(VERONA_EXECUTABLE)
 	@cd $(verona_srcdir)/projects/bootstrap && $(VERONA_EXECUTABLE) build bootstrap $(abs_top_builddir)/build/bootstrap
 	@$(abs_top_builddir)/build/bootstrap/bootstrap
 
-build: $(VERONA_EXECUTABLE) $(VERONA_SERVER) $(VERONA_PROJECT)
+build: $(VERONA_EXECUTABLE) $(VERONA_SERVER) $(VERONA_PROJECT) $(VERONA_FORMATTER)
 
 $(VERONA_EXECUTABLE): $(verona_srcdir)/verona.asd $(verona_srcdir)/scripts/build-executable.lisp $(verona_lisp_files)
 	@$(MKDIR_P) $(@D)
@@ -66,13 +68,14 @@ $(VERONA_PROJECT): $(VERONA_EXECUTABLE) $(verona_srcdir)/projects/project/verona
 .PHONY: project
 project: $(VERONA_PROJECT)
 
-install-exec-local: $(VERONA_EXECUTABLE) $(VERONA_PROJECT)
+install-exec-local: $(VERONA_EXECUTABLE) $(VERONA_PROJECT) $(VERONA_FORMATTER)
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
 	$(INSTALL_PROGRAM) $(VERONA_EXECUTABLE) '$(DESTDIR)$(bindir)/verona'
 	$(INSTALL_PROGRAM) $(VERONA_PROJECT) '$(DESTDIR)$(bindir)/verona-project'
+	$(INSTALL_PROGRAM) $(VERONA_FORMATTER) '$(DESTDIR)$(bindir)/verona-fmt'
 
 uninstall-local:
-	$(RM) '$(DESTDIR)$(bindir)/verona' '$(DESTDIR)$(bindir)/verona-project'
+	$(RM) '$(DESTDIR)$(bindir)/verona' '$(DESTDIR)$(bindir)/verona-project' '$(DESTDIR)$(bindir)/verona-fmt'
 
 test: test-frontend test-llvm test-compiler test-verona test-bounded test-foundation test-formatter
 
@@ -104,9 +107,11 @@ test-foundation: $(VERONA_EXECUTABLE)
 	@cd $(verona_srcdir)/projects/foundation && $(VERONA_EXECUTABLE) build foundation-tests $(abs_top_builddir)/build/foundation
 	@$(abs_top_builddir)/build/foundation/foundation-tests
 
-formatter: $(VERONA_EXECUTABLE)
-	@$(MKDIR_P) $(abs_top_builddir)/build/formatter
-	@cd $(verona_srcdir)/projects/formatter && $(VERONA_EXECUTABLE) build verona-fmt $(abs_top_builddir)/build/formatter
+formatter: $(VERONA_FORMATTER)
+
+$(VERONA_FORMATTER): $(VERONA_EXECUTABLE) $(verona_srcdir)/projects/formatter/verona.build $(verona_formatter_files)
+	@$(MKDIR_P) $(@D)
+	cd $(verona_srcdir)/projects/formatter && $(VERONA_EXECUTABLE) build verona-fmt $(@D)
 
 test-formatter: formatter
 	@cd $(verona_srcdir)/projects/formatter && $(VERONA_EXECUTABLE) build formatter-tests $(abs_top_builddir)/build/formatter
@@ -114,7 +119,7 @@ test-formatter: formatter
 	@$(SBCL) --script $(verona_srcdir)/projects/formatter/tests/run-integration.lisp $(abs_top_builddir)/build/formatter/verona-fmt
 
 clean-local:
-	$(RM) $(VERONA_EXECUTABLE) $(VERONA_PROJECT) $(VERONA_SERVER) $(VERONA_SERVER).tmp
+	$(RM) $(VERONA_EXECUTABLE) $(VERONA_FORMATTER) $(VERONA_PROJECT) $(VERONA_SERVER) $(VERONA_SERVER).tmp
 
 # Optional editor tests; Emacs and SLIME are not compiler dependencies.
 .PHONY: test-editor test-workflows

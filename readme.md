@@ -107,7 +107,8 @@ the image:
 make build
 ```
 
-This creates `build/verona` and `build/verona-server`. The compiler executable
+This creates `build/verona`, `build/verona-server`,
+`build/project/verona-project`, and `build/formatter/verona-fmt`. The compiler executable
 bundles SBCL; the server launcher uses an SBCL executable from its environment.
 Run the full test suite with:
 
@@ -116,8 +117,8 @@ make test
 ```
 
 To install the command, configure the desired prefix (default: `/usr/local`)
-and run `make install`. This installs `verona` and the `verona-server` Bash
-launcher side by side in `PREFIX/bin`. The launcher embeds its Lisp entry point;
+and run `make install`. This installs `verona`, `verona-project`, `verona-fmt`, and the `verona-server`
+Bash launcher side by side in `PREFIX/bin`. The launcher embeds its Lisp entry point;
 no separate server Lisp file is installed:
 
 ```sh
