@@ -29,6 +29,22 @@ four ordering helpers (`assert-less-than`, `assert-less-or-equal`,
 `assert-greater-than`, and `assert-greater-or-equal`) work for types
 implementing `base:ordering`.
 
+### Grouping checks inside expressions
+
+Use `testing:checks` to return one result from any number of assertions inside
+`let`, `match`, fixtures, or recursive helpers:
+
+```lisp
+(let ((value i64 42) (expected i64 42) (upper i64 43))
+  (testing:checks
+    (testing:assert-equal value expected)
+    (testing:assert-less-than value upper)))
+```
+
+Every expression runs once in source order, including after a failure. An empty
+group returns an empty result. `testing:test` already groups its top-level checks;
+use `testing:checks` when an expression needs a single aggregate result.
+
 ### Fixtures
 
 `testing:with-fixture` scopes a resource around one or more checks. Its

@@ -200,6 +200,9 @@ target's module paths, declare named tests, then list their calls in a runner:
 ```
 
 `testing:test` combines all checks in a named zero-argument function.
+`(testing:checks CHECK...)` aggregates results inside expressions such as `let`
+and `match`. It evaluates each check once in source order, including after
+a failure; an empty group returns an empty result.
 `testing:runner` executes its explicit list of test calls and makes the
 process exit code equal the total number of failures. `testing:check` wraps a
 boolean condition; `assert-equal` and `assert-not-equal` require
