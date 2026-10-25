@@ -94,6 +94,8 @@ integration with the driver.
 - Keep projects and their build files runnable. They serve as user-facing
   regression coverage and documentation.
 - Do not commit generated artifacts from `build/`.
+- Never use semantic commits or Conventional Commits. Write commit messages in
+  plain language without type prefixes such as `feat:`, `fix:`, or `docs:`.
 
 ## Scope-based verification
 
