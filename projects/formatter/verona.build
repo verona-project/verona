@@ -1,0 +1,19 @@
+(executable
+  verona-fmt
+  (root formatter.cli)
+  (module-path "src")
+  (module-path "../foundation/src")
+  (module-path "../base/src")
+  (module-path "../libc/src")
+  (optimize 2))
+
+(executable
+  formatter-tests
+  (root formatter.tests)
+  (module-path "src")
+  (module-path "tests")
+  (module-path "../foundation/src")
+  (module-path "../base/src")
+  (module-path "../testing/src")
+  (module-path "../libc/src")
+  (optimize 2))

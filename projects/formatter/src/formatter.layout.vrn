@@ -1,0 +1,431 @@
+(import base)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import data)
+(import formatter.model)
+(import formatter.model :as m)
+(import formatter.writer :as w)
+
+(base:function named ((source data:view) (node m:node) (text (pointer u8)) (size u64)) bool
+  (match (n:eq (field node kind) 0)
+    (false false)
+    (true
+      (match (n:ge (field node length) size)
+        (false false)
+        (true
+          (let ((start u64 (n:sub (n:add (field node start) (field node length)) size)))
+            (match (m:equal-at source start size text size)
+              (false false)
+              (true
+                (match (n:eq start (field node start))
+                  (true true)
+                  (false
+                    (match (m:byte source (n:sub start 1))
+                      (58 true)
+                      (37
+                        (match (n:eq start (n:add (field node start) 1))
+                          (true true)
+                          (false (n:eq (m:byte source (n:sub start 2)) 58))))
+                      (_ false))))))))))))
+
+(base:function next-noncomment ((items m:tape) (i u64) (end u64)) u64
+  (match (n:ge i end)
+    (true end)
+    (false
+      (match (n:eq (n:sub end i) 1)
+        (true (match (field (m:at items i) kind) (3 end) (_ i)))
+        (false
+          (let
+            ((middle u64 (n:add i (n:div (n:sub end i) 2)))
+             (found u64 (next-noncomment items i middle)))
+            (match (n:lt found middle) (true found) (false (next-noncomment items middle end)))))))))
+
+(base:function nth-child-at ((items m:tape) (i u64) (end u64) (ordinal u64)) u64
+  (match (n:ge i end)
+    (true end)
+    (false
+      (match (field (m:at items i) kind)
+        (3 (nth-child-at items (next-noncomment items i end) end ordinal))
+        (_
+          (match (n:eq ordinal 0)
+            (true i)
+            (false (nth-child-at items (field (m:at items i) next) end (n:sub ordinal 1)))))))))
+
+(base:function child ((items m:tape) (i u64) (ordinal u64)) u64
+  (nth-child-at items (n:add i 1) (n:sub (field (m:at items i) next) 1) ordinal))
+
+(base:function head-is ((source data:view) (items m:tape) (i u64) (text (pointer u8)) (size u64))
+  bool
+  (match (n:ge i (m:nodes-length items))
+    (true false)
+    (false
+      (match (field (m:at items i) kind)
+        (1
+          (let ((first u64 (child items i 0)))
+            (match (n:ge first (n:sub (field (m:at items i) next) 1))
+              (true false)
+              (false (named source (m:at items first) text size)))))
+        (_ false)))))
+
+; Header child count, always-break declaration, anonymous list.
+(base:function style ((source data:view) (items m:tape) (i u64)) (tuple u64 bool bool)
+  (let ((first u64 (child items i 0)))
+    (match (n:ge first (n:sub (field (m:at items i) next) 1))
+      (true (tuple 0 false false))
+      (false
+        (let ((head m:node (m:at items first)))
+          (match (field head kind)
+            (0
+              (match (named source head "function" 8)
+                (true
+                  (tuple
+                    (match (head-is source items (child items i 2) "for" 3) (true 5) (false 4))
+                    true
+                    false))
+                (false
+                  (match (named source head "macro" 5)
+                    (true (tuple 3 true false))
+                    (false
+                      (match (named source head "test" 4)
+                        (true (tuple 2 true false))
+                        (false
+                          (match (named source head "runner" 6)
+                            (true (tuple 2 true false))
+                            (false
+                              (match (named source head "protocol" 8)
+                                (true (tuple 3 true false))
+                                (false
+                                  (match (named source head "implementation" 14)
+                                    (true
+                                      (tuple
+                                        (match (field (m:at items (child items i 1)) kind)
+                                          (1 2)
+                                          (_ 4))
+                                        true
+                                        false))
+                                    (false
+                                      (match (named source head "let" 3)
+                                        (true (tuple 2 false false))
+                                        (false
+                                          (match (named source head "match" 5)
+                                            (true (tuple 2 false false))
+                                            (false
+                                              (match (named source head "type" 4)
+                                                (true (tuple 2 false false))
+                                                (false
+                                                  (match (named source head "with-fixture" 12)
+                                                    (true (tuple 2 false false))
+                                                    (false (tuple 1 false false))))))))))))))))))))))
+            (_ (tuple 1 false true))))))))
+
+(base:type cursor
+  (product
+    (source data:view)
+    (items m:tape)
+    (index u64)
+    (end u64)
+    (width u64)
+    (out (pointer data:data))
+    (column (pointer u64))
+    (indent u64)
+    (header u64)
+    (count u64)
+    (mode u64)
+    (previous bool)
+    (previous-import bool)))
+
+(base:function advance
+  ((context (pointer cursor)) (next u64) (count u64) (previous bool) (previous-import bool))
+  m:status
+  (let ((state cursor (deref context)))
+    (do
+      (store
+        (deref context)
+        (cursor
+          (field state source)
+          (field state items)
+          next
+          (field state end)
+          (field state width)
+          (field state out)
+          (field state column)
+          (field state indent)
+          (field state header)
+          count
+          (field state mode)
+          previous
+          previous-import))
+      (m:success))))
+
+(base:function cursor-done ((context (pointer cursor))) bool
+  (n:ge (field (deref context) index) (field (deref context) end)))
+
+(base:function cursor-step ((context (pointer cursor))) m:status
+  (match (field (deref context) mode)
+    (0 (flat-step context))
+    (1 (multiline-step context))
+    (2 (top-step context))
+    (_ (prefix-step context))))
+
+(m:iteration walk-cursor cursor cursor-done cursor-step)
+
+(base:function flat-children
+  ((source data:view)
+   (items m:tape)
+   (i u64)
+   (end u64)
+   (out (pointer data:data))
+   (column (pointer u64))
+   (first bool)) m:status
+  (let
+    ((state
+       cursor
+       (cursor source items i end 100 out column 0 0 (match first (true 0) (false 1)) 0 false false)))
+    (walk-cursor (& state) (n:sub end i))))
+
+(base:function flat-step ((context (pointer cursor))) m:status
+  (let
+    ((state cursor (deref context)) (i u64 (field state index)) (items m:tape (field state items)))
+    (m:steps
+      (match (n:eq (field state count) 0)
+        (true (m:success))
+        (false (w:spaces (field state out) (field state column) 1)))
+      (flat (field state source) items i (field state out) (field state column))
+      (advance context (field (m:at items i) next) (n:add (field state count) 1) false false))))
+
+(base:function flat
+  ((source data:view) (items m:tape) (i u64) (out (pointer data:data)) (column (pointer u64)))
+  m:status
+  (let ((node m:node (m:at items i)))
+    (match (field node kind)
+      (1
+        (m:steps
+          (w:byte out column 40)
+          (flat-children source items (n:add i 1) (n:sub (field node next) 1) out column true)
+          (w:byte out column 41)))
+      (4 (m:steps (w:token source node out column) (flat source items (n:add i 1) out column)))
+      (5
+        (m:steps
+          (w:token source node out column)
+          (w:spaces out column 1)
+          (flat source items (n:add i 1) out column)))
+      (_ (w:token source node out column)))))
+
+(base:function comment
+  ((source data:view) (node m:node) (out (pointer data:data)) (column (pointer u64)) (indent u64))
+  m:status
+  (m:steps
+    (match (field node inline)
+      (true
+        (match (n:eq (deref column) 0)
+          (true (w:spaces out column indent))
+          (false
+            (match (n:eq (m:byte (data:borrow (deref out)) (n:sub (data:length (deref out)) 1)) 32)
+              (true (m:success))
+              (false (w:spaces out column 1))))))
+      (false (w:line out column indent)))
+    (w:token source node out column)
+    (w:byte out column 10)))
+
+(base:function prefix-body
+  ((source data:view)
+   (items m:tape)
+   (i u64)
+   (end u64)
+   (width u64)
+   (out (pointer data:data))
+   (column (pointer u64))
+   (indent u64)) m:status
+  (let ((state cursor (cursor source items i end width out column indent 0 0 3 false false)))
+    (walk-cursor (& state) (n:sub end i))))
+
+(base:function prefix-step ((context (pointer cursor))) m:status
+  (let
+    ((state cursor (deref context))
+     (source data:view (field state source))
+     (items m:tape (field state items))
+     (i u64 (field state index))
+     (node m:node (m:at items i))
+     (out (pointer data:data) (field state out))
+     (column (pointer u64) (field state column)))
+    (m:steps
+      (match (field node kind)
+        (3 (comment source node out column (field state indent)))
+        (_
+          (m:steps
+            (match (n:eq (deref column) 0)
+              (true (w:spaces out column (field state indent)))
+              (false (m:success)))
+            (render source items i (field state width) out column))))
+      (advance context (field node next) 0 false false))))
+
+(base:function multiline-children
+  ((source data:view)
+   (items m:tape)
+   (i u64)
+   (end u64)
+   (width u64)
+   (out (pointer data:data))
+   (column (pointer u64))
+   (indent u64)
+   (header u64)
+   (count u64)) m:status
+  (let
+    ((state cursor (cursor source items i end width out column indent header count 1 false false)))
+    (walk-cursor (& state) (n:sub end i))))
+
+(base:function multiline-step ((context (pointer cursor))) m:status
+  (let
+    ((state cursor (deref context))
+     (source data:view (field state source))
+     (items m:tape (field state items))
+     (i u64 (field state index))
+     (node m:node (m:at items i))
+     (out (pointer data:data) (field state out))
+     (column (pointer u64) (field state column))
+     (indent u64 (field state indent))
+     (count u64 (field state count))
+     (width u64 (field state width)))
+    (match (field node kind)
+      (3
+        (m:steps
+          (comment source node out column indent)
+          (advance context (field node next) count false false)))
+      (_
+        (m:steps
+          (match (n:eq count 0)
+            (true
+              (match (n:eq (deref column) 0)
+                (true (w:spaces out column indent))
+                (false (m:success))))
+            (false
+              (match (n:lt count (field state header))
+                (true
+                  (match (n:eq (deref column) 0)
+                    (true (w:spaces out column indent))
+                    (false
+                      (match (n:le (n:add (deref column) (n:add 1 (field node flat))) width)
+                        (true (w:spaces out column 1))
+                        (false (w:line out column indent))))))
+                (false (w:line out column indent)))))
+          (render source items i width out column)
+          (advance context (field node next) (n:add count 1) false false))))))
+
+(base:function render
+  ((source data:view)
+   (items m:tape)
+   (i u64)
+   (width u64)
+   (out (pointer data:data))
+   (column (pointer u64))) m:status
+  (let ((node m:node (m:at items i)) (base u64 (deref column)))
+    (match (field node kind)
+      (1
+        (match (style source items i)
+          ((tuple header always anonymous)
+           (match
+             (match always
+               (true false)
+               (false
+                 (n:le
+                   (field node flat)
+                   (n:sub width (match (n:gt base width) (true width) (false base))))))
+             (true (flat source items i out column))
+             (false
+               (m:steps
+                 (w:byte out column 40)
+                 (multiline-children
+                   source
+                   items
+                   (n:add i 1)
+                   (n:sub (field node next) 1)
+                   width
+                   out
+                   column
+                   (n:add base (match anonymous (true 1) (false 2)))
+                   header
+                   0)
+                 (match (n:eq (deref column) 0)
+                   (true (w:spaces out column base))
+                   (false (m:success)))
+                 (w:byte out column 41)))))))
+      (4
+        (m:steps
+          (w:token source node out column)
+          (prefix-body source items (n:add i 1) (field node next) width out column base)))
+      (5
+        (m:steps
+          (w:token source node out column)
+          (w:spaces out column 1)
+          (prefix-body source items (n:add i 1) (field node next) width out column base)))
+      (_ (w:token source node out column)))))
+
+(base:function top-step ((context (pointer cursor))) m:status
+  (let
+    ((state cursor (deref context))
+     (source data:view (field state source))
+     (items m:tape (field state items))
+     (i u64 (field state index))
+     (node m:node (m:at items i))
+     (out (pointer data:data) (field state out))
+     (column (pointer u64) (field state column))
+     (previous bool (field state previous))
+     (previous-import bool (field state previous-import)))
+    (match (field node kind)
+      (3
+        (m:steps
+          (match (field node inline)
+            (true (m:success))
+            (false (match previous (true (w:blank out column)) (false (m:success)))))
+          (comment source node out column 0)
+          (advance
+            context
+            (field node next)
+            0
+            (match (field node inline) (true previous) (false false))
+            previous-import)))
+      (_
+        (let ((is-import bool (head-is source items i "import" 6)))
+          (m:steps
+            (match previous
+              (false (w:line out column 0))
+              (true
+                (match previous-import
+                  (true (match is-import (true (w:line out column 0)) (false (w:blank out column))))
+                  (false (w:blank out column)))))
+            (render source items i (field state width) out column)
+            (advance context (field node next) 0 true is-import)))))))
+
+(base:function top
+  ((source data:view)
+   (items m:tape)
+   (i u64)
+   (width u64)
+   (out (pointer data:data))
+   (column (pointer u64))
+   (previous bool)
+   (previous-import bool)) m:status
+  (let
+    ((state
+       cursor
+       (cursor
+         source
+         items
+         i
+         (m:nodes-length items)
+         width
+         out
+         column
+         0
+         0
+         0
+         2
+         previous
+         previous-import)))
+    (m:steps (walk-cursor (& state) (n:sub (m:nodes-length items) i)) (w:line out column 0))))
+
+(base:function format ((source data:view) (items m:tape) (width u64) (out (pointer data:data)))
+  m:status
+  (let ((column u64 0)) (top source items 0 width out (& column) false false)))
+
+(export format)

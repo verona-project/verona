@@ -1,0 +1,229 @@
+(import base)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import data)
+(import formatter.model)
+(import formatter.model :as m)
+
+; Character limits follow Base’s ASCII character domain.
+(base:function ascii-maximum () u64
+  (let ((last char (base:maxBound))) last))
+
+(base:function whitespace ((byte u64)) bool
+  (match byte (32 true) (9 true) (10 true) (13 true) (_ false)))
+
+(base:function delimiter ((byte u64)) bool
+  (match byte
+    (40 true)
+    (41 true)
+    (59 true)
+    (34 true)
+    (39 true)
+    (96 true)
+    (44 true)
+    (_ (whitespace byte))))
+
+(base:function ends ((byte u64) (comment bool)) bool
+  (match comment (true (match byte (10 true) (13 true) (_ false))) (false (delimiter byte))))
+
+(base:function short-end ((source data:view) (i u64) (end u64) (comment bool)) u64
+  (match (n:ge i end)
+    (true i)
+    (false
+      (match (ends (m:byte source i) comment)
+        (true i)
+        (false (short-end source (n:add i 1) end comment))))))
+
+(base:function find-end ((source data:view) (i u64) (end u64) (comment bool)) u64
+  (match (n:le (n:sub end i) 128)
+    (true (short-end source i end comment))
+    (false
+      (let
+        ((middle u64 (n:add i (n:div (n:sub end i) 2)))
+         (found u64 (find-end source i middle comment)))
+        (match (n:lt found middle) (true found) (false (find-end source middle end comment)))))))
+
+(base:function atom-end ((source data:view) (i u64)) u64
+  (find-end source i (field source length) false))
+
+(base:function comment-end ((source data:view) (i u64)) u64
+  (find-end source i (field source length) true))
+
+(base:type string-state (product (source data:view) (start u64) (position u64) (closed bool)))
+
+(base:function string-done ((context (pointer string-state))) bool
+  (match (field (deref context) closed)
+    (true true)
+    (false (n:ge (field (deref context) position) (field (field (deref context) source) length)))))
+
+(base:function string-advance ((context (pointer string-state)) (next u64) (closed bool)) m:status
+  (let ((state string-state (deref context)))
+    (do
+      (store (deref context) (string-state (field state source) (field state start) next closed))
+      (m:success))))
+
+(base:function string-step ((context (pointer string-state))) m:status
+  (let
+    ((state string-state (deref context))
+     (source data:view (field state source))
+     (i u64 (field state position)))
+    (match (m:byte source i)
+      (34 (string-advance context (n:add i 1) true))
+      (92
+        (match (n:ge (n:add i 1) (field source length))
+          (true (m:syntax (field state start) "unterminated string escape"))
+          (false
+            (match (m:byte source (n:add i 1))
+              (110 (string-advance context (n:add i 2) false))
+              (116 (string-advance context (n:add i 2) false))
+              (34 (string-advance context (n:add i 2) false))
+              (92 (string-advance context (n:add i 2) false))
+              (_ (m:syntax i "unsupported string escape"))))))
+      (_
+        (match (n:gt (m:byte source i) (ascii-maximum))
+          (true (m:syntax i "Verona string literals must be ASCII"))
+          (false (string-advance context (n:add i 1) false)))))))
+
+(m:iteration scan-string string-state string-done string-step)
+
+(base:function string-end ((source data:view) (start u64) (i u64)) (tuple m:status u64)
+  (let
+    ((state string-state (string-state source start i false))
+     (result m:status (scan-string (& state) (n:sub (field source length) i))))
+    (tuple
+      (match result
+        ((ok)
+         (match (field state closed)
+           (true (m:success))
+           (false (m:syntax start "unterminated string literal"))))
+        (failure failure))
+      (field state position))))
+
+(base:function lower ((byte u64)) u64
+  (match (n:ge byte 65)
+    (false byte)
+    (true (match (n:le byte 90) (true (n:add byte 32)) (false byte)))))
+
+(base:function folded ((source data:view) (start u64) (text (pointer u8)) (i u64) (size u64)) bool
+  (match (n:eq i size)
+    (true true)
+    (false
+      (let ((expected u64 (base:convert (deref (pointer-offset text i)))))
+        (match (n:eq (lower (m:byte source (n:add start i))) expected)
+          (false false)
+          (true (folded source start text (n:add i 1) size)))))))
+
+(base:function named-character ((source data:view) (start u64) (size u64)) bool
+  (match size
+    (3 (folded source start "tab" 0 3))
+    (5 (folded source start "space" 0 5))
+    (6 (folded source start "return" 0 6))
+    (7 (folded source start "newline" 0 7))
+    (9 (folded source start "form_feed" 0 9))
+    (12 (folded source start "vertical_tab" 0 12))
+    (_ false)))
+
+(base:function flat-short ((source data:view) (i u64) (end u64) (size u64)) u64
+  (match (n:eq i end)
+    (true (m:cap size))
+    (false (match (m:byte source i) (10 241) (13 241) (_ (flat-short source (n:add i 1) end size))))))
+
+(base:function flat-span ((source data:view) (i u64) (end u64) (size u64)) u64
+  (match (n:gt size 240) (true 241) (false (flat-short source i end size))))
+
+(base:function append-token
+  ((source data:view) (items (pointer m:tape)) (kind u64) (start u64) (end u64) (fresh bool))
+  m:status
+  (let
+    ((size u64 (n:sub end start))
+     (flat u64 (match kind (3 241) (_ (flat-span source start end size))))
+     (inline bool (match fresh (true false) (false true))))
+    (m:from-storage (m:nodes-append items (m:node kind start size 0 flat inline)))))
+
+(base:function special ((source data:view) (items (pointer m:tape)) (start u64) (fresh bool))
+  (tuple m:status u64)
+  (let ((next u64 (n:add start 1)))
+    (match (m:byte source next)
+      (92
+        (let ((first u64 (n:add start 2)))
+          (match (n:ge first (field source length))
+            (true (tuple (m:syntax start "character literal requires a character") first))
+            (false
+              (let ((end u64 (atom-end source (n:add first 1))) (size u64 (n:sub end first)))
+                (match
+                  (match (n:eq size 1)
+                    (true (n:le (m:byte source first) (ascii-maximum)))
+                    (false (named-character source first size)))
+                  (false (tuple (m:syntax start "invalid character literal") end))
+                  (true (tuple (append-token source items 7 start end fresh) end))))))))
+      (43 (feature source items start fresh))
+      (45 (feature source items start fresh))
+      (_ (tuple (m:syntax start "expected #+, #-, or a character literal") next)))))
+
+(base:function feature ((source data:view) (items (pointer m:tape)) (start u64) (fresh bool))
+  (tuple m:status u64)
+  (let ((first u64 (n:add start 2)) (end u64 (atom-end source first)))
+    (match (n:eq first end)
+      (true (tuple (m:syntax start "reader conditional requires a feature name") end))
+      (false (tuple (append-token source items 5 start end fresh) end)))))
+
+(base:function token ((source data:view) (items (pointer m:tape)) (start u64) (fresh bool))
+  (tuple m:status u64)
+  (match (m:byte source start)
+    (40 (tuple (append-token source items 1 start (n:add start 1) fresh) (n:add start 1)))
+    (41 (tuple (append-token source items 2 start (n:add start 1) fresh) (n:add start 1)))
+    (59
+      (let ((end u64 (comment-end source start)))
+        (tuple (append-token source items 3 start end fresh) end)))
+    (34
+      (match (string-end source start (n:add start 1))
+        ((tuple status end)
+         (tuple (m:step status (append-token source items 6 start end fresh)) end))))
+    (39 (tuple (append-token source items 4 start (n:add start 1) fresh) (n:add start 1)))
+    (96 (tuple (append-token source items 4 start (n:add start 1) fresh) (n:add start 1)))
+    (44 (tuple (append-token source items 4 start (n:add start 1) fresh) (n:add start 1)))
+    (35 (special source items start fresh))
+    (46 (tuple (m:syntax start "a form cannot begin with '.'") (n:add start 1)))
+    (_
+      (let ((end u64 (atom-end source start)))
+        (tuple (append-token source items 0 start end fresh) end)))))
+
+(base:type scan-state
+  (product (source data:view) (items (pointer m:tape)) (position u64) (fresh bool)))
+
+(base:function scan-done ((context (pointer scan-state))) bool
+  (n:ge (field (deref context) position) (field (field (deref context) source) length)))
+
+(base:function scan-step ((context (pointer scan-state))) m:status
+  (let
+    ((state scan-state (deref context))
+     (source data:view (field state source))
+     (i u64 (field state position))
+     (fresh bool (field state fresh)))
+    (match (whitespace (m:byte source i))
+      (true
+        (do
+          (store
+            (deref context)
+            (scan-state
+              source
+              (field state items)
+              (n:add i 1)
+              (match (m:byte source i) (10 true) (13 true) (_ fresh))))
+          (m:success)))
+      (false
+        (match (token source (field state items) i fresh)
+          ((tuple status end)
+           (m:step
+             status
+             (do
+               (store (deref context) (scan-state source (field state items) end false))
+               (m:success)))))))))
+
+(m:iteration scan-tokens scan-state scan-done scan-step)
+
+(base:function scan ((source data:view) (items (pointer m:tape))) m:status
+  (let ((state scan-state (scan-state source items 0 true)))
+    (scan-tokens (& state) (field source length))))
+
+(export scan)

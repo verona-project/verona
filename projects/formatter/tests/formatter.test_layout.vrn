@@ -1,0 +1,191 @@
+(import base)
+(import testing)
+(import foundation.compat.arithmetic :as n)
+(import data)
+(import formatter.test_support :as support)
+
+(testing:test empty
+  (support:golden "" "" 100))
+
+(testing:test whitespace
+  (support:golden " \t\n\n" "" 100))
+
+(testing:test simple-call
+  (support:golden " (  + 1  2 )" "(+ 1 2)\n" 100))
+
+(testing:test empty-list
+  (support:golden " ( ) " "()\n" 100))
+
+(testing:test nested-list
+  (support:golden " (a ( b c ) d)" "(a (b c) d)\n" 100))
+
+(testing:test import-grouping
+  (support:golden
+    "(import base) (import testing) (export a)"
+    "(import base)\n(import testing)\n\n(export a)\n"
+    100))
+
+(testing:test function-body
+  (support:golden
+    "(base:function main () exit-code (+ 1 2))"
+    "(base:function main () exit-code\n  (+ 1 2))\n"
+    100))
+
+(testing:test test-body
+  (support:golden
+    "(testing:test sample (testing:pass) (testing:fail))"
+    "(testing:test sample\n  (testing:pass)\n  (testing:fail))\n"
+    100))
+
+(testing:test quote
+  (support:golden " ' ( a b ) " "'(a b)\n" 100))
+
+(testing:test nested-quotes
+  (support:golden " ' ` , value " "'`,value\n" 100))
+
+(testing:test feature-branches
+  (support:golden "#+darwin (a b) #-darwin (c d)" "#+darwin (a b)\n\n#-darwin (c d)\n" 100))
+
+(testing:test nested-features
+  (support:golden "#+a #-b (x y)" "#+a #-b (x y)\n" 100))
+
+(testing:test comment-only
+  (support:golden " ; a comment\n" "; a comment\n" 100))
+
+(testing:test trailing-comment
+  (support:golden "(a b); keep this\n" "(a b) ; keep this\n" 100))
+
+(testing:test standalone-comment
+  (support:golden "; heading\n (a b)" "; heading\n(a b)\n" 100))
+
+(testing:test last-child-comment
+  (support:golden "(foo ; x\n  (bar a b) ; y\n )" "(foo ; x\n  (bar a b) ; y\n)\n" 100))
+
+(testing:test comment-before-closing
+  (support:golden "(a\n; end\n)" "(a\n  ; end\n)\n" 100))
+
+(testing:test quoted-comment
+  (support:golden "' ; attached\n (a)" "' ; attached\n(a)\n" 100))
+
+(testing:test conditional-comment
+  (support:golden "#+darwin ; conditional\n (a)" "#+darwin ; conditional\n(a)\n" 100))
+
+(testing:test character-close
+  (support:golden "(emit #\\))" "(emit #\\))\n" 100))
+
+(testing:test character-open
+  (support:golden "(emit #\\()" "(emit #\\()\n" 100))
+
+(testing:test character-semicolon
+  (support:golden "(emit #\\;)" "(emit #\\;)\n" 100))
+
+(testing:test character-quote
+  (support:golden "(emit #\\\")" "(emit #\\\")\n" 100))
+
+(testing:test character-prefix
+  (support:golden "(emit #\\`)" "(emit #\\`)\n" 100))
+
+(testing:test named-characters
+  (support:golden
+    "(a #\\Space #\\NEWLINE #\\vertical_tab #\\form_feed)"
+    "(a #\\Space #\\NEWLINE #\\vertical_tab #\\form_feed)\n"
+    100))
+
+(testing:test string-delimiters
+  (support:golden "(show \"(;),#x\")" "(show \"(;),#x\")\n" 100))
+
+(testing:test string-escapes
+  (support:golden "(show \"a\\n\\t\\\"\\\\b\")" "(show \"a\\n\\t\\\"\\\\b\")\n" 100))
+
+(testing:test literal-newline
+  (support:golden "(show \"a\nb\")" "(show\n  \"a\nb\")\n" 100))
+
+(testing:test adjacent-forms
+  (support:golden "(a)(b)" "(a)\n\n(b)\n" 100))
+
+(testing:test literal-spelling
+  (support:golden
+    "(a +0042 -0 01.250 :as Thing.Name:member)"
+    "(a +0042 -0 01.250 :as Thing.Name:member)\n"
+    100))
+
+(testing:test already-formatted
+  (support:golden
+    "(import base)\n\n(base:function main () exit-code\n  0)\n"
+    "(import base)\n\n(base:function main () exit-code\n  0)\n"
+    100))
+
+(testing:test crlf-layout
+  (let ((input (array u8 12) (array-of 40 97 13 10 9 98 41 13 10 13 10 32)))
+    (support:golden-view (data:view (& (index input 0)) 12) (support:view "(a b)\n") 100)))
+
+(testing:test unicode-comment
+  (let ((input (array u8 7) (array-of 59 32 195 169 10 97 10)))
+    (support:golden-view (data:view (& (index input 0)) 7) (data:view (& (index input 0)) 7) 100)))
+
+(testing:test embedded-nul-string
+  (let
+    ((input (array u8 5) (array-of 34 97 0 98 34))
+     (expected (array u8 6) (array-of 34 97 0 98 34 10)))
+    (support:golden-view (data:view (& (index input 0)) 5) (data:view (& (index expected 0)) 6) 100)))
+
+(testing:test width-wrap
+  (support:golden
+    "(call abcdefghij klmnopqrst uvwxyz)"
+    "(call\n  abcdefghij\n  klmnopqrst\n  uvwxyz)\n"
+    24))
+
+(testing:test anonymous-list-wrap
+  (support:golden "((abcdefghij 1) (klmnopqrst 2))" "((abcdefghij 1)\n (klmnopqrst 2))\n" 24))
+
+(testing:test header-wrap-at-exact-boundary
+  (support:golden
+    "(function very-long-name () i64 (+ 1 2))"
+    "(function very-long-name\n  () i64\n  (+ 1 2))\n"
+    24))
+
+(testing:test let-layout
+  (support:golden
+    "(let ((a 1)(b 2)) (match true (true a)(false b)))"
+    "(let ((a 1) (b 2))\n  (match true\n    (true a)\n    (false b)))\n"
+    24))
+
+(export
+  empty
+  whitespace
+  simple-call
+  empty-list
+  nested-list
+  import-grouping
+  function-body
+  test-body
+  quote
+  nested-quotes
+  feature-branches
+  nested-features
+  comment-only
+  trailing-comment
+  standalone-comment
+  last-child-comment
+  comment-before-closing
+  quoted-comment
+  conditional-comment
+  character-close
+  character-open
+  character-semicolon
+  character-quote
+  character-prefix
+  named-characters
+  string-delimiters
+  string-escapes
+  literal-newline
+  adjacent-forms
+  literal-spelling
+  already-formatted
+  crlf-layout
+  unicode-comment
+  embedded-nul-string
+  width-wrap
+  anonymous-list-wrap
+  header-wrap-at-exact-boundary
+  let-layout)

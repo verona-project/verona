@@ -1,0 +1,54 @@
+(import base)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import data)
+(import formatter.model)
+(import formatter.model :as m)
+
+; Byte-oriented output with bounded storage; literal lexemes are never rewritten.
+(base:function byte ((out (pointer data:data)) (column (pointer u64)) (value u8)) m:status
+  (match (n:ge (data:length (deref out)) 67108864)
+    (true (m:limit 0 "formatted output limit (64 MiB) exceeded"))
+    (false
+      (m:steps
+        (m:from-storage (data:append out value))
+        (do
+          (store (deref column) (match value (10 0) (13 0) (_ (n:add (deref column) 1))))
+          (m:success))))))
+
+(base:function raw
+  ((out (pointer data:data)) (column (pointer u64)) (bytes (pointer u8)) (size u64)) m:status
+  (match (n:eq size 0)
+    (true (m:success))
+    (false
+      (match (n:eq size 1)
+        (true (byte out column (deref bytes)))
+        (false
+          (let ((half u64 (n:div size 2)))
+            (m:steps
+              (raw out column bytes half)
+              (raw out column (pointer-offset bytes half) (n:sub size half)))))))))
+
+(base:function token
+  ((source data:view) (node m:node) (out (pointer data:data)) (column (pointer u64))) m:status
+  (raw out column (pointer-offset (field source bytes) (field node start)) (field node length)))
+
+(base:function spaces ((out (pointer data:data)) (column (pointer u64)) (count u64)) m:status
+  (match (n:eq count 0)
+    (true (m:success))
+    (false
+      (match (n:eq count 1)
+        (true (byte out column 32))
+        (false
+          (let ((half u64 (n:div count 2)))
+            (m:steps (spaces out column half) (spaces out column (n:sub count half)))))))))
+
+(base:function line ((out (pointer data:data)) (column (pointer u64)) (indent u64)) m:status
+  (m:steps
+    (match (n:eq (deref column) 0) (true (m:success)) (false (byte out column 10)))
+    (spaces out column indent)))
+
+(base:function blank ((out (pointer data:data)) (column (pointer u64))) m:status
+  (m:steps (line out column 0) (byte out column 10)))
+
+(export byte raw token spaces line blank)

@@ -16,7 +16,7 @@ EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/IDE-WORK
 	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/verona-server.el editors/emacs/README.md flake.lock flake.nix license projects readme.md \
 	scripts src tests $(cl_llvm_files) verona.asd
 
-.PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona test-bounded test-foundation test-swank
+.PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona test-bounded test-foundation formatter test-formatter test-swank
 
 help:
 	@printf '%s\n' 'Verona development commands:'
@@ -30,7 +30,8 @@ help:
 	@printf '%s\n' '  make test-verona    Build and run the supplied Verona project smoke suite'
 	@printf '%s\n' '  make test-foundation Build and run the Verona Foundation suite'
 	@printf '%s\n' '  make test-bounded   Build and run Base bounded unit tests'
-	@printf '%s\n' '  make Run formatter unit, CLI, and reader-equivalence tests'
+	@printf '%s\n' '  make formatter      Build the Verona source formatter'
+	@printf '%s\n' '  make test-formatter Run formatter unit, CLI, and reader-equivalence tests'
 	@printf '%s\n' '  make test-swank     Run optional Swank adapter integration tests'
 	@printf '%s\n' '  make test-editor    Run optional Emacs integration tests'
 	@printf '%s\n' '  make test-workflows Run all compiler, Swank and editor acceptance tests'
@@ -62,7 +63,7 @@ install-exec-local: $(VERONA_EXECUTABLE)
 uninstall-local:
 	$(RM) '$(DESTDIR)$(bindir)/verona'
 
-test: test-frontend test-llvm test-compiler test-verona test-bounded test-foundation
+test: test-frontend test-llvm test-compiler test-verona test-bounded test-foundation test-formatter
 
 test-frontend:
 	cd $(verona_srcdir) && $(SBCL) --script tests/run.lisp
@@ -91,6 +92,15 @@ test-foundation: $(VERONA_EXECUTABLE)
 	@$(MKDIR_P) $(abs_top_builddir)/build/foundation
 	@cd $(verona_srcdir)/projects/foundation && $(VERONA_EXECUTABLE) build foundation-tests $(abs_top_builddir)/build/foundation
 	@$(abs_top_builddir)/build/foundation/foundation-tests
+
+formatter: $(VERONA_EXECUTABLE)
+	@$(MKDIR_P) $(abs_top_builddir)/build/formatter
+	@cd $(verona_srcdir)/projects/formatter && $(VERONA_EXECUTABLE) build verona-fmt $(abs_top_builddir)/build/formatter
+
+test-formatter: formatter
+	@cd $(verona_srcdir)/projects/formatter && $(VERONA_EXECUTABLE) build formatter-tests $(abs_top_builddir)/build/formatter
+	@$(abs_top_builddir)/build/formatter/formatter-tests
+	@$(SBCL) --script $(verona_srcdir)/projects/formatter/tests/run-integration.lisp $(abs_top_builddir)/build/formatter/verona-fmt
 
 clean-local:
 	$(RM) $(VERONA_EXECUTABLE) $(VERONA_SERVER) $(VERONA_SERVER).tmp

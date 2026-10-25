@@ -1,0 +1,71 @@
+(import base)
+(import testing)
+(import foundation.compat.arithmetic :as n)
+(import data)
+(import formatter.test_support :as support)
+
+(testing:test unexpected-close
+  (support:rejected ")" 0))
+
+(testing:test missing-close
+  (support:rejected "(a" 0))
+
+(testing:test extra-close
+  (support:rejected "(a))" 3))
+
+(testing:test missing-quote-target
+  (support:rejected "'" 0))
+
+(testing:test prefix-before-close
+  (support:rejected "(')" 2))
+
+(testing:test missing-feature-target
+  (support:rejected "#+darwin" 0))
+
+(testing:test missing-feature-name
+  (support:rejected "#+ (a)" 0))
+
+(testing:test unknown-dispatch
+  (support:rejected "#thing" 0))
+
+(testing:test empty-character
+  (support:rejected "#\\" 0))
+
+(testing:test unknown-character-name
+  (support:rejected "#\\mystery" 0))
+
+(testing:test multicharacter
+  (support:rejected "#\\ab" 0))
+
+(testing:test unterminated-string
+  (support:rejected "\"abc" 0))
+
+(testing:test unterminated-escape
+  (support:rejected "\"abc\\" 0))
+
+(testing:test unsupported-escape
+  (support:rejected "\"a\\r\"" 2))
+
+(testing:test dot-literal
+  (support:rejected ".1" 0))
+
+(testing:test invalid-inactive-branch
+  (support:rejected "#+missing (a))" 13))
+
+(export
+  unexpected-close
+  missing-close
+  extra-close
+  missing-quote-target
+  prefix-before-close
+  missing-feature-target
+  missing-feature-name
+  unknown-dispatch
+  empty-character
+  unknown-character-name
+  multicharacter
+  unterminated-string
+  unterminated-escape
+  unsupported-escape
+  dot-literal
+  invalid-inactive-branch)

@@ -1,0 +1,211 @@
+(import base)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import data)
+(import number)
+(import system_allocator :as system)
+(import libc.string :as cstring)
+(import formatter)
+(import formatter.io :as io)
+(import formatter.model)
+(import formatter.model :as m)
+
+(base:type settings
+  (product (width u64) (check bool) (path (pointer u8)) (provided bool) (help bool)))
+
+(base:type arguments (sum (ready settings) (invalid (pointer u8))))
+
+(base:function ready-result ((value settings)) arguments
+  (ready value))
+
+(base:function bad-argument ((message (pointer u8))) arguments
+  (invalid message))
+
+(base:function parse
+  ((argc u64) (argv (pointer (pointer u8))) (i u64) (value settings) (stopped bool)) arguments
+  (match (n:ge i argc)
+    (true (ready-result value))
+    (false
+      (let ((argument (pointer u8) (deref (pointer-offset argv i))))
+        (match
+          (match stopped
+            (true false)
+            (false (match (cstring:strcmp argument "--") (0 true) (_ false))))
+          (true (parse argc argv (n:add i 1) value true))
+          (false
+            (match
+              (match stopped
+                (true false)
+                (false (match (cstring:strcmp argument "--check") (0 true) (_ false))))
+              (true
+                (parse
+                  argc
+                  argv
+                  (n:add i 1)
+                  (settings
+                    (field value width)
+                    true
+                    (field value path)
+                    (field value provided)
+                    (field value help))
+                  false))
+              (false
+                (match
+                  (match stopped
+                    (true false)
+                    (false (match (cstring:strcmp argument "--help") (0 true) (_ false))))
+                  (true
+                    (parse
+                      argc
+                      argv
+                      (n:add i 1)
+                      (settings
+                        (field value width)
+                        (field value check)
+                        (field value path)
+                        (field value provided)
+                        true)
+                      false))
+                  (false
+                    (match
+                      (match stopped
+                        (true false)
+                        (false (match (cstring:strcmp argument "--width") (0 true) (_ false))))
+                      (true
+                        (match (n:ge (n:add i 1) argc)
+                          (true (bad-argument "--width requires an integer from 20 to 240"))
+                          (false
+                            (let ((text (pointer u8) (deref (pointer-offset argv (n:add i 1)))))
+                              (match (number:parse-u64 (data:view text (cstring:strlen text)))
+                                ((value width)
+                                 (match (n:lt width 20)
+                                   (true (bad-argument "width must be between 20 and 240"))
+                                   (false
+                                     (match (n:gt width 240)
+                                       (true (bad-argument "width must be between 20 and 240"))
+                                       (false
+                                         (parse
+                                           argc
+                                           argv
+                                           (n:add i 2)
+                                           (settings
+                                             width
+                                             (field value check)
+                                             (field value path)
+                                             (field value provided)
+                                             (field value help))
+                                           false))))))
+                                (_ (bad-argument "--width requires an integer from 20 to 240")))))))
+                      (false
+                        (match
+                          (match stopped
+                            (true false)
+                            (false
+                              (match (cstring:strcmp argument "-")
+                                (0 false)
+                                (_ (match (deref argument) (45 true) (_ false))))))
+                          (true (bad-argument "unknown option"))
+                          (false
+                            (match (field value provided)
+                              (true (bad-argument "provide at most one input file"))
+                              (false
+                                (parse
+                                  argc
+                                  argv
+                                  (n:add i 1)
+                                  (settings
+                                    (field value width)
+                                    (field value check)
+                                    argument
+                                    true
+                                    (field value help))
+                                  stopped)))))))))))))))))
+
+(base:function usage ((fd i32)) m:status
+  (io:text fd "usage: verona-fmt [--check] [--width 20..240] [--] [FILE|-]\n"))
+
+(base:type location-state
+  (product (source data:view) (end u64) (index u64) (line u64) (column u64) (cr bool)))
+
+(base:function location-done ((context (pointer location-state))) bool
+  (n:ge (field (deref context) index) (field (deref context) end)))
+
+(base:function location-step ((context (pointer location-state))) m:status
+  (let
+    ((state location-state (deref context))
+     (source data:view (field state source))
+     (i u64 (field state index))
+     (byte u64 (m:byte source i))
+     (line
+       u64
+       (match byte
+         (13 (n:add (field state line) 1))
+         (10
+           (match (field state cr) (true (field state line)) (false (n:add (field state line) 1))))
+         (_ (field state line))))
+     (column u64 (match byte (13 1) (10 1) (_ (n:add (field state column) 1)))))
+    (do
+      (store
+        (deref context)
+        (location-state source (field state end) (n:add i 1) line column (n:eq byte 13)))
+      (m:success))))
+
+(m:iteration locate location-state location-done location-step)
+
+(base:function report ((path (pointer u8)) (source data:view) (status m:status)) unit
+  (let
+    ((end
+       u64
+       (match (n:le (m:offset status) (field source length))
+         (true (m:offset status))
+         (false (field source length))))
+     (position location-state (location-state source end 0 1 1 false)))
+    (do
+      (locate (& position) end)
+      (io:text 2 path)
+      (io:text 2 ":")
+      (io:number 2 (field position line))
+      (io:text 2 ":")
+      (io:number 2 (field position column))
+      (io:text 2 ": ")
+      (io:text 2 (m:description status))
+      (io:text 2 "\n")
+      unit)))
+
+(base:function execute ((options settings)) exit-code
+  (let
+    ((source data:data (data:empty (system:create)))
+     (output data:data (data:empty (system:create)))
+     (result
+       m:status
+       (m:steps
+         (io:load (field options path) (& source))
+         (formatter:format (data:borrow source) (field options width) (& output) (system:create))))
+     (exit
+       exit-code
+       (match result
+         ((ok)
+          (match (field options check)
+            (true
+              (match (data:equal (data:borrow source) (data:borrow output))
+                (true 0)
+                (false (do (io:text 2 (field options path)) (io:text 2 ": formatting differs\n") 1))))
+            (false
+              (match (io:write 1 (data:borrow output))
+                ((ok) 0)
+                (failure (do (report (field options path) (data:borrow source) failure) 2))))))
+         (failure (do (report (field options path) (data:borrow source) failure) 2)))))
+    (do (data:destroy (& output)) (data:destroy (& source)) exit)))
+
+(base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (let ((count u64 (base:convert argc)))
+    (match (n:gt count 128)
+      (true (do (io:text 2 "verona-fmt: too many arguments (maximum 127)\n") (usage 2) 2))
+      (false
+        (match (parse count argv 1 (settings 100 false "-" false false) false)
+          ((invalid message)
+           (do (io:text 2 "verona-fmt: ") (io:text 2 message) (io:text 2 "\n") (usage 2) 2))
+          ((ready options)
+           (match (field options help)
+             (true (match (usage 1) ((ok) 0) (_ 2)))
+             (false (execute options)))))))))

@@ -1,0 +1,157 @@
+(import base)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import formatter.model)
+(import formatter.model :as m)
+
+(base:function finish ((items m:tape) (i u64) (next u64) (flat u64)) unit
+  (let ((node m:node (m:at items i)))
+    (m:set
+      items
+      i
+      (m:node
+        (field node kind)
+        (field node start)
+        (field node length)
+        next
+        flat
+        (field node inline)))))
+
+(base:type parse-state
+  (product
+    (items m:tape)
+    (open u64)
+    (index u64)
+    (depth u64)
+    (flat u64)
+    (first bool)
+    (closed bool)
+    (top bool)))
+
+(base:function parse-done ((context (pointer parse-state))) bool
+  (let ((state parse-state (deref context)))
+    (match (field state closed)
+      (true true)
+      (false
+        (match (field state top)
+          (false false)
+          (true (n:ge (field state index) (m:nodes-length (field state items)))))))))
+
+(base:function parse-step ((context (pointer parse-state))) m:status
+  (let
+    ((state parse-state (deref context))
+     (items m:tape (field state items))
+     (i u64 (field state index)))
+    (match (n:ge i (m:nodes-length items))
+      (true (m:syntax (field (m:at items (field state open)) start) "unterminated list"))
+      (false
+        (match (match (field state top) (true false) (false (n:eq (field (m:at items i) kind) 2)))
+          (true
+            (do
+              (finish items i (n:add i 1) 1)
+              (finish items (field state open) (n:add i 1) (field state flat))
+              (store
+                (deref context)
+                (parse-state
+                  items
+                  (field state open)
+                  (n:add i 1)
+                  (field state depth)
+                  (field state flat)
+                  false
+                  true
+                  false))
+              (m:success)))
+          (false
+            (match (form items i (field state depth))
+              ((tuple status next)
+               (m:step
+                 status
+                 (do
+                   (store
+                     (deref context)
+                     (parse-state
+                       items
+                       (field state open)
+                       next
+                       (field state depth)
+                       (m:plus
+                         (field state flat)
+                         (m:plus
+                           (match (field state first) (true 0) (false 1))
+                           (field (m:at items i) flat)))
+                       false
+                       false
+                       (field state top)))
+                   (m:success)))))))))))
+
+(m:iteration parse-forms parse-state parse-done parse-step)
+
+(base:function children ((items m:tape) (open u64) (i u64) (depth u64)) (tuple m:status u64)
+  (let
+    ((state parse-state (parse-state items open i depth 2 true false false))
+     (status m:status (parse-forms (& state) (n:add (n:sub (m:nodes-length items) i) 1))))
+    (tuple status (field state index))))
+
+(base:function skip-comments ((items m:tape) (i u64) (end u64)) u64
+  (match (n:ge i end)
+    (true end)
+    (false
+      (match (n:eq (n:sub end i) 1)
+        (true
+          (match (field (m:at items i) kind)
+            (3 (do (finish items i (n:add i 1) 241) (n:add i 1)))
+            (_ i)))
+        (false
+          (let
+            ((middle u64 (n:add i (n:div (n:sub end i) 2)))
+             (found u64 (skip-comments items i middle)))
+            (match (n:lt found middle) (true found) (false (skip-comments items middle end)))))))))
+
+(base:function prefix-child ((items m:tape) (prefix u64) (i u64) (depth u64)) (tuple m:status u64)
+  (let ((target u64 (skip-comments items i (m:nodes-length items))))
+    (match (n:ge target (m:nodes-length items))
+      (true
+        (tuple
+          (m:syntax (field (m:at items prefix) start) "reader prefix requires a following form")
+          target))
+      (false
+        (match (form items target depth)
+          ((tuple status next)
+           (match status
+             ((ok)
+              (let
+                ((node m:node (m:at items prefix))
+                 (gap u64 (match (field node kind) (5 1) (_ 0)))
+                 (flat
+                   u64
+                   (match (n:eq target i)
+                     (false 241)
+                     (true
+                       (m:plus (field node length) (m:plus gap (field (m:at items target) flat)))))))
+                (do (finish items prefix next flat) (tuple (m:success) next))))
+             (failure (tuple failure next)))))))))
+
+(base:function form ((items m:tape) (i u64) (depth u64)) (tuple m:status u64)
+  (let ((node m:node (m:at items i)))
+    (match (field node kind)
+      (2 (tuple (m:syntax (field node start) "unexpected ')'") i))
+      (1
+        (match (n:ge depth 256)
+          (true (tuple (m:limit (field node start) "nesting limit (256) exceeded") i))
+          (false (children items i (n:add i 1) (n:add depth 1)))))
+      (4
+        (match (n:ge depth 256)
+          (true (tuple (m:limit (field node start) "nesting limit (256) exceeded") i))
+          (false (prefix-child items i (n:add i 1) (n:add depth 1)))))
+      (5
+        (match (n:ge depth 256)
+          (true (tuple (m:limit (field node start) "nesting limit (256) exceeded") i))
+          (false (prefix-child items i (n:add i 1) (n:add depth 1)))))
+      (_ (do (finish items i (n:add i 1) (field node flat)) (tuple (m:success) (n:add i 1)))))))
+
+(base:function parse ((items m:tape)) m:status
+  (let ((state parse-state (parse-state items 0 0 0 0 true false true)))
+    (parse-forms (& state) (n:add (m:nodes-length items) 1))))
+
+(export parse)

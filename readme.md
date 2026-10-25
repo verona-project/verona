@@ -195,6 +195,10 @@ The [Foundation package](projects/foundation/README.md) adds explicit allocators
 arenas, UTF-8 strings, binary data, checked numeric/time utilities, and statically
 specialized collections. Run `make test-foundation` for its native suite.
 
+The [Verona formatter](projects/formatter/README.md) is a Foundation-based native
+application. Build it with `make formatter`; run `make test-formatter` for its
+unit, command-line, and compiler-reader equivalence suites.
+
 For the complete source-language, Common Lisp, LLVM, compiler-driver, and
 declarative-build reference, see [the API documentation](docs/API.md).
 The planned language and tooling work is described in the

@@ -1,0 +1,137 @@
+(import base)
+(import allocator)
+(import foundation.compat.arithmetic :as n)
+(import foundation.compat.arithmetic)
+(import array)
+(import error)
+(import data)
+
+; A concrete syntax tape retains every lexeme, including inactive features.
+; Kinds: atom=0, open=1, close=2, comment=3, quote=4, feature=5,
+; string=6, character=7. NEXT skips a complete form after parsing.
+; 48-byte node layout on the supported 64-bit Foundation ABI.
+(base:type node (product (kind u64) (start u64) (length u64) (next u64) (flat u64) (inline bool)))
+
+(array:define nodes node)
+
+(base:type tape (tuple (pointer node) u64 u64 array:layout))
+
+(base:type status
+  (sum
+    (ok)
+    (syntax-error u64 (pointer u8))
+    (allocation-error allocator:error)
+    (io-error (pointer u8))
+    (limit-error u64 (pointer u8))))
+
+(base:function success () status
+  (ok))
+
+(base:function syntax ((offset u64) (message (pointer u8))) status
+  (syntax-error offset message))
+
+(base:function limit ((offset u64) (message (pointer u8))) status
+  (limit-error offset message))
+
+(base:function allocation ((reason allocator:error)) status
+  (allocation-error reason))
+
+(base:function io ((message (pointer u8))) status
+  (io-error message))
+
+(base:function from-storage ((value error:status)) status
+  (match value
+    ((ok) (success))
+    ((allocation-error reason) (allocation reason))
+    (_ (limit 0 "storage limit exceeded"))))
+
+(base:function description ((value status)) (pointer u8)
+  (match value
+    ((ok) "success")
+    ((syntax-error offset message) message)
+    ((allocation-error reason) "allocation failed")
+    ((io-error message) message)
+    ((limit-error offset message) message)))
+
+(base:function offset ((value status)) u64
+  (match value ((syntax-error offset message) offset) ((limit-error offset message) offset) (_ 0)))
+
+; Sequence fallible operations without evaluating later ones after a failure.
+(base:macro step (operation next)
+  `(match ,operation ((ok) ,next) (formatter-step-error formatter-step-error)))
+
+(base:macro steps (&rest operations)
+  (compiler:reduce-right 'formatter.model:step '(formatter.model:success) operations))
+
+; Statically specialized, bounded-stack iteration. DONE allows early exit.
+; The recursive driver halves its budget; STEP advances caller-owned state.
+(base:macro iteration (name state done step)
+  `(base:function ,name ((context (pointer ,state)) (count u64)) formatter.model:status
+     (match (,done context)
+       (true (formatter.model:success))
+       (false
+         (match (foundation.compat.arithmetic:eq count 0)
+           (true (formatter.model:success))
+           (false
+             (match (foundation.compat.arithmetic:eq count 1)
+               (true (,step context))
+               (false
+                 (let ((half u64 (foundation.compat.arithmetic:div count 2)))
+                   (formatter.model:steps
+                     (,name context half)
+                     (,name context (foundation.compat.arithmetic:sub count half))))))))))))
+
+(base:function empty ((backing allocator:backend)) tape
+  (nodes-empty (cast (pointer node) (cast (pointer void) "")) (array:layout 48 8 backing)))
+
+(base:function at ((items tape) (i u64)) node
+  (deref (pointer-offset (tuple-get items 0) i)))
+
+(base:function set ((items tape) (i u64) (value node)) unit
+  (do (store (deref (pointer-offset (tuple-get items 0) i)) value) unit))
+
+(base:function byte ((source data:view) (i u64)) u64
+  (match (n:lt i (field source length))
+    (true (base:convert (deref (pointer-offset (field source bytes) i))))
+    (false 0)))
+
+(base:function equal-at ((source data:view) (start u64) (length u64) (text (pointer u8)) (size u64))
+  bool
+  (match (n:eq length size)
+    (false false)
+    (true
+      (data:equal
+        (data:view (pointer-offset (field source bytes) start) length)
+        (data:view text size)))))
+
+(base:function cap ((value u64)) u64
+  (match (n:gt value 240) (true 241) (false value)))
+
+(base:function plus ((left u64) (right u64)) u64
+  (cap (n:add (cap left) (cap right))))
+
+(export
+  node
+  tape
+  status
+  success
+  syntax
+  limit
+  allocation
+  from-storage
+  description
+  offset
+  io
+  step
+  steps
+  iteration
+  empty
+  at
+  set
+  byte
+  equal-at
+  cap
+  plus
+  nodes-length
+  nodes-append
+  nodes-destroy)
