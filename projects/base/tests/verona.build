@@ -1,0 +1,7 @@
+(executable bounded-tests
+  (root base.bounded-tests)
+  (module-path ".")
+  (module-path "../src")
+  (module-path "../../testing/src")
+  (target native)
+  (optimize 0))

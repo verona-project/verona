@@ -1589,3 +1589,45 @@ state. Request rejection is reported in the minibuffer;
 `verona-ide-last-error` in the originating buffer shows its full response.
 Startup settings appear in `*Verona help*`, while server process output and
 initialization failures appear in `*Verona server*`.
+
+
+### Bounded values
+
+Base exports `bounded`, the Haskell-style protocol for types with a smallest and
+largest value. Its zero-argument operations are `minBound` and `maxBound`:
+
+```lisp
+(import base)
+(base:function smallest () i64 (base:minBound))
+(base:function largest () u64 (base:maxBound))
+```
+
+The expected result type selects the instance. A call with no type context is
+ambiguous when multiple instances apply. Constrained functions can use the
+operations directly:
+
+```lisp
+(base:function bounds (for (a) ((base:bounded a))) ((witness a)) (tuple a a)
+  (tuple (minBound) (maxBound)))
+```
+
+Instances cover signed and unsigned fixed-width integers, `bool` (`false` through
+`true`), ASCII `char` (0 through 127), `unit`, and `base:order` (`less` through
+`greater`). Integer aliases, including `isize`, `usize`, `int`, and `exit-code`,
+use the underlying integer instance. Floating-point numbers and pointers have no
+instances. There is no ordering superclass and no overflow checking.
+
+Custom types use ordinary protocol implementations:
+
+```lisp
+(base:type color (sum (red) (green) (blue)))
+(base:implementation (base:bounded color)
+  (function minBound () color (red))
+  (function maxBound () color (blue)))
+```
+
+Concrete product and tuple types can implement the protocol explicitly; instances
+are not automatically derived. An exported zero-argument generic can select a
+same-named protocol method declared in its owning module by expected result type.
+Explicit generic implementations retain precedence, and ambiguous matches are
+rejected. Calls resolve statically.

@@ -1,0 +1,5 @@
+(import base)
+(base:protocol unrelated (a) (minBound () a))
+(base:implementation (unrelated f64)
+  (function minBound () f64 0.0))
+(base:function smallest () f64 (base:minBound))

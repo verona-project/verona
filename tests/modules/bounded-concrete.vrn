@@ -1,0 +1,1 @@
+(import base) (base:function smallest () i8 (base:minBound))

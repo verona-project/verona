@@ -2,6 +2,41 @@
 
 (in-suite :verona)
 
+(test unrelated-protocol-cannot-supply-an-imported-bound-generic
+  (signals no-generic-implementation-error
+    (compile-file
+     (make-compiler :search-paths (list #P"projects/base/src/"))
+     #P"tests/modules/bounded-unrelated.vrn")))
+
+(test base-bounded-resolves-a-concrete-result-statically
+  (let* ((unit (compile-file
+                (make-compiler :search-paths (list #P"projects/base/src/"))
+                #P"tests/modules/bounded-concrete.vrn"))
+         (program (compilation-unit-semantic-program unit))
+         (function (semantic-program-declaration program (first (unit-declarations unit))))
+         (call (semantic-function-declaration-body function)))
+    (is (typep call 'semantic-call))
+    (is (typep (semantic-reference-binding (semantic-call-callee call))
+               'verona:semantic-protocol-operation-implementation))))
+
+(test base-bounded-requires-result-type-context
+  (signals ambiguous-generic-implementation-error
+    (compile-file
+     (make-compiler :search-paths (list #P"projects/base/src/"))
+     #P"tests/modules/bounded-ambiguous.vrn")))
+
+(test base-bounded-has-no-floating-point-instance
+  (signals no-generic-implementation-error
+    (compile-file
+     (make-compiler :search-paths (list #P"projects/base/src/"))
+     #P"tests/modules/bounded-float.vrn")))
+
+(test base-bounded-has-no-pointer-instance
+  (signals no-generic-implementation-error
+    (compile-file
+     (make-compiler :search-paths (list #P"projects/base/src/"))
+     #P"tests/modules/bounded-pointer.vrn")))
+
 (test imports-the-explicit-base-macro-module
   (let* ((unit (compile-file
                 (make-compiler :search-paths (list #P"projects/base/src/"))

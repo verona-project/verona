@@ -269,7 +269,41 @@
   (quotRem ((left a) (right a)) (tuple a a))
   (divMod ((left a) (right a)) (tuple a a)))
 
+;; Bounded has no ordering/numeric superclass. Nullary methods select their
+;; concrete result type from context, just like CONVERT's result-directed dispatch.
+(protocol bounded (a)
+  (minBound () a)
+  (maxBound () a))
+
+(generic minBound ())
+(generic maxBound ())
+
+(macro implement-builtin-bounded (type lower upper)
+  `(implementation (bounded ,type)
+     (function minBound () ,type ,lower)
+     (function maxBound () ,type ,upper)))
+
+(implement-builtin-bounded i8 -128 127)
+(implement-builtin-bounded i16 -32768 32767)
+(implement-builtin-bounded i32 -2147483648 2147483647)
+(implement-builtin-bounded i64 -9223372036854775808 9223372036854775807)
+(implement-builtin-bounded u8 0 255)
+(implement-builtin-bounded u16 0 65535)
+(implement-builtin-bounded u32 0 4294967295)
+(implement-builtin-bounded u64 0 18446744073709551615)
+;; isize, usize, exit-code and int are aliases of these existing integer types.
+(implement-builtin-bounded bool false true)
+;; CHAR is an ASCII code unit with the same one-byte representation as U8.
+;; Read the constant byte as CHAR; no pointer escapes and no heap allocation occurs.
+(macro bounded-character (code)
+  `(let ((bounded-character-code u8 ,code))
+     (deref (cast (pointer char) (cast (pointer void) (& bounded-character-code))))))
+(implement-builtin-bounded char (bounded-character 0) (bounded-character 127))
+(implement-builtin-bounded unit unit unit)
+(implement-builtin-bounded order (less) (greater))
+
 (export
  macro type function external-function constant variable generic protocol implementation
  int rational order enum num eq ord real integral
+ bounded minBound maxBound
  convert numeric equality ordering)

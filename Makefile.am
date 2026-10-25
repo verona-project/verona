@@ -16,7 +16,7 @@ EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/IDE-WORK
 	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/verona-server.el editors/emacs/README.md flake.lock flake.nix license projects readme.md \
 	scripts src tests $(cl_llvm_files) verona.asd
 
-.PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona test-swank
+.PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona test-bounded test-swank
 
 help:
 	@printf '%s\n' 'Verona development commands:'
@@ -28,6 +28,7 @@ help:
 	@printf '%s\n' '  make test-llvm      Run LLVM backend integration tests'
 	@printf '%s\n' '  make test-compiler  Run compiler-driver, CLI, and build tests'
 	@printf '%s\n' '  make test-verona    Build and run the supplied Verona project smoke suite'
+	@printf '%s\n' '  make test-bounded   Build and run Base bounded unit tests'
 	@printf '%s\n' '  make test-swank     Run optional Swank adapter integration tests'
 	@printf '%s\n' '  make test-editor    Run optional Emacs integration tests'
 	@printf '%s\n' '  make test-workflows Run all compiler, Swank and editor acceptance tests'
@@ -59,7 +60,7 @@ install-exec-local: $(VERONA_EXECUTABLE)
 uninstall-local:
 	$(RM) '$(DESTDIR)$(bindir)/verona'
 
-test: test-frontend test-llvm test-compiler test-verona
+test: test-frontend test-llvm test-compiler test-verona test-bounded
 
 test-frontend:
 	cd $(verona_srcdir) && $(SBCL) --script tests/run.lisp
@@ -78,6 +79,11 @@ test-verona: $(VERONA_EXECUTABLE)
 	@$(MKDIR_P) $(abs_top_builddir)/build/testing
 	@cd $(verona_srcdir)/projects/testing && $(VERONA_EXECUTABLE) build testing-smoke $(abs_top_builddir)/build/testing
 	@$(abs_top_builddir)/build/testing/testing-smoke
+
+test-bounded: $(VERONA_EXECUTABLE)
+	@$(MKDIR_P) $(abs_top_builddir)/build/base
+	@cd $(verona_srcdir)/projects/base/tests && $(VERONA_EXECUTABLE) build bounded-tests $(abs_top_builddir)/build/base
+	@$(abs_top_builddir)/build/base/bounded-tests
 
 clean-local:
 	$(RM) $(VERONA_EXECUTABLE) $(VERONA_SERVER) $(VERONA_SERVER).tmp
