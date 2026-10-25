@@ -2555,6 +2555,34 @@ LET bindings are addressable but remain immutable through their source name."
                            :arguments arguments :operation operation :constraint constraint
                            :type result-type))))))
 
+(defun nullary-protocol-generic-candidates (program generic expected-type)
+  "Resolve a result-only protocol method exposed by a same-module generic.
+
+Ordinary generic implementations take precedence. Only protocols declared in
+GENERIC's owning module participate, so an unrelated same-named operation
+cannot supply an implementation. Return concrete method functions, not a
+runtime dictionary or a new generic instance in the importing module."
+  (let* ((declaration (generic-declaration generic))
+         (owner (and declaration (declaration-module declaration)))
+         (candidates '()))
+    (when owner
+      (dolist (entry (semantic-program-declarations program))
+        (let ((source (car entry)) (semantic (cdr entry)))
+          (when (and (typep semantic 'semantic-protocol-declaration)
+                     (eq owner (declaration-module source)))
+            (let* ((protocol (semantic-protocol-declaration-protocol semantic))
+                   (operation (find (generic-name generic) (protocol-operations protocol)
+                                    :key #'protocol-operation-name :test #'verona-name=)))
+              (when (and operation (null (protocol-operation-parameters operation)))
+                (dolist (instance (protocol-implementations protocol))
+                  (let ((method (protocol-implementation-find-operation (cdr instance) operation)))
+                    (when (and method
+                               (or (null expected-type)
+                                   (same-type-p expected-type
+                                                (semantic-function-declaration-return-type method))))
+                      (pushnew method candidates :test #'eq))))))))))
+    (nreverse candidates)))
+
 (defun infer-call-expression (syntax scope &optional expected-type)
   (let* ((elements (verona-list-elements (syntax-datum syntax)))
 	 (head (first elements))
@@ -2593,6 +2621,10 @@ LET bindings are addressable but remain immutable through their source name."
                                         argument-syntax))
                      (argument-types (mapcar #'expression-type arguments))
                      (candidates (generic-find-implementations generic argument-types))
+                     (protocol-candidates
+                       (and (null candidates) (zerop (generic-arity generic))
+                            (nullary-protocol-generic-candidates
+                             (semantic-scope-owning-program scope) generic expected-type)))
                      (implementation
                        (or (cond ((null (cdr candidates))
                                   (first candidates))
@@ -2627,6 +2659,19 @@ LET bindings are addressable but remain immutable through their source name."
                                                          :pointer-equal
                                                          :pointer-not-equal))))))))
                 (unless implementation
+                  (when protocol-candidates
+                    (unless (null (cdr protocol-candidates))
+                      (error 'ambiguous-generic-implementation-error :syntax syntax
+                             :generic generic :argument-types argument-types))
+                    (let ((method (first protocol-candidates)))
+                      (return-from infer-call-expression
+                        (make-instance 'semantic-call :syntax syntax
+                                       :callee (make-instance 'semantic-reference :syntax head
+                                                              :name (syntax-datum head)
+                                                              :binding method
+                                                              :type (semantic-function-declaration-type method))
+                                       :arguments '()
+                                       :type (semantic-function-declaration-return-type method)))))
                   (error 'no-generic-implementation-error :syntax syntax
                          :generic generic :argument-types argument-types))
                 (let ((operation (generic-implementation-primitive-operation implementation)))

@@ -2,6 +2,30 @@
 
 (in-suite :verona)
 
+(test explicit-nullary-generic-implementation-precedes-protocol-method
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(protocol bounded (a) (limit () a))
+                 (generic limit ())
+                 (implementation (bounded i32) (function limit () i32 7))
+                 (implementation limit () i32 42)
+                 (function answer () i32 (limit))"))
+         (program (compilation-unit-semantic-program unit))
+         (function (semantic-program-declaration program (car (last (unit-declarations unit)))))
+         (call (semantic-function-declaration-body function)))
+    (is (typep (semantic-reference-binding (semantic-call-callee call))
+               'semantic-generic-implementation))))
+
+(test nullary-protocol-methods-with-identical-results-remain-ambiguous
+  (signals ambiguous-generic-implementation-error
+    (compile-string
+     (make-compiler)
+     "(protocol marker (a) (marked () bool))
+      (generic marked ())
+      (implementation (marker i8) (function marked () bool true))
+      (implementation (marker i16) (function marked () bool false))
+      (function answer () bool (marked))")))
+
 (test generic-declarations-and-exact-dispatch
   (let* ((unit (compile-string
                 (make-compiler)
