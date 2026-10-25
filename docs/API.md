@@ -1631,3 +1631,20 @@ are not automatically derived. An exported zero-argument generic can select a
 same-named protocol method declared in its owning module by expected result type.
 Explicit generic implementations retain precedence, and ambiguous matches are
 rejected. Calls resolve statically.
+
+## Project management tools
+
+`verona-project` is a standalone executable for project management, installed
+alongside the compiler. Run `verona-project --help` to list its commands.
+The tool is written in Verona in `projects/project/`; `make project` builds
+`build/project/verona-project`. The resulting native executable does not load
+the compiler or LLVM.
+
+`verona-project new NAME` creates a new executable project in `NAME/` under the
+current directory. It writes `verona.build`, `src/main.vrn`, `README.md`, and
+`.gitignore` (ignoring `/build/`). The program returns exit code zero and
+requires no additional packages. Run `cd NAME`, `verona build NAME ./build`,
+then `./build/NAME` to build and run it.
+
+NAME must start with an ASCII letter and contain only ASCII letters, digits,
+hyphens, or underscores. Existing files and directories are rejected.

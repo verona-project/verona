@@ -1,0 +1,6 @@
+(executable verona-project
+  (root project)
+  (module-path "src")
+  (module-path "../base/src")
+  (module-path "../libc/src")
+  (optimize 2))

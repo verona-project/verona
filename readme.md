@@ -152,6 +152,25 @@ to C with an explicit top-level declaration:
 Native exports currently accept the scalar and pointer types supported by
 `external-function`; products, sums, and `unit` are outside the C ABI.
 
+## Create a project
+
+Use the separate `verona-project` tool (installed alongside Verona) to create an
+executable project. It is written in Verona; from a checkout, run `make project`
+and use `build/project/verona-project new NAME`:
+
+```sh
+verona-project new my-app
+cd my-app
+verona build my-app ./build
+./build/my-app
+```
+
+This creates `verona.build`, `src/main.vrn`, `README.md`, and `.gitignore`.
+The starter program returns exit code zero and needs no external packages.
+Names start with a letter and contain only ASCII letters, digits, `-`, or `_`.
+The destination must not already exist. Run `verona-project --help` to list
+project management commands.
+
 ## Declarative builds
 
 `verona.build` describes native artifacts without evaluating Verona code. The
