@@ -36,9 +36,14 @@ reference.
 
 ## Development environment
 
-Initialize the pinned `vendor/CL-LLVM` submodule with
-`git submodule update --init --recursive`. Use its recorded commit, which is
-matched to LLVM 23, rather than the fork's default branch.
+Initialize the pinned `vendor/CL-LLVM`, `projects/base`, `projects/libc`,
+`projects/formatter`, `projects/testing`, `projects/foundation`, and
+`projects/project` submodules with
+`git submodule update --init --recursive`.
+Use their recorded commits. CL-LLVM is matched to LLVM 23; do not substitute the
+fork's default branch. The project submodules have their own repositories under
+https://github.com/verona-project. Commit and push component
+changes inside their own repository before updating Verona's submodule reference.
 
 Use the repository's Nix development shell (Nix 2.27 or later) when working on LLVM-backed builds
 or tests. It provides the pinned LLVM Common Lisp bindings and sets
