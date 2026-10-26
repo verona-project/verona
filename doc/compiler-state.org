@@ -1,0 +1,320 @@
+#+title: Compile-time operations and compiler state
+#+startup: overview
+
+* Objective
+
+Extend Verona's existing macro evaluator into a useful compile-time language
+for inspecting and constructing forms, querying compilation features, and
+maintaining scoped state. Preserve the boundary between compile-time values
+and the statically typed program emitted for LLVM.
+
+This document is an implementation plan. Proposed operation names and the
+design defaults below are not descriptions of implemented functionality.
+
+* Agreed language requirements
+
+- Use =cond= for branching. Do not add =if= or a separate =do= form.
+- Support =let= for local bindings.
+- Provide boolean operations =and=, =or=, and =not=; =and= and =or=
+  short-circuit.
+- Allow multiple expressions in =cond= clause bodies and =let= bodies;
+  evaluate them in order and return the last value.
+- Provide =nil= exclusively at compile time as the empty list. Keep it
+  distinct from =false= and =unit=.
+- Provide arithmetic, property-list, association-list, string, keyword,
+  and form-manipulation operations.
+- Expose compilation features and persistent compile-time state to macros.
+- Share state across modules within one compilation session. Use qualified
+  keys such as ='models:types= for explicit module namespacing; unqualified
+  keys are session-global.
+
+* Existing implementation
+
+- =src/evaluator.lisp= implements evaluator environments, callable wrappers,
+  macro invocation, quotation, and quasiquotation. Macro arguments and
+  results use ordinary S-expressions; compiler syntax wrappers preserve
+  source provenance at the expansion boundary.
+- =src/compiler.lisp= constructs a fresh compilation environment per module,
+  installs compile-time operations, registers macros sequentially, and loads
+  imported macro bindings. Source macros capture their definition environment.
+- The reader already receives target and project features. The same feature
+  set must be available to the evaluator.
+- Declaration collection and macro expansion precede semantic resolution.
+  Resolved types and target layout are not generally available during initial
+  expansion.
+- =src/ide/analysis.lisp= also constructs compilation environments. IDE
+  analysis must use the same context and state rules as batch compilation.
+- Existing =compiler:map= and reduce helpers construct calls; they do not
+  execute arbitrary compile-time functions.
+
+* Value and evaluation contracts
+
+** Booleans and nil
+
+Use Verona boolean values for predicates and conditions; do not leak Common
+Lisp truth values through evaluator functions. Conditions require booleans:
+=nil= is an empty list, not an alternative spelling of =false=.
+
+Resolve bare =nil= specially in the evaluator, and make quoted =nil= and
+quoted =()= denote the same empty-list value. Keep the spelling recognizable
+to runtime analysis so misuse produces a source-located compile-time-only
+diagnostic. Do not globally rewrite identifier tokens in the reader in a way
+that loses this distinction. Test the existing empty-list reader path before
+choosing the exact representation boundary.
+
+Empty lists may be macro data or an element of generated data. They do not
+automatically mean zero generated declarations: retain =(definitions)= for
+that purpose. A macro must still return valid syntax for its expansion
+position.
+
+** Control and bindings
+
+- =cond=: evaluate tests in order; evaluate only the first matching body.
+  Use =true= as the final unconditional test. Proposed default: no matching
+  clause returns =nil=. Reject malformed clauses and empty bodies.
+- =let=: use =(let ((name initializer) ...) body...)= without runtime type
+  annotations. Proposed default: sequential immutable bindings, consistent
+  with Verona's runtime =let=; later initializers can see earlier bindings.
+- =and= and =or=: special forms with left-to-right short-circuit evaluation
+  and boolean results. Zero operands return =true= and =false= respectively.
+- =not=: ordinary unary boolean operation.
+- Share an internal body evaluator for sequencing. Do not expose =do=.
+
+** Equality and collections
+
+Define structural =equal?= for supported S-expression values, including
+identifier spelling and qualified identifiers. Do not compare host object
+identity or source wrappers. Numeric comparisons remain separate.
+
+Collection updates return new values. Only operations explicitly ending in
+=!= mutate persistent state. Return copies at state boundaries so callers
+cannot mutate stored data through shared host lists or strings.
+
+Lookup takes an optional default, initially =nil=. Presence predicates must
+distinguish a missing key from a key explicitly associated with =nil=.
+Use structural equality consistently for association-list and state keys.
+
+Property lists contain alternating key/value entries. Association lists use
+two-element proper lists, avoiding dotted pairs outside the existing macro
+value model. Proposed default: reject duplicate keys and malformed entries;
+updates replace an existing entry or append a new entry, preserving order.
+
+** Keywords
+
+The current =keyword= constructor is equivalent to =symbol=. Preserve this
+compatibility initially: keywords remain identifiers used by convention as
+keys, with colon-prefixed spellings such as =:name=. Define =keyword?= and
+keyword conversions against that convention, with tests for colon handling.
+Do not imply a separate keyword value type without an explicit language
+decision. Keep existing =keyword= and =keyword-concat= behavior compatible.
+
+* Operation inventory
+
+** Arithmetic and comparison
+
+- =+=, =-=, =*=, =/=, =quotient=, =remainder=, =min=, =max=, =abs=.
+- ===, =/==, =<=, =<==, =>=, =>== for numeric comparison.
+- =equal?= for structural equality.
+- =number?=, =integer?=, =string?=, =symbol?=, =keyword?=, =list?=,
+  =empty?=, and =boolean?=.
+
+Specify arity, numeric domains, division rules, overflow behavior, and error
+conditions before adding bindings. Proposed integer arithmetic uses exact
+integers; =quotient= truncates toward zero and =remainder= has the dividend's
+sign. Define which numeric results can be emitted into runtime literals.
+Do not accidentally expose host ratios or other unsupported numeric values
+through =/=. Division by zero is a compiler diagnostic.
+
+** Lists and forms
+
+- Retain =list=, =cons=, =car=, =cdr=, =append=, and =length=.
+- Add =nth=, =take=, =drop=, =reverse=, and =empty?=.
+- Reject improper or cyclic lists, invalid indices, and invalid operands with
+  source-aware diagnostics. Keep =car= and =cdr= on empty lists consistent
+  with their existing error behavior.
+- Retain quote, quasiquote, symbol construction, =definitions=, and existing
+  =compiler:call/map/reduce/reduce-right/reverse= behavior.
+
+General =map=, =filter=, =fold=, =find=, =any?=, and =every?= require callable
+compile-time helpers. Treat these as a later increment: first specify helper
+definitions, lexical capture, and callable arguments. Do not introduce
+=lambda= or overload runtime function declarations implicitly.
+
+** Property and association lists
+
+- =plist-ref=, =plist-has?=, =plist-set=, =plist-remove=, =plist-keys=.
+- =alist-ref=, =alist-has?=, =alist-set=, =alist-remove=, =alist-keys=,
+  =alist-values=.
+
+Examples of data representations:
+
+#+begin_src lisp
+(:name "Point" :fields (x y))
+((name "Point") (fields (x y)))
+#+end_src
+
+** Strings and names
+
+- Retain =string-concat=, =string-length=, and =substring=.
+- Add =string==, =string-split=, =string-join=, =string-replace=,
+  =string-prefix?=, and =string-suffix?=.
+- Retain =symbol=, =symbol-name=, =symbol-concat=, =keyword=, and
+  =keyword-concat=; add =keyword-name= where compatible with keyword rules.
+- Add =number->string=, =string->number=, =symbol->keyword=, and
+  =keyword->symbol= after defining conversion failure and colon semantics.
+- Specify case sensitivity, empty separators, replacement overlap, numeric
+  formatting, and parsing. Keep source-string restrictions consistent with
+  the current language; do not silently add Unicode source syntax.
+
+* Compilation context and state
+
+** Immutable context
+
+Introduce a frontend-owned context containing normalized reader features,
+available target metadata, and the current expansion module. Keep LLVM and
+native-driver types out of the reusable evaluator API.
+
+- =(compiler:feature? name)= accepts a feature identifier or string and uses
+  the reader's case-insensitive normalization.
+- =(compiler:features)= returns a copy of the effective reader feature set.
+- =(compiler:target-info)= returns documented plain data. Report unavailable
+  fields explicitly; do not infer target properties from the host when a
+  cross target is selected.
+- Keep LLVM CPU feature strings distinct from Verona reader feature names.
+- Reader conditionals run before expansion. State changes cannot retroactively
+  change which source forms the reader selected.
+
+** Mutable state
+
+Provide =compiler:state-ref=, =compiler:state-has?=,
+=compiler:state-set!=, and =compiler:state-remove!=.
+
+One state store belongs to the compilation session and is shared by all its
+modules. Unqualified keys are session-global. Qualified identifiers explicitly
+namespace keys by module; any module can read or update the same entry:
+
+#+begin_src lisp
+(compiler:state-set! 'models:types entries)
+(compiler:state-ref 'models:types nil)
+#+end_src
+
+Canonicalize a qualified key's module through the invocation module's import
+aliases and module identity. Its state name does not require a declaration or
+export in that module. Qualification supplies a namespace, not access control.
+Do not automatically namespace keys by the calling or defining macro module.
+Do not add state exports, dependency snapshots, or a separate module argument.
+Specify diagnostics for unknown or ambiguous module qualifiers and ensure
+self-qualified keys work while the current module is being collected.
+
+Keep lexical name lookup in the captured definition environment. Supply the
+active session and invocation module at invocation rather than capturing a
+previous session in operation closures installed in a library's environment.
+Preserve context through nested and expression-position expansion, restoring
+it on normal return or error. Normalize state keys at the state API boundary;
+ordinary quoted qualified identifiers remain data elsewhere.
+
+Store only validated macro S-expression values. Define mutation results:
+=state-set!= returns the stored value; =state-remove!= returns whether an
+entry existed. Reject state access without an active compilation context.
+
+State persists across module loading, declaration collection, and later
+expression expansion within one compilation session. A new build or IDE
+analysis generation starts a fresh store. Failed analyses discard their
+session state. Concurrent compilation requests must never share stores.
+
+** Ordering, failures, and IDE reuse
+
+- Preserve existing top-level source order and define deterministic module
+  loading order. Reads observe writes already performed in the session; a
+  missing key does not trigger loading or expansion of another module.
+- Define deterministic ordering for expression expansion and repeated
+  specialization. Avoid applying a mutation twice because an expression is
+  revisited; either cache the expanded form or explicitly constrain the
+  stateful operation's phase with a diagnostic.
+- Start each reanalysis with fresh state and replay the required expansion
+  sequence. Publish state and analysis products together only on success.
+- Audit IDE caching of imported macros: captured environments must not retain
+  a previous analysis generation's mutable state.
+- Include feature and context changes in analysis invalidation. Initially
+  avoid partial state replay. Because state crosses module boundaries, cached
+  expansion products cannot skip state effects: replay all required effects
+  in order or initially rebuild the affected compilation session.
+
+* Implementation sequence
+
+** 1. Establish evaluator semantics
+
+Implement =nil=, strict boolean handling, =cond=, =let=, =and=, =or=,
+=not=, and shared body evaluation in =src/evaluator.lisp=. Preserve source
+locations for argument, arity, condition, and binding errors. Add runtime
+rejection of compile-time-only =nil= through the appropriate resolver path.
+
+Acceptance: unselected expressions never evaluate; local bindings do not
+escape; =nil= round-trips through quotation and macro arguments but is
+rejected as a runtime value.
+
+** 2. Build the compile-time data library
+
+Implement arithmetic, predicates, structural equality, lists, property and
+association lists, strings, and name operations. Separate reusable operation
+implementations from environment registration if the current compiler file
+becomes unwieldy; preserve serial dependency order in =verona.asd=.
+
+Acceptance: operations compose inside =cond= and =let=, updates preserve
+their inputs, missing entries differ from empty values, and invalid input
+produces Verona diagnostics rather than raw host exceptions.
+
+** 3. Thread immutable context through every entry point
+
+Update =compile-source=, module loaders, compiler file/module entry points,
+development expansion APIs, and IDE analysis to create and propagate the same
+context. Install feature and target queries in compilation environments.
+
+Acceptance: reader and macro feature queries agree for native and cross
+targets, imported macro calls, project features, and IDE overrides.
+
+** 4. Add scoped mutable state
+
+Create a compilation-session store, bind invocation context, canonicalize
+qualified module keys, add state operations, and implement fresh-store and
+failure-discard behavior. Complete
+the expression-expansion and specialization ordering audit before exposing
+state mutation there.
+
+Acceptance: modules can read and update the same qualified key; unqualified
+keys are global within the session; aliases resolve to the same entry; distinct
+module qualifiers keep same-named keys separate; nested calls restore context;
+recompilation and failed analysis leave no stale state.
+
+** 5. Document and exercise the public language
+
+Update =docs/API.md= and the =site/manual/= reference when implementing the
+language changes. Add a runnable macro-expansion example demonstrating
+feature selection, plist/alist manipulation, and a cross-module registry
+using a qualified key such as ='models:types=.
+Document all defaults, ordering guarantees, compile-time-only values, and
+the distinction between call-building helpers and executable traversal.
+
+General callable helpers and higher-order traversal follow separately after
+their language design is settled. Resolved-type reflection is outside this
+initial implementation; cross-module state is part of it.
+
+* Verification
+
+- Extend =tests/evaluator.lisp= for evaluation order, booleans, nil, binding
+  scope, arithmetic, conversions, malformed collections, and copy semantics.
+- Extend =tests/macro-expansion.lisp= and =tests/modules.lisp= for state
+  session lifetime, cross-module reads and writes, qualified and global keys,
+  import aliases, nested expansion, expression expansion,
+  generated declarations, and error provenance.
+- Add runtime-invalid fixtures for compile-time-only values and operations.
+- Extend =tests/driver-target.lisp= and build integration tests for parity
+  between effective reader features and macro feature queries.
+- Extend IDE tests for fresh reanalysis, failed analysis, cached imports,
+  configuration changes, and isolation between sessions.
+- Run =make test-frontend= first. Run =make test-compiler= for context
+  plumbing through the driver, and =make test-llvm= for affected resolver
+  output or runtime rejection behavior. Run =make test= as the final broad
+  check using the repository's required development environment.
+- Build and run the affected macro example. Report missing prerequisites
+  rather than substituting an unpinned toolchain.
