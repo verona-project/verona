@@ -11,13 +11,14 @@ verona_srcdir = $(shell cd $(top_srcdir) && pwd -P)
 # The generated launcher embeds its Lisp entry point and shares bindir with verona.
 nodist_bin_SCRIPTS = $(VERONA_SERVER)
 
-# Include the pinned bindings in source archives without Git's metadata pointer.
+# Include submodule sources in archives without Git metadata pointers.
 cl_llvm_files = $(shell cd $(verona_srcdir) && find vendor/CL-LLVM -type f ! -name .git -print)
+project_dist_files = $(shell cd $(verona_srcdir) && find projects -type f ! -name .git -print)
 verona_project_files = $(shell find $(verona_srcdir)/projects/project $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
 verona_formatter_files = $(shell find $(verona_srcdir)/projects/formatter/src $(verona_srcdir)/projects/foundation/src $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
 verona_lisp_files = $(shell find $(verona_srcdir)/src -type f -name '*.lisp' -print)
 EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/IDE-WORKFLOWS.md \
-	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/verona-server.el editors/emacs/README.md flake.lock flake.nix license projects readme.md \
+	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/verona-server.el editors/emacs/README.md flake.lock flake.nix license $(project_dist_files) readme.md \
 	scripts src tests $(cl_llvm_files) verona.asd
 
 .PHONY: help bootstrap build test test-frontend test-llvm test-compiler test-verona test-bounded test-foundation formatter test-formatter test-swank
