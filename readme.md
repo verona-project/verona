@@ -1,6 +1,6 @@
 # Verona
 
-![Verona logo](assets/calico.png)
+![Verona logo](assets/github-banner.png)
 
 Verona is a statically typed systems programming language with an S-expression
 syntax. It compiles ahead of time through LLVM and supports product and sum
