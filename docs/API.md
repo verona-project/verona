@@ -1648,3 +1648,28 @@ then `./build/NAME` to build and run it.
 
 NAME must start with an ASCII letter and contain only ASCII letters, digits,
 hyphens, or underscores. Existing files and directories are rejected.
+
+`verona-project libraries` groups immediate directories in `VERONA_SOURCE_DIR`
+by library and lists every available version, for example:
+
+```text
+base: 1.1.0, 1.2.0
+foundation: 0.1.0
+```
+
+Directory names use `NAME-MAJOR.MINOR.PATCH`, with optional `-` release or `+`
+build suffixes. Names may contain hyphens. Directories without a version suffix
+fall back to the `(version "...")` clause on a matching `static-library` or
+`shared-library` target in that directory's `verona.build`. Directory versions
+take precedence. Missing or unusable version metadata leaves the directory
+shown as `(unversioned)` without an asterisk. A version read from the manifest
+of an unversioned directory is followed by an asterisk, for example `0.1.0*`. If both
+versioned and unversioned directories provide the same version, it appears once
+with an asterisk. Manifest reads are limited to files smaller than 1 MiB;
+read errors fail the listing. Libraries and version strings are sorted
+lexicographically, with repeated versions shown once; this ordering does not
+select a preferred version.
+Directory symlinks are followed; ordinary files and dangling links are skipped.
+An empty source directory produces no output. The variable must name an absolute,
+readable directory. Listing, allocation, or output failures return a nonzero exit
+status. This reads version metadata without checking library integrity; `VERONA_LIBRARY_DIR` is not required.
