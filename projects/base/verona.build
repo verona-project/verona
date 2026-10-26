@@ -1,6 +1,0 @@
-(static-library base
-  (version "0.1.0")
-  (root base)
-  (module-path "src")
-  (target native)
-  (optimize 0))

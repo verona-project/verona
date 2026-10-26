@@ -1,3 +1,24 @@
 [submodule "vendor/CL-LLVM"]
 	path = vendor/CL-LLVM
 	url = https://github.com/verona-project/CL-LLVM.git
+[submodule "projects/base"]
+	path = projects/base
+	url = https://github.com/verona-project/base.git
+[submodule "projects/libc"]
+	path = projects/libc
+	url = https://github.com/verona-project/libc.git
+[submodule "projects/formatter"]
+	path = projects/formatter
+	url = https://github.com/verona-project/formatter.git
+[submodule "projects/testing"]
+	path = projects/testing
+	url = https://github.com/verona-project/testing.git
+[submodule "projects/foundation"]
+	path = projects/foundation
+	url = https://github.com/verona-project/foundation.git
+[submodule "projects/project"]
+	path = projects/project
+	url = https://github.com/verona-project/project.git
+[submodule "editors/emacs"]
+	path = editors/emacs
+	url = https://github.com/verona-project/verona-mode.el.git

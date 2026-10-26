@@ -73,7 +73,19 @@ toolchain setup:
   [verona-project/CL-LLVM](https://github.com/verona-project/CL-LLVM).
 - Autoconf, Automake, and Make.
 
-Initialize the submodule from the repository root (or clone Verona with
+The following projects are pinned as submodules:
+
+| Path | Repository |
+| --- | --- |
+| `projects/base` | [verona-project/base](https://github.com/verona-project/base) |
+| `projects/libc` | [verona-project/libc](https://github.com/verona-project/libc) |
+| `projects/formatter` | [verona-project/formatter](https://github.com/verona-project/formatter) |
+| `projects/testing` | [verona-project/testing](https://github.com/verona-project/testing) |
+| `projects/foundation` | [verona-project/foundation](https://github.com/verona-project/foundation) |
+| `projects/project` | [verona-project/project](https://github.com/verona-project/project) |
+| `editors/emacs` | [verona-project/verona-mode.el](https://github.com/verona-project/verona-mode.el) |
+
+Initialize the submodules from the repository root (or clone Verona with
 `git clone --recurse-submodules`), then set the bindings directory:
 
 ```sh
@@ -81,8 +93,23 @@ git submodule update --init --recursive
 export VERONA_CL_LLVM="$PWD/vendor/CL-LLVM"
 ```
 
-Use the recorded submodule commit when updating a checkout; the fork's default
-branch may target a different LLVM version.
+Use the recorded submodule commits when updating a checkout; the CL-LLVM fork's
+default branch may target a different LLVM version.
+
+These submodules use HTTPS for public checkouts. To work on them and push over SSH:
+
+```sh
+git -C projects/base remote set-url --push origin git@github.com:verona-project/base.git
+git -C projects/libc remote set-url --push origin git@github.com:verona-project/libc.git
+git -C projects/formatter remote set-url --push origin git@github.com:verona-project/formatter.git
+git -C projects/testing remote set-url --push origin git@github.com:verona-project/testing.git
+git -C projects/foundation remote set-url --push origin git@github.com:verona-project/foundation.git
+git -C projects/project remote set-url --push origin git@github.com:verona-project/project.git
+git -C editors/emacs remote set-url --push origin git@github.com:verona-project/verona-mode.el.git
+```
+
+Commit and push component changes in their own repository first, then update the
+corresponding submodule reference in Verona.
 
 From the repository root, bootstrap and configure the Autotools build. Generated
 Autotools files are not committed, so this is required from a Git checkout:

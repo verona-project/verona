@@ -37,8 +37,8 @@ reference.
 ## Development environment
 
 Initialize the pinned `vendor/CL-LLVM`, `projects/base`, `projects/libc`,
-`projects/formatter`, `projects/testing`, `projects/foundation`, and
-`projects/project` submodules with
+`projects/formatter`, `projects/testing`, `projects/foundation`,
+`projects/project`, and `editors/emacs` submodules with
 `git submodule update --init --recursive`.
 Use their recorded commits. CL-LLVM is matched to LLVM 23; do not substitute the
 fork's default branch. The project submodules have their own repositories under
