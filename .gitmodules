@@ -22,3 +22,6 @@
 [submodule "editors/emacs"]
 	path = editors/emacs
 	url = https://github.com/verona-project/verona-mode.el.git
+[submodule "projects/compiler"]
+	path = projects/compiler
+	url = git@github.com:diasbruno/compiler.git
