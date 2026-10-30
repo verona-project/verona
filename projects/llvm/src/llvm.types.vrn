@@ -1,0 +1,53 @@
+(import base)
+
+; LLVM C API opaque handles. Different handle kinds remain distinct Verona types.
+(base:type context-handle)
+
+(base:type context-ref (pointer context-handle))
+
+(base:type module-handle)
+
+(base:type module-ref (pointer module-handle))
+
+(base:type type-handle)
+
+(base:type type-ref (pointer type-handle))
+
+(base:type value-handle)
+
+(base:type value-ref (pointer value-handle))
+
+(base:type block-handle)
+
+(base:type block-ref (pointer block-handle))
+
+(base:type builder-handle)
+
+(base:type builder-ref (pointer builder-handle))
+
+(base:type target-handle)
+
+(base:type target-ref (pointer target-handle))
+
+(base:type machine-handle)
+
+(base:type machine-ref (pointer machine-handle))
+
+(base:type layout-handle)
+
+(base:type layout-ref (pointer layout-handle))
+
+; LLVMBool and C enum values use int, not the one-byte Verona bool.
+(base:type boolean i32)
+
+(export
+  context-ref
+  module-ref
+  type-ref
+  value-ref
+  block-ref
+  builder-ref
+  target-ref
+  machine-ref
+  layout-ref
+  boolean)

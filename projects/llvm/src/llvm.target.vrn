@@ -1,0 +1,125 @@
+(import base)
+(import llvm.types :as t)
+(import llvm.core :as core)
+(import llvm.enums :as enum)
+
+(base:external-function default-triple "LLVMGetDefaultTargetTriple" () (pointer u8))
+
+(base:external-function
+  from-triple
+  "LLVMGetTargetFromTriple"
+  ((pointer u8) (pointer t:target-ref) (pointer (pointer u8)))
+  t:boolean)
+
+(base:external-function
+  machine-create
+  "LLVMCreateTargetMachine"
+  (t:target-ref (pointer u8) (pointer u8) (pointer u8) i32 i32 i32)
+  t:machine-ref)
+
+(base:external-function machine-dispose "LLVMDisposeTargetMachine" (t:machine-ref) void)
+
+(base:external-function machine-layout "LLVMCreateTargetDataLayout" (t:machine-ref) t:layout-ref)
+
+(base:external-function
+  module-layout-set
+  "LLVMSetModuleDataLayout"
+  (t:module-ref t:layout-ref)
+  void)
+
+(base:external-function layout-dispose "LLVMDisposeTargetData" (t:layout-ref) void)
+
+(base:external-function
+  emit-file
+  "LLVMTargetMachineEmitToFile"
+  (t:machine-ref t:module-ref (pointer u8) i32 (pointer (pointer u8)))
+  t:boolean)
+
+#+aarch64 (base:external-function init-targetinfo "LLVMInitializeAArch64TargetInfo" () void)
+
+#+aarch64 (base:external-function init-target "LLVMInitializeAArch64Target" () void)
+
+#+aarch64 (base:external-function init-targetmc "LLVMInitializeAArch64TargetMC" () void)
+
+#+aarch64 (base:external-function init-asmprinter "LLVMInitializeAArch64AsmPrinter" () void)
+
+#+x86_64 (base:external-function init-targetinfo "LLVMInitializeX86TargetInfo" () void)
+
+#+x86_64 (base:external-function init-target "LLVMInitializeX86Target" () void)
+
+#+x86_64 (base:external-function init-targetmc "LLVMInitializeX86TargetMC" () void)
+
+#+x86_64 (base:external-function init-asmprinter "LLVMInitializeX86AsmPrinter" () void)
+
+; LLVMInitializeNativeTarget is a header inline function, not a library symbol.
+(base:function initialize-native () unit
+  (do (init-targetinfo) (init-target) (init-targetmc) (init-asmprinter) unit))
+
+; On success the caller owns the machine. On failure OUT-MESSAGE owns an LLVM
+; message. Both outputs start null; strings assigned here use LLVMCreateMessage.
+(base:function native-machine ((module t:module-ref) (out-message (pointer (pointer u8))))
+  t:machine-ref
+  (let
+    ((triple (pointer u8) (default-triple))
+     (target t:target-ref (cast t:target-ref (null-pointer))))
+    (do
+      (initialize-native)
+      (match (is-null (cast (pointer void) triple))
+        (true
+          (do
+            (store
+              (deref out-message)
+              (core:message-create "LLVM could not determine the host triple"))
+            (cast t:machine-ref (null-pointer))))
+        (false
+          (let ((status t:boolean (from-triple triple (& target) out-message)))
+            (match status
+              (0
+                (let
+                  ((machine
+                     t:machine-ref
+                     (machine-create
+                       target
+                       triple
+                       "generic"
+                       ""
+                       enum:codegen-default
+                       enum:reloc-pic
+                       enum:code-model-default)))
+                  (do
+                    (match (is-null (cast (pointer void) machine))
+                      (true
+                        (store
+                          (deref out-message)
+                          (core:message-create "LLVM could not create a host target machine")))
+                      (false
+                        (let ((layout t:layout-ref (machine-layout machine)))
+                          (do
+                            (core:module-target module triple)
+                            (module-layout-set module layout)
+                            (layout-dispose layout)
+                            unit))))
+                    (core:message-dispose triple)
+                    machine)))
+              (_ (do (core:message-dispose triple) (cast t:machine-ref (null-pointer)))))))))))
+
+(base:function null-pointer () (pointer void)
+  (let ((zero usize 0)) (deref (cast (pointer (pointer void)) (cast (pointer void) (& zero))))))
+
+(base:function is-null ((p (pointer void))) bool
+  (let ((bits usize (deref (cast (pointer usize) (cast (pointer void) (& p))))))
+    (match bits (0 true) (_ false))))
+
+(export
+  default-triple
+  from-triple
+  machine-create
+  machine-dispose
+  machine-layout
+  module-layout-set
+  layout-dispose
+  emit-file
+  initialize-native
+  native-machine
+  null-pointer
+  is-null)

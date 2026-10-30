@@ -18,4 +18,5 @@
 (defun verona-image-main ()
   (verona.compiler:main))
 
-(sb-ext:save-lisp-and-die *output-path* :executable t :toplevel #'verona-image-main)
+;; Pass flags such as --version to Verona rather than the SBCL runtime.
+(sb-ext:save-lisp-and-die *output-path* :executable t :save-runtime-options t :toplevel #'verona-image-main)

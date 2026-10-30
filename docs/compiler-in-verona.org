@@ -1,0 +1,204 @@
+#+TITLE: Compiler and Evaluator Written in Verona
+#+STARTUP: overview
+
+* Purpose and handoff
+This document records the scope agreed with the user for a new compiler and
+evaluator written in Verona. Use it as context in a new chat.
+
+The goal is to design our own compiler and evaluator, not to port the entire
+existing Common Lisp implementation. Use the existing compiler to bootstrap
+the Verona implementation. The first milestone is implemented in projects/compiler/. See the implementation
+record below for the current scope and commands.
+
+Before working, read the repository instructions, including AGENT.md and
+/Users/dias/.codex/RTK.md. The latter requires prefixing shell commands with rtk.
+
+* Existing project context
+- Verona is a statically typed language with S-expression syntax.
+- The current compiler is written in Common Lisp and emits native code via LLVM.
+- src/ contains the current implementation; tests/ contains its tests.
+- projects/ contains Verona libraries and applications.
+- readme.md and docs/API.md describe the current language and toolchain.
+- Check actual library and language capabilities before assuming prerequisites
+  for the new implementation are available.
+
+* Agreed direction
+Start with a small, statically typed core shared by compilation and evaluation.
+The evaluator executes checked Verona programs and can eventually become the
+execution engine for macros.
+
+This is an initial subset, not a commitment to reproduce every feature or
+implementation choice of the existing compiler.
+
+* Initial language subset
+| Area                | Initial scope                                      |
+|---------------------+----------------------------------------------------|
+| Values              | unit, bool, i64                                     |
+| Functions           | Explicit parameter and return types; direct calls  |
+| Recursion           | Recursive named functions                          |
+| Local bindings      | Immutable bindings with lexical scope              |
+| Control flow        | Conditional expressions; execute one branch only   |
+| Primitive operations | Integer arithmetic and comparisons                |
+| Programs            | One source file; named functions; main entry point |
+
+Define bindings and conditionals directly in the core so the first version
+does not depend on a macro system. Exact surface syntax remains to be settled.
+
+** Deferred features
+- Macros
+- Generics and protocols
+- Modules
+- Mutation
+- Pointers and native calls
+- Floating point
+
+Product types, sum types, and pattern matching are the next planned additions
+after the first milestone. They provide structures for representing syntax
+and implementing the compiler itself.
+
+* Compilation and evaluation behavior
+** Shared analysis
+Both paths use the same pipeline:
+
+#+begin_example
+Source -> reader -> name resolution -> type checking -> typed representation
+#+end_example
+
+The evaluator interprets this typed representation. The compiler lowers the
+same representation to LLVM and builds an executable.
+
+** Shared semantics
+- The same program must produce the same result through both execution paths.
+- Evaluate function arguments from left to right.
+- Evaluate only the selected conditional branch.
+- Do not perform implicit numeric conversions.
+- Use wrapping integer arithmetic.
+- Division by zero and signed division overflow produce runtime failures.
+- Check all function bodies, including functions that execution never reaches.
+
+** Diagnostics
+- Preserve source locations from the reader onward.
+- Report syntax and type errors with source locations.
+- Evaluator runtime failures include source locations and a call stack.
+- Exact compiled runtime failure reporting remains to be designed; it must
+  preserve the agreed failure semantics.
+
+* First milestone
+A recursive factorial program evaluates successfully and compiles to a native
+executable with the same result.
+
+Use small inputs whose results fit the chosen native entry-point convention.
+Decide how a Verona main result maps to a process exit status before comparing
+the evaluator's value with native execution.
+
+Validate shared behavior with focused examples covering bindings, calls,
+recursion, conditionals, arithmetic, type errors, and runtime failures.
+
+* Suggested implementation sequence
+1. Inspect the Verona language and libraries for implementation prerequisites:
+   collections, memory management, file access, and LLVM/native bindings.
+2. Settle the minimal syntax, name-resolution rules, typed representation,
+   primitive operations, and main convention.
+3. Create a Verona project and its build/test entry points.
+4. Implement the reader and syntax representation with source locations.
+5. Implement name resolution and type checking.
+6. Implement the evaluator for the agreed subset.
+7. Implement LLVM lowering and a minimal compiler driver.
+8. Compare both execution paths and complete the factorial milestone.
+9. Add products, sums, and pattern matching.
+10. Expand toward modules, generics, protocols, macros, and self-hosting as needed.
+
+* Questions to resolve as work proceeds
+- Which existing libraries can supply the required data structures and I/O?
+- What memory-management strategy should syntax and evaluator values use?
+- What are the exact binding, conditional, and primitive-operation forms?
+- How are integer literals checked, and which comparisons are initially supported?
+- Are forward calls and mutual recursion supported in the first version?
+- How will the Verona implementation access LLVM?
+- What minimal command-line interface serves evaluation and compilation?
+
+Resolve these incrementally. The user requested short steps and gathering
+further information as we go, rather than designing the entire system upfront.
+
+* Implementation record
+The initial core lives in projects/compiler/ and is written in Verona. Build it
+with =make compiler-core= and run differential integration coverage with
+=make test-compiler-core= inside the pinned Nix development shell. The package
+README specifies the grammar, commands, representation, ownership, diagnostics,
+and resource limits.
+
+Resolved initial choices:
+- Foundation Array/Data and a per-invocation arena provide storage and ownership;
+  libc provides file access and process execution. No library submodule changes
+  are required.
+- Syntax uses =(%function NAME ((PARAM TYPE) ...) TYPE BODY)=,
+  =(let ((NAME TYPE VALUE) ...) BODY)=, and =(if CONDITION THEN ELSE)=.
+- Bindings are sequential, immutable, and lexical. Inner scopes may shadow;
+  duplicates within one parameter/binding list are rejected.
+- All signatures are collected before bodies, supporting forward and mutual calls.
+- Types are unit/bool/i64; decimal literals are range checked. Binary operations
+  use the existing typed %OP-primitive-i64 names for arithmetic/comparisons.
+  Arithmetic wraps; division truncates toward zero and guards zero and signed overflow in both backends.
+- A source-aware indexed tape becomes the shared typed representation with
+  resolved binder/function identities. Both execution paths consume that tape.
+- LLVM lowering uses the Verona LLVM 23 C API library in projects/llvm/. It
+  constructs and verifies modules with LLVM builders and emits native objects
+  with the target-machine API. Clang performs native linking, invoked directly
+  without shell command construction. =emit-llvm= uses LLVM's module printer.
+- Commands are =check=, =eval=, =emit-llvm=, and =compile FILE -o EXECUTABLE=.
+- =main= has no parameters and returns i64. Evaluation prints the signed result;
+  native execution returns its low eight bits as process exit status.
+- Evaluator runtime diagnostics include source locations and function frames.
+  Native division errors report their category and exit 70; native source-aware
+  runtime diagnostics remain deferred.
+
+The factorial example uses 5! = 120, which fits the exit-status convention.
+Products, sums, and pattern matching are the next milestone; they are not yet
+accepted by this initial core. The later expansion toward modules, generics,
+protocols, macros, and self-hosting remains open.
+
+** Verification
+- =make test-compiler-core=: 21 FiveAM checks and twelve differential/driver test
+  groups pass, including native factorial status 120 and evaluator result 120.
+- LLVM suite: 85 checks pass; compiler-driver suite: 189 checks pass.
+- Verona smoke, Base bounded, Foundation (277 named tests), and formatter
+  (63 unit tests plus 1090 integration checks) pass.
+- =make test= stops in the existing frontend suite: 1326/1328 checks pass.
+  The two failures are in =IDE-INSPECTION-SELECTS-EXPANSION-SUBTREES= (body
+  expansion and step count). This work does not modify that implementation or
+  those tests. The remaining suites above were run separately afterward.
+
+** LLVM binding library
+The initial handwritten IR emitter has been replaced with projects/llvm/, a
+reusable Verona binding to the pinned LLVM 23 C API. Distinct opaque handles,
+explicit ownership/disposal, instruction builders, phi nodes, non-aborting
+verification, diagnostics, and native object emission are available independently
+of the core compiler. =make llvm-bindings= builds the library archive;
+=make test-llvm-bindings= runs native library acceptance tests. The core now
+builds one LLVM module and verifies it before printing or object emission.
+Clang is used only to link the emitted object. Products/sums/pattern matching
+remain the next core language milestone.
+
+Library migration verification: the archive builds, all eight library FiveAM
+checks pass, and the migrated core's 21 FiveAM checks plus twelve differential test
+groups pass. The linker-boundary test verifies a native object is passed to
+Clang and that the temporary file is removed. A complete =make -k test= run
+passes the other suites and reproduces only the two frontend IDE assertions
+recorded above.
+
+** Compiler input convention
+The compiler consumes expanded percent forms: =%function= declarations and
+concrete primitives such as =%+-primitive-i64= and =%=-primitive-i64=. Surface
+=function= and protocol operators belong to Base/macro expansion. The new core
+accepts these percent declarations/primitives directly; it does not treat bare
+=function= or =+= as built-ins. Existing core =let= and the planned built-in =if=
+remain unprefixed. The implementation itself continues to import/use Base.
+
+** Direct numeric bounds and signed evaluation
+The =core.bounds= wrapper module has been removed. Literal range checking reads
+Base's =minBound=/=maxBound= at its use site, with unsigned accumulation only to
+represent the magnitude of the signed minimum. Checked literal payloads are
+stored as i64. Evaluation carries i64 values
+through arguments, local bindings, arithmetic, and results. Signed division
+checks use i64 =minBound= and -1 directly. LLVM's constant API receives unsigned
+bits at the lowering boundary.

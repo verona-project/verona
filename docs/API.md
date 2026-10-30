@@ -13,6 +13,42 @@ front-end functions below are suitable for tools, tests, and embeddings; the
 semantic and LLVM layers are advanced APIs for analyzers and alternate
 backends.
 
+## Compiler and evaluator written in Verona
+
+The separate [`projects/compiler`](../projects/compiler/README.md) bootstrap
+implements a small typed core with `unit`, `bool`, and `i64`, explicit functions,
+lexical `let`, built-in `if`, and typed `%OP-primitive-i64` primitives. Its
+compiler input uses `%function`, matching expanded Base declarations. Build with
+`make compiler-core`; use `build/compiler/verona-core check FILE`, `eval FILE`,
+`emit-llvm FILE`, or `compile FILE -o EXECUTABLE`. Both paths share name resolution
+and type checking; the evaluator prints a signed result, while the compiled
+program returns that result modulo 256 as process status. Its grammar and limits
+are documented in the package README. The existing language/API below is unchanged.
+
+## libc I/O, process, and error bindings
+
+The bundled libc library exports `libc.stdio:ferror`,
+`libc.filesystem:mkstemp`/`unlink`, and `libc.process:waitpid` using its C ABI
+types. `libc.errno:errno-pointer` selects Darwin's `__error` or Linux's
+`__errno_location` and returns borrowed thread-local `c-int` storage. Read it
+immediately after failure and use the error constants in `libc.constants`.
+`mkstemp` mutates a writable `XXXXXX` template and returns an open descriptor;
+`waitpid` writes a raw POSIX status. See the
+[libc reference](../projects/libc/README.md) for ownership and return conventions.
+The core compiler, formatter, and project tool import these shared bindings.
+
+## LLVM library written in Verona
+
+[`projects/llvm`](../projects/llvm/README.md) binds the pinned LLVM 23 C API using
+ordinary Verona foreign declarations with distinct opaque handles. Modules cover
+core builders/types, named enums, verification, target machines, native object
+emission, and explicit resource ownership. Build with `make llvm-bindings` and
+validate with `make test-llvm-bindings`. Consumers add its `src` and Base to
+module paths and link `(library "LLVM")` in the pinned development shell.
+The core compiler builds and verifies modules through this library; `emit-llvm`
+uses LLVM's printer and native compilation emits an object through LLVM, then
+uses Clang for linking. The package README specifies the API and lifetimes.
+
 ## Command-line compiler
 
 `verona compile SOURCE [options]` compiles one root `.vrn` module and prints

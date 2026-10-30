@@ -1,0 +1,208 @@
+(import base)
+(import llvm.types :as t)
+
+; Thin LLVM 23 C API bindings. See README for ownership and pointer-array rules.
+(base:external-function context-create "LLVMContextCreate" () t:context-ref)
+
+(base:external-function context-dispose "LLVMContextDispose" (t:context-ref) void)
+
+(base:external-function
+  module-create
+  "LLVMModuleCreateWithNameInContext"
+  ((pointer u8) t:context-ref)
+  t:module-ref)
+
+(base:external-function module-dispose "LLVMDisposeModule" (t:module-ref) void)
+
+(base:external-function message-create "LLVMCreateMessage" ((pointer u8)) (pointer u8))
+
+(base:external-function message-dispose "LLVMDisposeMessage" ((pointer u8)) void)
+
+(base:external-function module-string "LLVMPrintModuleToString" (t:module-ref) (pointer u8))
+
+(base:external-function
+  module-print-file
+  "LLVMPrintModuleToFile"
+  (t:module-ref (pointer u8) (pointer (pointer u8)))
+  t:boolean)
+
+(base:external-function module-target "LLVMSetTarget" (t:module-ref (pointer u8)) void)
+
+(base:external-function int-type "LLVMIntTypeInContext" (t:context-ref u32) t:type-ref)
+
+(base:external-function void-type "LLVMVoidTypeInContext" (t:context-ref) t:type-ref)
+
+(base:external-function pointer-type "LLVMPointerTypeInContext" (t:context-ref u32) t:type-ref)
+
+(base:external-function
+  function-type
+  "LLVMFunctionType"
+  (t:type-ref (pointer t:type-ref) u32 t:boolean)
+  t:type-ref)
+
+(base:external-function const-int "LLVMConstInt" (t:type-ref u64 t:boolean) t:value-ref)
+
+(base:external-function
+  function-add
+  "LLVMAddFunction"
+  (t:module-ref (pointer u8) t:type-ref)
+  t:value-ref)
+
+(base:external-function function-type-of "LLVMGlobalGetValueType" (t:value-ref) t:type-ref)
+
+(base:external-function function-param "LLVMGetParam" (t:value-ref u32) t:value-ref)
+
+(base:external-function linkage-set "LLVMSetLinkage" (t:value-ref i32) void)
+
+(base:external-function
+  block-append
+  "LLVMAppendBasicBlockInContext"
+  (t:context-ref t:value-ref (pointer u8))
+  t:block-ref)
+
+(base:external-function block-parent "LLVMGetBasicBlockParent" (t:block-ref) t:value-ref)
+
+(base:external-function builder-create "LLVMCreateBuilderInContext" (t:context-ref) t:builder-ref)
+
+(base:external-function builder-dispose "LLVMDisposeBuilder" (t:builder-ref) void)
+
+(base:external-function
+  builder-position
+  "LLVMPositionBuilderAtEnd"
+  (t:builder-ref t:block-ref)
+  void)
+
+(base:external-function builder-block "LLVMGetInsertBlock" (t:builder-ref) t:block-ref)
+
+(base:external-function build-ret "LLVMBuildRet" (t:builder-ref t:value-ref) t:value-ref)
+
+(base:external-function build-br "LLVMBuildBr" (t:builder-ref t:block-ref) t:value-ref)
+
+(base:external-function
+  build-cond-br
+  "LLVMBuildCondBr"
+  (t:builder-ref t:value-ref t:block-ref t:block-ref)
+  t:value-ref)
+
+(base:external-function build-unreachable "LLVMBuildUnreachable" (t:builder-ref) t:value-ref)
+
+(base:external-function
+  build-add
+  "LLVMBuildAdd"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-sub
+  "LLVMBuildSub"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-mul
+  "LLVMBuildMul"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-sdiv
+  "LLVMBuildSDiv"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-and
+  "LLVMBuildAnd"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-icmp
+  "LLVMBuildICmp"
+  (t:builder-ref i32 t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-zext
+  "LLVMBuildZExt"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-trunc
+  "LLVMBuildTrunc"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-call
+  "LLVMBuildCall2"
+  (t:builder-ref t:type-ref t:value-ref (pointer t:value-ref) u32 (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-phi
+  "LLVMBuildPhi"
+  (t:builder-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  phi-incoming
+  "LLVMAddIncoming"
+  (t:value-ref (pointer t:value-ref) (pointer t:block-ref) u32)
+  void)
+
+(base:external-function
+  build-global-string
+  "LLVMBuildGlobalStringPtr"
+  (t:builder-ref (pointer u8) (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  verify-module
+  "LLVMVerifyModule"
+  (t:module-ref i32 (pointer (pointer u8)))
+  t:boolean)
+
+(export
+  context-create
+  context-dispose
+  module-create
+  module-dispose
+  message-create
+  message-dispose
+  module-string
+  module-print-file
+  module-target
+  int-type
+  void-type
+  pointer-type
+  function-type
+  const-int
+  function-add
+  function-type-of
+  function-param
+  linkage-set
+  block-append
+  block-parent
+  builder-create
+  builder-dispose
+  builder-position
+  builder-block
+  build-ret
+  build-br
+  build-cond-br
+  build-unreachable
+  build-add
+  build-sub
+  build-mul
+  build-sdiv
+  build-and
+  build-icmp
+  build-zext
+  build-trunc
+  build-call
+  build-phi
+  phi-incoming
+  build-global-string
+  verify-module)

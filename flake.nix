@@ -47,6 +47,7 @@
               packages = [
                 pkgs.autoconf
                 pkgs.automake
+                pkgs.python3
                 pkgs.cmake
                 lisp
                 pkgs.llvmPackages_23.llvm

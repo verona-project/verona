@@ -17,7 +17,7 @@ project_dist_files = $(shell cd $(verona_srcdir) && find projects -type f ! -nam
 verona_project_files = $(shell find $(verona_srcdir)/projects/project $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
 verona_formatter_files = $(shell find $(verona_srcdir)/projects/formatter/src $(verona_srcdir)/projects/foundation/src $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
 verona_lisp_files = $(shell find $(verona_srcdir)/src -type f -name '*.lisp' -print)
-EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/IDE-WORKFLOWS.md \
+EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/compiler-foundations.org docs/compiler-in-verona.org docs/IDE-WORKFLOWS.md \
 	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/verona-server.el editors/emacs/README.md flake.lock flake.nix license $(project_dist_files) readme.md \
 	scripts src tests $(cl_llvm_files) verona.asd
 
@@ -27,6 +27,7 @@ help:
 	@printf '%s\n' 'Verona development commands:'
 	@printf '%s\n' '  make bootstrap      Check and run the Verona package-environment tutorial'
 	@printf '%s\n' '  make build          Build Verona and its standalone tools'
+	@printf '%s\n' '  make release RELEASE_VERSION=X.Y.Z  Build a versioned release zip'
 	@printf '%s\n' '  make project        Build the Verona project management tool'
 	@printf '%s\n' '  make install        Install Verona and its tools (configure --prefix=/path)'
 	@printf '%s\n' '  make test           Run every test runner'
@@ -38,6 +39,11 @@ help:
 	@printf '%s\n' '  make test-bounded   Build and run Base bounded unit tests'
 	@printf '%s\n' '  make formatter      Build the Verona source formatter'
 	@printf '%s\n' '  make test-formatter Run formatter unit, CLI, and reader-equivalence tests'
+	@printf '%s\n' '  make llvm-bindings  Build the Verona LLVM binding library'
+	@printf '%s\n' '  make test-llvm-bindings Run native LLVM binding acceptance tests'
+	@printf '%s\n' '  make test-compiler-support Run compiler support unit tests'
+	@printf '%s\n' '  make compiler-core  Build the compiler and evaluator written in Verona'
+	@printf '%s\n' '  make test-compiler-core Compare core evaluation with native LLVM execution'
 	@printf '%s\n' '  make test-swank     Run optional Swank adapter integration tests'
 	@printf '%s\n' '  make test-editor    Run optional Emacs integration tests'
 	@printf '%s\n' '  make test-workflows Run all compiler, Swank and editor acceptance tests'
@@ -78,7 +84,7 @@ install-exec-local: $(VERONA_EXECUTABLE) $(VERONA_PROJECT) $(VERONA_FORMATTER)
 uninstall-local:
 	$(RM) '$(DESTDIR)$(bindir)/verona' '$(DESTDIR)$(bindir)/verona-project' '$(DESTDIR)$(bindir)/verona-fmt'
 
-test: test-frontend test-llvm test-compiler test-verona test-bounded test-foundation test-formatter
+test: test-frontend test-llvm test-compiler test-verona test-bounded test-foundation test-formatter test-compiler-core test-llvm-bindings test-compiler-support
 
 test-frontend:
 	cd $(verona_srcdir) && $(SBCL) --script tests/run.lisp
@@ -120,7 +126,7 @@ test-formatter: formatter
 	@$(SBCL) --script $(verona_srcdir)/projects/formatter/tests/run-integration.lisp $(abs_top_builddir)/build/formatter/verona-fmt
 
 clean-local:
-	$(RM) $(VERONA_EXECUTABLE) $(VERONA_FORMATTER) $(VERONA_PROJECT) $(VERONA_SERVER) $(VERONA_SERVER).tmp
+	$(RM) $(VERONA_EXECUTABLE) $(VERONA_FORMATTER) $(VERONA_PROJECT) $(VERONA_SERVER) $(VERONA_SERVER).tmp $(VERONA_CORE) $(VERONA_LLVM_LIBRARY) $(VERONA_LLVM_TESTS)
 
 # Optional editor tests; Emacs and SLIME are not compiler dependencies.
 .PHONY: test-editor test-workflows
@@ -137,3 +143,53 @@ test-editor:
 test-editor-live: $(VERONA_SERVER)
 	@test -n "$(SLIME_DIR)" || { echo 'Set SLIME_DIR to the installed SLIME directory'; exit 1; }
 	cd $(verona_srcdir) && $(EMACS) -Q --batch -L "$(SLIME_DIR)" -L editors/emacs -l tests/editor-live.el -f ert-run-tests-batch-and-exit
+
+# Release inputs are versioned in a temporary copy, including submodules.
+PYTHON = python3
+RELEASE_VERSION = $(PACKAGE_VERSION)
+RELEASE_OUTPUT = $(abs_top_builddir)/build/releases
+.PHONY: release test-release
+release:
+	$(PYTHON) $(verona_srcdir)/scripts/release.py --version "$(RELEASE_VERSION)" --output "$(RELEASE_OUTPUT)"
+
+test-release:
+	$(PYTHON) $(verona_srcdir)/tests/test-release.py
+
+# The independently designed core compiler/evaluator is bootstrapped by Verona.
+VERONA_CORE = $(abs_top_builddir)/build/compiler/verona-core
+verona_core_files = $(shell find $(verona_srcdir)/projects/compiler/src $(verona_srcdir)/projects/llvm/src $(verona_srcdir)/projects/foundation/src $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
+.PHONY: compiler-core test-compiler-core
+compiler-core: $(VERONA_CORE)
+
+$(VERONA_CORE): $(VERONA_EXECUTABLE) $(verona_srcdir)/projects/compiler/verona.build $(verona_core_files)
+	@$(MKDIR_P) $(@D)
+	cd $(verona_srcdir)/projects/compiler && $(VERONA_EXECUTABLE) build verona-core $(@D)
+
+test-compiler-core: compiler-core
+	$(SBCL) --script $(verona_srcdir)/tests/run-core.lisp $(VERONA_CORE)
+	$(PYTHON) $(verona_srcdir)/projects/compiler/tests/test_core.py $(VERONA_CORE)
+
+# LLVM bindings are independently consumable Verona source modules.
+VERONA_LLVM_LIBRARY = $(abs_top_builddir)/build/llvm/libverona-llvm.a
+VERONA_LLVM_TESTS = $(abs_top_builddir)/build/llvm/llvm-tests
+verona_llvm_files = $(shell find $(verona_srcdir)/projects/llvm/src $(verona_srcdir)/projects/base/src -type f -name '*.vrn' -print)
+.PHONY: llvm-bindings test-llvm-bindings
+llvm-bindings: $(VERONA_LLVM_LIBRARY)
+
+$(VERONA_LLVM_LIBRARY): $(VERONA_EXECUTABLE) $(verona_srcdir)/projects/llvm/verona.build $(verona_llvm_files)
+	@$(MKDIR_P) $(@D)
+	cd $(verona_srcdir)/projects/llvm && $(VERONA_EXECUTABLE) build verona-llvm $(@D)
+
+$(VERONA_LLVM_TESTS): $(VERONA_EXECUTABLE) $(verona_srcdir)/projects/llvm/verona.build $(verona_llvm_files) $(verona_srcdir)/projects/llvm/tests/llvm.tests.vrn
+	@$(MKDIR_P) $(@D)
+	cd $(verona_srcdir)/projects/llvm && $(VERONA_EXECUTABLE) build llvm-tests $(@D)
+
+test-llvm-bindings: $(VERONA_LLVM_TESTS)
+	$(SBCL) --script $(verona_srcdir)/tests/run-llvm-bindings.lisp $(VERONA_LLVM_TESTS)
+
+# Compiler support unit tests use the regular Verona testing library.
+.PHONY: test-compiler-support
+test-compiler-support: $(VERONA_EXECUTABLE)
+	@$(MKDIR_P) $(abs_top_builddir)/build/compiler
+	cd $(verona_srcdir)/projects/compiler && $(VERONA_EXECUTABLE) build compiler-tests $(abs_top_builddir)/build/compiler
+	$(abs_top_builddir)/build/compiler/compiler-tests

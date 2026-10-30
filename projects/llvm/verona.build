@@ -1,0 +1,13 @@
+(static-library verona-llvm
+  (root llvm)
+  (module-path "src")
+  (module-path "../base/src")
+  (optimize 2))
+
+(executable llvm-tests
+  (root llvm.tests)
+  (module-path "src")
+  (module-path "tests")
+  (module-path "../base/src")
+  (library "LLVM")
+  (optimize 2))

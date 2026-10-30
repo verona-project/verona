@@ -242,6 +242,12 @@ The [Foundation package](projects/foundation/README.md) adds explicit allocators
 arenas, UTF-8 strings, binary data, checked numeric/time utilities, and statically
 specialized collections. Run `make test-foundation` for its native suite.
 
+The [Verona LLVM library](projects/llvm/README.md) binds the pinned LLVM 23 C API
+with typed handles, instruction builders, verification, and native object output.
+Run `make llvm-bindings` and `make test-llvm-bindings`. The
+[compiler and evaluator written in Verona](projects/compiler/README.md) use this
+library for LLVM lowering; Clang performs native linking.
+
 The [Verona formatter](projects/formatter/README.md) is a Foundation-based native
 application. Build it with `make formatter`; run `make test-formatter` for its
 unit, command-line, and compiler-reader equivalence suites.
@@ -295,3 +301,62 @@ disclaimer.
 
 The name is inspired by Verona, the city in Italy—and by Verona, one of the
 author's cats.
+
+## Building a release
+
+Initialize the pinned submodules, enter `nix develop`, and configure the build:
+
+```sh
+git submodule update --init --recursive
+nix develop
+autoreconf -fi
+./configure
+make release RELEASE_VERSION=0.2.0
+```
+
+Python 3 is also required for release packaging. Alternatively, run
+`python3 scripts/release.py --version 0.2.0` directly inside the development
+shell. `RELEASE_OUTPUT=/absolute/path` overrides the make target's output directory.
+The default is `build/releases/verona-{version}-{git-hash}.zip`, using the first
+12 characters of HEAD. Existing archives are never overwritten. After creating
+the zip, the script prints its path and MD5, SHA-1, and SHA-256 checksums.
+
+The release builds fresh executables for the current host and includes Base, libc,
+Foundation, and testing as source packages. Imported library modules compile with
+the program; separate library artifacts are built only when explicitly requested
+by the user. The archive also includes compiler and CL-LLVM
+sources needed by the IDE, the license, and `install.sh`. Versions in ASDF,
+configure metadata, and released tool/library manifests are synchronized in a
+temporary build copy; the checkout and submodules remain untouched. The server
+launcher shares the release's `VERSION` metadata. The compiler reports the release
+version with `verona --version`; tool manifests carry the same version.
+The archive reflects current working files; use a clean checkout when publishing
+so that its Git hash identifies the released sources.
+
+After extracting the archive, install with Bash or Zsh:
+
+```sh
+export VERONA_SOURCE_DIR="$HOME/.local/share/verona"
+export VERONA_LIBRARY_DIR="$HOME/.local/lib/verona"
+bash install.sh "$HOME/.local/bin"
+# Or: zsh install.sh "$HOME/.local/bin"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+`make test-release` checks packaging and both installers without a native toolchain.
+
+Both environment variables must be absolute destinations; the installer creates
+missing directories. The optional binary destination defaults to `/usr/local/bin`
+and must be writable. Source packages retain their sibling layout for module
+paths. No prebuilt library archives are built or installed. `VERONA_LIBRARY_DIR`
+is created for explicitly built libraries and stores the release version and Git
+revision. Keep the variables exported in your shell profile. Installation copies files and replaces
+matching installed files without removing unrelated files.
+
+These are host-specific releases, not self-contained toolchains: provide LLVM 23
+runtime libraries through the host's library search path and a C linker/archiver
+(`VERONA_LINKER` and `VERONA_AR` can select them). Nix-built executables retain
+references to their Nix store dependencies; the zip does not bundle or relocate
+them. The optional IDE also needs SBCL and Swank; its compiler root is
+`$VERONA_SOURCE_DIR/compiler`, and its bindings are available at
+`$VERONA_SOURCE_DIR/CL-LLVM` (set `VERONA_CL_LLVM` accordingly).

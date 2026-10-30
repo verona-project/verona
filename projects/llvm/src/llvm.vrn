@@ -1,0 +1,58 @@
+(import base)
+(import llvm.types :as t)
+(import llvm.core :as c)
+(import llvm.enums :as enum)
+(import llvm.target)
+
+(base:type session (product (context t:context-ref) (module t:module-ref) (builder t:builder-ref)))
+
+(base:function create ((name (pointer u8))) session
+  (let ((context t:context-ref (c:context-create)))
+    (session context (c:module-create name context) (c:builder-create context))))
+
+(base:function destroy ((owner session)) unit
+  (do
+    (c:builder-dispose (field owner builder))
+    (c:module-dispose (field owner module))
+    (c:context-dispose (field owner context))
+    unit))
+
+; Non-aborting verification. OUT-MESSAGE must be disposed even on success if nonnull.
+(base:function verify ((owner session) (message (pointer (pointer u8)))) i32
+  (c:verify-module (field owner module) enum:verify-return-status message))
+
+; Fixed-arity helpers only borrow their stack arrays for the duration of C calls.
+(base:function call-0 ((builder t:builder-ref) (function t:value-ref)) t:value-ref
+  (let ((unused t:value-ref function))
+    (c:build-call builder (c:function-type-of function) function (& unused) 0 "")))
+
+(base:function call-1 ((builder t:builder-ref) (function t:value-ref) (a t:value-ref)) t:value-ref
+  (c:build-call builder (c:function-type-of function) function (& a) 1 ""))
+
+(base:function call-2
+  ((builder t:builder-ref) (function t:value-ref) (a t:value-ref) (b t:value-ref)) t:value-ref
+  (let ((args (tuple t:value-ref t:value-ref) (tuple a b)))
+    (c:build-call
+      builder
+      (c:function-type-of function)
+      function
+      (cast (pointer t:value-ref) (cast (pointer void) (& args)))
+      2
+      "")))
+
+(base:function call-3
+  ((builder t:builder-ref) (function t:value-ref) (a t:value-ref) (b t:value-ref) (d t:value-ref))
+  t:value-ref
+  (let ((args (tuple t:value-ref t:value-ref t:value-ref) (tuple a b d)))
+    (c:build-call
+      builder
+      (c:function-type-of function)
+      function
+      (cast (pointer t:value-ref) (cast (pointer void) (& args)))
+      3
+      "")))
+
+(base:function incoming ((phi t:value-ref) (value t:value-ref) (block t:block-ref)) unit
+  (do (c:phi-incoming phi (& value) (& block) 1) unit))
+
+(export session create destroy verify call-0 call-1 call-2 call-3 incoming)

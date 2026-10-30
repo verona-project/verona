@@ -181,3 +181,23 @@
                                                      :ignore-error-status t)))))
       (dolist (path (list source library shared c-source executable shared-executable))
         (when (probe-file path) (delete-file path)))))
+
+(test libc-stream-temporary-file-and-process-bindings
+  (let* ((root (asdf:system-source-directory :verona))
+         (source (merge-pathnames "tests/native/libc-io-process.vrn" root))
+         (driver (verona.compiler:make-compiler-driver
+                  :search-paths (list (merge-pathnames "projects/base/src/" root)
+                                      (merge-pathnames "projects/libc/src/" root)))))
+    (uiop:with-temporary-file (:pathname executable)
+      (verona.compiler:compile-root driver source :artifact-kind :executable :output executable)
+      (let ((template (merge-pathnames (format nil "verona-libc-~A-XXXXXX" (gensym "TEST-"))
+                                       (uiop:temporary-directory))))
+        (multiple-value-bind (output diagnostics status)
+            (uiop:run-program (list (namestring executable) (namestring template))
+                              :output :string :error-output :string :ignore-error-status t)
+          (is (= 0 status) "libc binding fixture returned ~D: ~A" status diagnostics)
+          (is (string= "" output))
+          (is (string= "" diagnostics))
+          (is (null (directory (concatenate 'string (subseq (namestring template) 0
+                                                           (- (length (namestring template)) 6)) "*")))
+              "mkstemp file was not removed by unlink"))))))

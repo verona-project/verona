@@ -1,0 +1,40 @@
+(import base)
+
+; LLVM 23 C enum values; all are 32-bit C integers.
+(base:constant int-eq i32 32)
+
+(base:constant int-ne i32 33)
+
+(base:constant int-sgt i32 38)
+
+(base:constant int-sge i32 39)
+
+(base:constant int-slt i32 40)
+
+(base:constant int-sle i32 41)
+
+(base:constant linkage-internal i32 8)
+
+(base:constant verify-return-status i32 2)
+
+(base:constant codegen-default i32 2)
+
+(base:constant reloc-pic i32 2)
+
+(base:constant code-model-default i32 0)
+
+(base:constant object-file i32 1)
+
+(export
+  int-eq
+  int-ne
+  int-sgt
+  int-sge
+  int-slt
+  int-sle
+  linkage-internal
+  verify-return-status
+  codegen-default
+  reloc-pic
+  code-model-default
+  object-file)

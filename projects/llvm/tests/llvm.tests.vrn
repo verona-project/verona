@@ -1,0 +1,161 @@
+(import base)
+(import llvm)
+(import llvm.types :as t)
+(import llvm.core :as ir)
+(import llvm.target :as target)
+(import llvm.enums :as enum)
+
+(base:external-function puts "puts" ((pointer u8)) i32)
+
+(base:function release ((message (pointer u8))) unit
+  (match (target:is-null (cast (pointer void) message))
+    (true unit)
+    (false (do (ir:message-dispose message) unit))))
+
+(base:function verified ((owner llvm:session)) bool
+  (let
+    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+     (result i32 (llvm:verify owner (& message))))
+    (do (release message) (match result (0 true) (_ false)))))
+
+(base:function invalid-module () bool
+  (let
+    ((owner llvm:session (llvm:create "invalid"))
+     (ty t:type-ref (ir:void-type (field owner context)))
+     (function t:value-ref
+       (ir:function-add (field owner module) "unterminated" (ir:function-type ty (& ty) 0 0))))
+    (do
+      (ir:block-append (field owner context) function "entry")
+      (let
+        ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+         (result i32 (llvm:verify owner (& message)))
+         (has-message
+           bool
+           (match (target:is-null (cast (pointer void) message)) (true false) (false true))))
+        (do (release message) (llvm:destroy owner) (match result (0 false) (_ has-message)))))))
+
+(base:function invalid-triple () bool
+  (let
+    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+     (out t:target-ref (cast t:target-ref (target:null-pointer)))
+     (result i32 (target:from-triple "not-a-real-architecture-unknown-none" (& out) (& message)))
+     (has-message
+       bool
+       (match (target:is-null (cast (pointer void) message)) (true false) (false true))))
+    (do (release message) (match result (0 false) (_ has-message)))))
+
+(base:function program () llvm:session
+  (let
+    ((owner llvm:session (llvm:create "binding-test"))
+     (context t:context-ref (field owner context))
+     (module t:module-ref (field owner module))
+     (builder t:builder-ref (field owner builder))
+     (i64 t:type-ref (ir:int-type context 64))
+     (i32 t:type-ref (ir:int-type context 32))
+     (params (tuple t:type-ref t:type-ref) (tuple i64 i64))
+     (sum
+       t:value-ref
+       (ir:function-add
+         module
+         "sum"
+         (ir:function-type i64 (cast (pointer t:type-ref) (cast (pointer void) (& params))) 2 0))))
+    (do
+      (ir:builder-position builder (ir:block-append context sum "entry"))
+      (ir:build-ret
+        builder
+        (ir:build-add builder (ir:function-param sum 0) (ir:function-param sum 1) "sum"))
+      (let
+        ((main t:value-ref (ir:function-add module "main" (ir:function-type i32 (& i32) 0 0)))
+         (start t:block-ref (ir:block-append context main "entry"))
+         (yes t:block-ref (ir:block-append context main "yes"))
+         (no t:block-ref (ir:block-append context main "no"))
+         (end t:block-ref (ir:block-append context main "end")))
+        (do
+          (ir:builder-position builder start)
+          (let
+            ((value
+               t:value-ref
+               (llvm:call-2 builder sum (ir:const-int i64 20 0) (ir:const-int i64 22 0))))
+            (do
+              (ir:build-cond-br
+                builder
+                (ir:build-icmp builder enum:int-eq value (ir:const-int i64 42 0) "")
+                yes
+                no)
+              (ir:builder-position builder yes)
+              (ir:build-br builder end)
+              (ir:builder-position builder no)
+              (ir:build-br builder end)
+              (ir:builder-position builder end)
+              (let ((phi t:value-ref (ir:build-phi builder i64 "result")))
+                (do
+                  (llvm:incoming phi value yes)
+                  (llvm:incoming phi (ir:const-int i64 0 0) no)
+                  (ir:build-ret builder (ir:build-trunc builder phi i32 ""))
+                  unit))))))
+      owner)))
+
+(base:function emit ((owner llvm:session) (path (pointer u8)) (bad-path (pointer u8))) bool
+  (let
+    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+     (machine t:machine-ref (target:native-machine (field owner module) (& message))))
+    (do
+      (release message)
+      (match (target:is-null (cast (pointer void) machine))
+        (true false)
+        (false
+          (let
+            ((bad-message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+             (bad
+               i32
+               (target:emit-file
+                 machine
+                 (field owner module)
+                 bad-path
+                 enum:object-file
+                 (& bad-message)))
+             (diagnostic
+               bool
+               (match (target:is-null (cast (pointer void) bad-message)) (true false) (false true)))
+             (good-message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+             (good
+               i32
+               (target:emit-file
+                 machine
+                 (field owner module)
+                 path
+                 enum:object-file
+                 (& good-message))))
+            (do
+              (release bad-message)
+              (release good-message)
+              (target:machine-dispose machine)
+              (match bad (0 false) (_ (match good (0 diagnostic) (_ false)))))))))))
+
+(base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (match argc
+    (3
+      (match (invalid-module)
+        (false (do (puts "LLVM verifier did not reject an unterminated block") 1))
+        (true
+          (match (invalid-triple)
+            (false (do (puts "LLVM target lookup did not return a diagnostic") 1))
+            (true
+              (let
+                ((owner llvm:session (program))
+                 (ok
+                   bool
+                   (match (verified owner)
+                     (true
+                       (emit owner (deref (pointer-offset argv 1)) (deref (pointer-offset argv 2))))
+                     (false false))))
+                (do
+                  (llvm:destroy owner)
+                  (match ok
+                    (true
+                      (do
+                        (puts
+                          "LLVM bindings: verification, target errors, calls, phi, and object emission passed")
+                        0))
+                    (false (do (puts "LLVM binding smoke test failed") 1))))))))))
+    (_ 2)))

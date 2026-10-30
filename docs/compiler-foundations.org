@@ -1,0 +1,155 @@
+#+TITLE: Foundations for the Verona Compiler and Evaluator
+#+DATE: 2026-10-29
+#+STARTUP: overview
+
+* Purpose and handoff
+This document records the foundation recommendations accepted in discussion for
+a compiler and evaluator written in Verona. Load it in another chat together
+with [[file:compiler-in-verona.org][the initial compiler plan]]. The first support layer and its tests are now
+implemented; see the implementation record below.
+
+The goal is our own compiler and evaluator, not a port of the entire Common
+Lisp implementation. The existing compiler bootstraps the new implementation.
+The implementation may use existing Verona modules, macros, pointers, and
+libraries even when those features are outside the new compiler's initial
+accepted language subset.
+
+Read repository instructions before making changes, including AGENT.md and
+/Users/dias/.codex/RTK.md. Prefix shell commands with rtk.
+
+* Existing foundations to reuse
+- projects/foundation/ provides allocators, arenas, byte buffers, UTF-8 strings,
+  arrays, dictionaries, sets, checked numeric helpers, and structured errors.
+- projects/libc/ provides low-level C ABI declarations for file access, process
+  execution, memory, and other POSIX facilities on Darwin and Linux.
+- Foundation collections currently use macro specialization and explicit layout
+  sizes and alignments. Do not assume automatic layout discovery is available.
+- The existing toolchain uses pinned LLVM dependencies. Inspect the current
+  build configuration when implementing native output.
+
+These observations came from the library README files during discussion.
+Recheck current source and documentation before implementation; they may change.
+
+* Collections and representation
+- Use arrays for syntax nodes, analyzed nodes, instructions, and evaluation stacks.
+- Use dictionaries for symbol lookup.
+- Intern identifiers and refer to them through numeric IDs.
+- Store nodes in arrays and connect them through numeric IDs rather than pointers
+  into growable storage. IDs remain useful across relocation, provided the node
+  indexing scheme preserves them.
+- Keep collection ownership explicit. Copying a descriptor does not copy its
+  backing storage or create a second owner.
+- Centralize manual layout definitions and verify their ABI sizes and alignments.
+  Compiler-supported layout queries would be a useful prerequisite improvement,
+  but their implementation is not yet a decided requirement.
+
+* Memory: mix allocation strategies
+The user explicitly requested mixing allocation strategies. Do not impose one
+arena or one allocation policy on all compiler and evaluator data.
+
+Pass allocators explicitly where practical and choose them by lifetime and use.
+
+| Data                              | Suggested strategy                         |
+|-----------------------------------+--------------------------------------------|
+| Temporary parsing/analysis data    | Scratch arenas reset after a phase         |
+| Syntax and typed representation    | Compilation arena retained while needed    |
+| Interned names/reusable definitions | Session allocator across evaluations      |
+| Evaluator frames and local values | Stack storage or a growable frame array    |
+| Resizable buffers and collections  | General allocator reclaiming old storage   |
+| Files and native handles          | Explicit cleanup separate from allocation |
+
+Foundation's allocator interface supports choosing system or arena allocation
+for collections. Start with the existing implementations; introduce additional
+allocation strategies only when their need is established.
+
+** Lifetime rules
+- References must not outlive their storage.
+- Copy or promote anything escaping scratch storage into longer-lived storage.
+- Reset an arena only after every client of its allocations has finished.
+- Keep allocator contexts at stable addresses and alive for their users.
+- Do not retain pointers into arrays across operations that may move storage.
+- Release nested owned resources explicitly: Foundation collections store shallow
+  values and do not run element destructors.
+- Close files and release native handles even when an arena will reclaim memory.
+
+The allocation table is a starting recommendation. Choose exact ownership
+boundaries as the compiler representation and evaluator develop. A session
+allocator does not imply that a garbage collector is required.
+
+* Source text and diagnostics
+- Reuse Foundation byte buffers and UTF-8 strings.
+- Represent source spans with a file ID and byte offsets.
+- Retain source buffers as long as spans or borrowed text require them.
+- Calculate line and column information when reporting diagnostics.
+- Keep file IDs, node IDs, and interned-name IDs conceptually distinct.
+
+* File and native support layer
+** File access
+Wrap existing libc declarations with a small compiler-facing interface:
+- Read a complete source file into memory.
+- Write output files.
+- Print diagnostics.
+
+Handle I/O failures and cleanup explicitly. Foundation strings are not necessarily
+NUL-terminated; conversions for C paths and arguments need owned, terminated
+buffers and must reject embedded NUL where inappropriate.
+
+** Native code generation
+The accepted starting suggestion is to emit textual LLVM IR and invoke the
+pinned toolchain to produce native artifacts. This postpones implementing direct
+LLVM API bindings in Verona.
+
+Exact tool commands, target configuration, and artifact handling still need to
+be designed and checked against the repository's current toolchain.
+
+** Process execution
+Wrap libc process functions to launch tools with explicit argument lists and
+collect their exit status. Do not build shell command strings from paths or
+arguments. Decode native process status rather than treating raw wait status as
+an exit code.
+
+* Suggested first implementation task
+Add regular tests that:
+1. Reads a source file.
+2. Stores source spans in an array.
+3. Interns names in a dictionary.
+4. Prints a source diagnostic.
+5. Releases memory and closes resources using the selected ownership strategies.
+
+These validate the basic support layer independently of the reader. Include
+focused failure checks where appropriate, especially allocation and file errors.
+
+* Open implementation decisions
+- Exact compiler project location and module boundaries.
+- Stable node-ID and source-file-ID representations.
+- Identifier hashing and interning ownership.
+- Concrete scratch, compilation, and session lifetime boundaries.
+- Evaluator frame storage and limits.
+- Whether layout queries should be added before building custom collections.
+- Minimal file/process wrapper APIs and their error representation.
+- Exact LLVM invocation and native linking flow.
+
+Resolve these incrementally. The user prefers short implementation steps and
+gathering further information as work proceeds.
+
+* Implementation record
+Reusable support modules live beside the existing compiler in projects/compiler/:
+- =core.source= reads a size-limited source file into caller-owned Data and closes
+  every opened file, including on allocation and I/O errors.
+- =core.span= defines file/start/length/name spans and their Foundation array.
+- =core.names= interns copied byte spellings into stable numeric IDs using a
+  Foundation dictionary and a caller-owned arena for key storage.
+
+Run =make test-compiler-support= in the pinned Nix development shell. Named tests
+use the existing Verona testing library, with their modules and runner under
+projects/compiler/tests/. There are no separate support-check applications.
+Tests cover sizes/alignment, array and dictionary growth, stable IDs, copied
+keys, source bytes and file limits, missing files, directory reads, and successive
+allocation failures. Injected allocators verify balanced allocation/release counts.
+General allocation owns resizable source/dictionary buffers; separate arenas own
+spans and retained names in the mixed-allocation tests.
+
+The existing core pipeline remains as recorded in compiler-in-verona.org. Moving
+it to interned identifiers and explicit file IDs is a later step. Scratch arenas
+and reusable evaluator sessions should be introduced when those lifetimes exist.
+The existing LLVM C API library supersedes the earlier textual-IR suggestion.
