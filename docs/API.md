@@ -27,6 +27,10 @@ integers with an optional sign, and semicolon comments. Use `build/compiler/vero
 and type checking; the evaluator prints a signed result, while the compiled
 program returns that result modulo 256 as process status. Its grammar and limits
 are documented in the package README. The existing language/API below is unchanged.
+Core locals use `(let ((NAME VALUE) ...) BODY)` with inferred types; optional
+`(NAME TYPE VALUE)` annotations require exact equality. Semantic errors are
+collected across independent functions and block both execution paths. Type
+mismatches include expected/actual types and relevant declaration locations.
 
 ## libc I/O, process, and error bindings
 
