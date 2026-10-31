@@ -19,7 +19,10 @@ The separate [`projects/compiler`](../projects/compiler/README.md) bootstrap
 implements a small typed core with `unit`, `bool`, and `i64`, explicit functions,
 lexical `let`, built-in `if`, and typed `%OP-primitive-i64` primitives. Its
 compiler input uses `%function`, matching expanded Base declarations. Build with
-`make compiler-core`; use `build/compiler/verona-core check FILE`, `eval FILE`,
+`make compiler-core`; `build/compiler/verona-core read FILE` prints the separate
+S-expression tree with source spans and interned identifiers without checking
+integer ranges or language forms. The reader accepts ASCII tokens, decimal
+integers with an optional sign, and semicolon comments. Use `build/compiler/verona-core check FILE`, `eval FILE`,
 `emit-llvm FILE`, or `compile FILE -o EXECUTABLE`. Both paths share name resolution
 and type checking; the evaluator prints a signed result, while the compiled
 program returns that result modulo 256 as process status. Its grammar and limits
