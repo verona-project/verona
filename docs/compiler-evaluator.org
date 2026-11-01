@@ -1,0 +1,226 @@
+#+TITLE: Evaluator for the Initial Verona Subset
+#+DATE: 2026-10-31
+#+STARTUP: overview
+
+* Purpose and handoff
+This document records the evaluator recommendations accepted by the user for
+a compiler and evaluator written in Verona. Load it alongside:
+- [[file:compiler-in-verona.org][Initial compiler and evaluator scope]]
+- [[file:compiler-foundations.org][Foundations and allocation strategies]]
+- [[file:compiler-reader.org][Reader and syntax representation]]
+- [[file:compiler-type-checking.org][Name resolution and type checking]]
+
+The evaluator implementation and validation are recorded below.
+Read repository instructions before implementation, including AGENT.md and
+/Users/dias/.codex/RTK.md. Prefix shell commands with rtk.
+
+* Design direction
+Start with a tree-walking evaluator over the resolved, typed representation.
+Use explicit execution stacks rather than recursively evaluating through the
+host language's call stack.
+
+#+begin_example
+Checked typed program + entry function + arguments + execution options
+  -> evaluator -> typed value or structured failure
+#+end_example
+
+The evaluator consumes the same analyzed representation used by native code
+generation. Name lookup and type checking happen before evaluation. Never
+execute a program containing semantic errors.
+
+The evaluator should become a reliable reference for language behavior and
+may eventually support compile-time execution for macros. Macro execution is
+outside the initial implementation.
+
+* Initial scope
+- Runtime values: unit, bool, i64.
+- Immutable local bindings and lexical scope.
+- Integer arithmetic and comparisons.
+- Conditional expressions.
+- Direct named function calls, including recursion and mutual recursion.
+
+Defer bytecode, JIT compilation, closures, and tail-call optimization.
+Do not introduce modules, native calls, mutation, or other deferred source
+language features merely because the implementation uses existing Verona
+libraries that provide them.
+
+* Runtime values
+Keep runtime values distinct from syntax and typed expression nodes.
+Represent unit, bool, and i64 explicitly, preserving the expected operand and
+result types when implementing primitives.
+
+Concrete value representation remains an implementation decision. Invariants
+violated by malformed typed input are internal errors, distinct from ordinary
+language runtime failures.
+
+* Local slots and call frames
+Assign parameters and local bindings slot indices within each function.
+Resolved references access their assigned slots without runtime name lookup.
+Slot assignment may be recorded during analysis or in a small preparation pass.
+
+Each call frame stores its function identity and local values, plus enough
+execution information to resume its caller and report a useful call stack.
+Recursive calls get independent frames and slots.
+
+Evaluate a binding initializer before installing its value. Preserve the
+resolution phase's sequential-binding and shadowing rules through slot IDs.
+
+* Explicit execution state
+Use:
+- A call-frame stack.
+- A value stack for intermediate results.
+- A stack of pending evaluation steps, including continuations for unfinished
+  expressions.
+
+This permits deeply nested expressions and recursive Verona calls without
+depending on native evaluator recursion. Define frame/value/pending-step stack
+boundaries so completion or failure cannot leave stale execution state.
+
+Use indices or other stable references when stacks can grow; do not retain
+pointers into arrays across growth. Exact frame and continuation layouts remain
+to be designed.
+
+* Expression execution
+Implement incrementally:
+1. Literal values and local-slot reads.
+2. Immutable bindings.
+3. Integer arithmetic and comparisons.
+4. Conditional expressions.
+5. Function calls and returns.
+
+Evaluate function arguments from left to right, completing each before starting
+the next. Apply the same explicit operand order to primitive operations.
+For a conditional, evaluate its condition and then only the selected branch.
+Both branches have already been checked by the type checker.
+
+Execution scheduling on a last-in-first-out pending-step stack must preserve
+these rules; do not accidentally reverse operand or argument evaluation order.
+
+* Primitive semantics
+Centralize primitive execution and follow the shared language rules:
+- Arithmetic on i64 wraps at the type's width where specified in the initial plan.
+- Division by zero produces a runtime failure.
+- Signed division overflow produces a runtime failure.
+- Integer comparisons return bool.
+- No implicit numeric conversions occur.
+
+Implement wrapping behavior deliberately rather than assuming host arithmetic
+or conversion behavior matches it. Check invalid division cases before invoking
+host division. Exact supported primitive names, arities, and signed division
+rounding rules must be settled consistently with the language and compiler plans.
+
+Native lowering must implement these same rules. Share semantic definitions
+and behavioral fixtures where useful; direct reuse of evaluator implementation
+code by the backend is not required.
+
+* Results and diagnostics
+Evaluation returns either:
+- A typed runtime value.
+- A structured failure.
+
+Language runtime failures include the failing expression's source span and a
+call stack. Preserve call-site information for useful diagnostics.
+Distinguish language failures from execution-limit exhaustion, allocation
+failures, and internal invariant violations.
+
+Retain the checked program and its source information for repeated evaluation.
+Do not confuse the evaluator's full i64 result with a native process exit code;
+the main/exit-status convention remains a separate language/driver decision.
+
+* Allocation and cleanup
+Follow the foundations plan's mixed allocation strategies.
+- Keep reusable program data separate from per-run execution storage.
+- Use stack storage or growable arrays for frames and intermediate values.
+- Choose scratch/general allocation according to actual storage lifetimes.
+- Release execution storage on success and failure.
+- Leave the analyzed program reusable after either outcome.
+
+With the initial scalar-only values, runtime values do not own nested heap
+objects. Revisit value ownership when adding products, sums, or other values
+that require additional storage.
+
+* Optional execution limits
+Support optional step and call-depth limits to stop runaway evaluation in tests
+and eventually compile-time execution.
+
+Limit exhaustion is distinct from a language runtime error. Define what counts
+as a step and when depth is checked so limits are predictable and testable.
+Default limits and the options interface remain undecided. These initial limits
+do not constitute a complete resource-control design for future macro execution.
+
+* First milestone and validation
+Evaluate factorial and mutually recursive functions successfully.
+Add focused checks for:
+- Literals, local slots, sequential bindings, and shadowing.
+- Left-to-right argument evaluation, observable through which failing argument
+  is reported first when the subset has no side effects.
+- Selected and unselected conditional branches, including an unselected branch
+  containing an operation that would fail if executed.
+- Arithmetic boundaries and wrapping behavior.
+- Division failures and their source locations/call stacks.
+- Recursive calls and deep expression nesting using explicit stacks.
+- Optional step/depth limit exhaustion.
+- Repeated runs, including runs after failure, without stale execution state or
+  leaked per-run storage.
+
+Use these behavioral fixtures for comparison with native compilation when that
+path becomes available.
+
+* Next implementation decisions
+1. Confirm the typed-program interface and primitive inventory.
+2. Define value, slot, frame, and continuation representations.
+3. Specify evaluator entry points and structured outcomes.
+4. Specify step counting, depth limits, and cleanup ownership.
+5. Implement expression forms incrementally and validate factorial.
+
+Resolve details incrementally. The user prefers short steps and gathering
+further information as implementation proceeds.
+
+* Implementation record
+=projects/compiler/src/core.eval.vrn= now executes the shared checked tape with
+explicit call-frame, tagged-value, local-slot, and pending-step arrays. A small
+preparation pass assigns compact per-function slots to resolved binder IDs without
+modifying the checked program. Binding initializers complete before slot installation.
+Frames record function/call-site IDs and local/value/pending boundaries; recursive
+calls have independent slots. Balanced pumping uses bounded host depth rather than
+recursing through source expressions or Verona calls.
+
+The reusable =run= entry accepts a checked context, function ID, borrowed typed
+arguments, =options(steps, depth)=, and an allocator. Zero disables either limit;
+the CLI uses no step limit and a depth limit of 512 including the entry frame.
+One step is one pending dispatch, checked before dispatch. Entry setup and slot
+preparation do not count. A literal entry consumes two steps, literal and return.
+The package README documents each continuation and the ownership contract.
+
+Structured outcomes distinguish success, division by zero, signed overflow,
+step/depth exhaustion, storage failure (with Foundation status), and internal
+invariant failure. Runtime failures retain expression IDs and call-site frames.
+All execution buffers except the transferred trace are destroyed before return;
+=destroy= releases that trace on success or failure. The CLI formats diagnostics,
+destroys the outcome and invocation arena, then returns status 70. The same checked
+program remains reusable after any result.
+
+The established primitive inventory remains binary i64 +, -, *, /, =, <, <=, >,
+and >= through expanded typed primitive names. Wrapping arithmetic explicitly
+operates on unsigned bits; guarded signed division truncates toward zero.
+Unit, bool, and i64 have distinct runtime tags. Existing native/evaluator behavioral
+fixtures continue to cover shared semantics.
+
+Named evaluator tests in =tests/test_eval.vrn= cover exact step/depth boundaries,
+3,000 recursive calls without depth limits, 2,000 directly constructed checked
+expression layers beyond the checker's independent nesting limit, repeated runs
+after runtime failure, typed entry arguments, and successive allocation failures.
+Run =make test-compiler-support= and =make test-compiler-core= in the pinned Nix
+shell. Native runtime source diagnostics and macro execution remain deferred.
+
+** Verification
+In the pinned Nix shell, =make test-compiler-support= passes all 18 named groups,
+including the four evaluator groups. =make test-compiler-core= passes all 21
+FiveAM checks and 17 differential/driver groups, including exact runtime source
+and call-site locations. Repository and compiler-submodule whitespace checks pass.
+The broader =make test-frontend= passes 1326/1328 checks and reproduces the two
+previously recorded =IDE-INSPECTION-SELECTS-EXPANSION-SUBTREES= failures.
+
+The subsequent IDE inspection fix resolves those two frontend assertions.
+=make test-frontend= now passes all 1338 checks, including the added nested-subtree
+regression checks; inspection uses cached expansions without rerunning macros.

@@ -32,6 +32,14 @@ Core locals use `(let ((NAME VALUE) ...) BODY)` with inferred types; optional
 collected across independent functions and block both execution paths. Type
 mismatches include expected/actual types and relevant declaration locations.
 
+The reusable core evaluator executes with explicit stacks and tagged scalar values.
+`core.eval:run` accepts a checked context, entry function, typed arguments, optional
+step/depth limits, and an allocator. Its structured outcome distinguishes runtime,
+limit, allocation, and invariant failures, with source IDs and call frames. Release
+every outcome with `core.eval:destroy`; the checked program remains reusable after
+failure. The CLI retains its 512-frame depth limit. See the package README for
+step counting and ownership.
+
 ## libc I/O, process, and error bindings
 
 The bundled libc library exports `libc.stdio:ferror`,
