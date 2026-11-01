@@ -1,0 +1,206 @@
+#+TITLE: Incremental Language Expansion for the Verona Compiler
+#+DATE: 2026-11-01
+#+STARTUP: overview
+
+* Purpose and handoff
+This document records the incremental feature recommendations accepted by the
+user for a compiler and evaluator written in Verona. Load it alongside:
+- [[file:compiler-in-verona.org][Initial compiler and evaluator scope]]
+- [[file:compiler-foundations.org][Foundations and allocation strategies]]
+- [[file:compiler-reader.org][Reader and syntax representation]]
+- [[file:compiler-type-checking.org][Name resolution and type checking]]
+- [[file:compiler-evaluator.org][Evaluator design]]
+- [[file:compiler-code-generation.org][Code generation]]
+
+The modules milestone is implemented in projects/compiler/; see the implementation
+record below. Later milestones remain sequential follow-up work.
+Read repository instructions before implementation, including AGENT.md and
+/Users/dias/.codex/RTK.md. Prefix shell commands with rtk.
+
+* Direction and sequence
+Expand the initial working subset incrementally:
+1. Modules.
+2. Product types, sum types, and pattern matching.
+3. Generics through explicit specialization.
+4. Protocols with static dispatch.
+5. Macros executed by the evaluator.
+
+At every stage, the evaluator and native compiler share the same resolved
+behavior. Extend analysis, runtime values, evaluation, and native lowering
+together where a feature requires it. Keep previously agreed semantics intact.
+
+This is a design plan, not a requirement to reproduce every behavior of the
+existing Common Lisp implementation. Inspect existing syntax and libraries
+before deciding compatibility and concrete surface forms.
+
+* Modules
+Start with:
+- Explicit imports and exports.
+- Qualified names.
+- Stable declaration identities across modules.
+- Loading each module once per session.
+- Clear diagnostics for import cycles, initially rejecting them.
+
+Distinguish module identity from a spelling used to import or qualify it. Define
+module search and identity rules so the same module is not loaded twice through
+different paths. Preserve declaration and source identities across dependencies.
+
+Decide export visibility, unqualified-name conflicts, qualified lookup, loading
+order, and failure handling before implementation. Keep imports explicit during
+the initial macro implementation.
+
+Defer separate compilation and persistent caching. Loading once per session does
+not require a persistent build cache.
+
+** Milestone
+Import a module and call one of its exported functions through both execution
+paths. Check private-name access, missing imports/exports, conflicts, repeated
+imports, and cycle diagnostics.
+
+* Product types, sum types, and pattern matching
+Add these before advanced generics and macros. They provide useful library data
+structures, syntax values, and evaluator data.
+
+Specify construction, field access, case payloads, and matching rules. Extend
+the typed representation and runtime values, and choose native layouts consistent
+with the selected target. Define ownership/allocation for aggregate values using
+the mixed allocation strategies in the foundations plan.
+
+Pattern matching needs explicit rules for case coverage, binding scopes, and
+invalid or overlapping patterns. Exact initial pattern forms and exhaustiveness
+policy remain to be decided.
+
+** Milestone
+Evaluate and compile a result-like sum value with pattern matching. Include
+product construction/access and case payload checks as focused coverage.
+
+* Generics through explicit specialization
+Start with explicitly supplied type arguments. Resolve each use to a concrete
+specialization at compile time.
+
+- Cache specializations by generic declaration ID and concrete type arguments.
+- Give specializations stable identities within the compilation/session.
+- Support calls between specializations, including recursive calls.
+- Detect expansion that keeps generating new concrete types without bound.
+
+Track specializations that are in progress so ordinary recursion can reference
+an existing specialization instead of triggering repeated expansion. Distinguish
+that recursion from unbounded generation of new specialization keys.
+
+Settle generic parameter syntax, substitution rules, checking stages, and growth
+limits before implementation. Do not assume a finite cache can by itself detect
+all unbounded specialization; define a practical diagnostic/limit policy.
+
+Defer implicit type-argument inference and more advanced generic behavior until
+explicit specialization works reliably.
+
+** Milestone
+Specialize an identity function for two concrete types, with evaluator/native
+agreement. Check specialization reuse and recursion separately.
+
+* Protocols with static dispatch
+Start with named operations and explicit implementations for concrete types.
+
+- Require one unambiguous implementation for each operation/type combination.
+- Resolve operation calls statically to concrete implementations.
+- Add protocol requirements to generic functions after concrete dispatch works.
+- Check requirements when specializing generic functions.
+
+Specify which types determine implementation selection, signature compatibility,
+implementation visibility across modules, and duplicate/conflict handling.
+Do not let import order silently select an implementation.
+
+Defer runtime dispatch and overlapping implementations.
+
+** Milestone
+Call a protocol-constrained generic function using two concrete implementations.
+Check missing, duplicate, and incompatible implementations with useful locations.
+
+* Macros executed by the evaluator
+Expose syntax values representing:
+- Identifiers.
+- Lists.
+- Literals.
+- Source locations and expansion origins.
+
+Evaluate macro functions during compilation. Feed their output through normal
+expansion, syntax analysis, name resolution, and type checking before execution
+or native lowering. Macro evaluation is not permission to bypass static checks.
+
+Begin with expression macros. Add top-level declaration expansion afterward,
+with an explicitly defined expansion and declaration-collection order.
+
+** Hygiene from the start
+Generated bindings must not accidentally capture names at the invocation site.
+Define lexical identity and syntax context rather than relying only on interned
+identifier spelling. Distinguish generated names, invocation-site syntax, and
+macro-definition-site references.
+
+The exact hygiene model and any deliberate capture mechanism remain design
+decisions. Preserve context through syntax construction and expansion rather
+than attempting to add hygiene only after a spelling-based macro API is established.
+
+** Expansion diagnostics and execution lifetime
+- Preserve origins so errors can identify the macro invocation and generated form.
+- Retain definition locations where useful in expansion traces.
+- Give compile-time execution its own allocation lifetime and execution limits.
+- Copy/promote returned syntax out of temporary evaluator storage before cleanup.
+- Define expansion-depth or work limits as well as evaluator limits to catch
+  repeated expansion that does not terminate.
+
+Keep the initial compile-time capability surface small and explicit. Exact
+syntax APIs, available operations, and limits remain to be specified.
+
+** Imports and dependency discovery
+Keep imports explicit in the first macro implementation. Defer macros that
+introduce imports or change module dependencies until expansion order and module
+loading are well defined.
+
+** Milestone
+Expand a small binding or conditional macro safely. Verify it with conflicting
+names at the call site, definition-site references, malformed output, expansion
+errors, execution limits, and evaluator/native agreement after expansion.
+
+* Validation approach
+For each stage:
+1. Add focused analysis and diagnostic checks.
+2. Exercise the feature through the evaluator.
+3. Exercise the same behavior through native compilation.
+4. Retain fixtures for earlier stages and the original scalar subset.
+
+Compare full results and failure behavior using the shared harness from the
+code-generation plan. Do not depend on native process exit codes to encode every
+language value.
+
+* Decisions to resolve incrementally
+- Module identity, search rules, exports, and name conflicts.
+- Structured-value ownership, layouts, and match coverage rules.
+- Generic syntax, substitution, recursion, and specialization limits.
+- Protocol selection keys, visibility, and coherence rules.
+- Hygienic syntax contexts and macro construction APIs.
+- Top-level expansion order, compile-time capabilities, and resource limits.
+
+The user prefers short steps and gathering further information as work proceeds.
+Treat the milestones as sequential review points rather than designing or
+implementing the entire expanded language in one pass.
+
+* Modules implementation record
+The first expansion milestone adds file-relative =(%import PATH :as ALIAS)=,
+explicit =(%export NAME ...)=, and qualified =ALIAS:NAME= calls. Functions are
+private by default, unqualified names stay local, aliases are unique per file,
+and only the root module supplies the entry main. Imports do not re-export names.
+Canonical realpath identities reuse modules across relative spellings, symlinks,
+and dependency diamonds; active loads reject cycles. All dependency bodies are
+checked. A session-owned tape and source-range table retain stable declaration
+identities and original dependency locations through evaluation and LLVM lowering.
+See projects/compiler/README.md for exact syntax, ownership, ordering, and limits.
+
+Products, sums, and pattern matching are the next sequential review point.
+
+Validation in the pinned Nix development shell (=nix develop path:.=):
+- =make test-compiler-core=: 33 FiveAM checks and 22 differential/driver groups pass,
+  including module reuse, visibility, cycles, limits, and native execution at both levels.
+- =make test-compiler-support=: all 18 named tests pass.
+- =make test-frontend=: 1348 checks pass.
+- =make test-llvm=: 86 checks pass.
+The module example at projects/compiler/examples/modules/main.vrn evaluates to 42.

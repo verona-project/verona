@@ -32,6 +32,14 @@ Core locals use `(let ((NAME VALUE) ...) BODY)` with inferred types; optional
 collected across independent functions and block both execution paths. Type
 mismatches include expected/actual types and relevant declaration locations.
 
+Core modules use `(%import math.vrn :as math)`, `(%export answer)`, and qualified
+calls such as `(math:answer)`. Imports resolve relative to the importing file;
+canonical paths (including symlink resolution) identify modules loaded once per
+invocation. Functions are private by default, unqualified calls remain local,
+and duplicate aliases, invalid exports, and import cycles are rejected. Only the
+root module supplies the entry `main`. Both execution paths retain dependency
+source locations. See the package README for visibility, ordering, and limits.
+
 The reusable core evaluator executes with explicit stacks and tagged scalar values.
 `core.eval:run` accepts a checked context, entry function, typed arguments, optional
 step/depth limits, and an allocator. Its structured outcome distinguishes runtime,

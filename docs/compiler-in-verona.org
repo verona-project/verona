@@ -202,3 +202,12 @@ stored as i64. Evaluation carries i64 values
 through arguments, local bindings, arithmetic, and results. Signed division
 checks use i64 =minBound= and -1 directly. LLVM's constant API receives unsigned
 bits at the lowering boundary.
+
+** File modules
+The first milestone from =compiler-language-expansion.org= is now implemented:
+explicit file-relative =%import= declarations with aliases, private-by-default
+functions and explicit =%export= declarations, and qualified calls. Canonical paths identify modules loaded
+once per invocation; cycles and duplicate aliases are errors. Only the root file
+supplies the entry main. The evaluator and native compiler share resolved IDs and
+dependency source locations. See projects/compiler/README.md for the exact rules.
+Products, sums, and pattern matching are the next expansion milestone.

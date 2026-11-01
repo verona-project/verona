@@ -57,6 +57,14 @@
     (is (string= "" output))
     (is (not (null (search "only %function declarations" diagnostics))))))
 
+(test rejects-unexpanded-module-declarations
+  (dolist (form '("(import missing.vrn :as m)" "(export main)"))
+    (multiple-value-bind (output diagnostics status)
+        (invoke "check" (concatenate 'string form "(%function main () i64 0)"))
+      (is (= 2 status))
+      (is (string= "" output))
+      (is (not (null (search "only %function declarations" diagnostics)))))))
+
 (test signed-minimum-through-runtime-bindings
   (multiple-value-bind (output diagnostics status)
       (invoke "eval" "(%function identity ((x i64)) i64 (let ((y i64 x)) y))
@@ -64,5 +72,21 @@
     (is (= 0 status))
     (is (string= (format nil "-9223372036854775808~%") output))
     (is (string= "" diagnostics))))
+
+(test module-exports-and-private-names
+  (uiop:with-temporary-file (:pathname library :stream stream :type "vrn")
+    (write-string "(%export answer)(%function answer () i64 (hidden))(%function hidden () i64 42)" stream)
+    (finish-output stream)
+    (let ((prefix (format nil "(%import ~A :as library)" (file-namestring library))))
+      (multiple-value-bind (output diagnostics status)
+          (invoke "eval" (concatenate 'string prefix "(%function main () i64 (library:answer))"))
+        (is (= 0 status))
+        (is (string= (format nil "42~%") output))
+        (is (string= "" diagnostics)))
+      (multiple-value-bind (output diagnostics status)
+          (invoke "check" (concatenate 'string prefix "(%function main () i64 (library:hidden))"))
+        (is (= 2 status))
+        (is (string= "" output))
+        (is (not (null (search "not exported" diagnostics))))))))
 
 (unless (run! :core) (uiop:quit 1))
