@@ -108,7 +108,7 @@ git -C projects/project remote set-url --push origin git@github.com:verona-proje
 git -C editors/emacs remote set-url --push origin git@github.com:verona-project/verona-mode.el.git
 ```
 
-Commit and push component changes in their own repository first, then update the
+Commit component changes in their own repository first, then update the
 corresponding submodule reference in Verona.
 
 From the repository root, bootstrap and configure the Autotools build. Generated
