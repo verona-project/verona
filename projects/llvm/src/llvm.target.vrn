@@ -57,7 +57,8 @@
 
 ; On success the caller owns the machine. On failure OUT-MESSAGE owns an LLVM
 ; message. Both outputs start null; strings assigned here use LLVMCreateMessage.
-(base:function native-machine ((module t:module-ref) (out-message (pointer (pointer u8))))
+(base:function native-machine-with-optimization
+  ((module t:module-ref) (optimization i32) (out-message (pointer (pointer u8))))
   t:machine-ref
   (let
     ((triple (pointer u8) (default-triple))
@@ -83,7 +84,7 @@
                        triple
                        "generic"
                        ""
-                       enum:codegen-default
+                       optimization
                        enum:reloc-pic
                        enum:code-model-default)))
                   (do
@@ -103,6 +104,11 @@
                     machine)))
               (_ (do (core:message-dispose triple) (cast t:machine-ref (null-pointer)))))))))))
 
+; Preserve the original default for existing binding consumers.
+(base:function native-machine ((module t:module-ref) (out-message (pointer (pointer u8))))
+  t:machine-ref
+  (native-machine-with-optimization module enum:codegen-default out-message))
+
 (base:function null-pointer () (pointer void)
   (let ((zero usize 0)) (deref (cast (pointer (pointer void)) (cast (pointer void) (& zero))))))
 
@@ -121,5 +127,6 @@
   emit-file
   initialize-native
   native-machine
+  native-machine-with-optimization
   null-pointer
   is-null)

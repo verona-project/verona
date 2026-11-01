@@ -17,6 +17,8 @@
 
 (base:constant verify-return-status i32 2)
 
+(base:constant codegen-none i32 0)
+
 (base:constant codegen-default i32 2)
 
 (base:constant reloc-pic i32 2)
@@ -34,6 +36,7 @@
   int-sle
   linkage-internal
   verify-return-status
+  codegen-none
   codegen-default
   reloc-pic
   code-model-default

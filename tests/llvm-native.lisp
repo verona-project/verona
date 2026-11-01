@@ -220,3 +220,18 @@
               (function main () exit-code
                 (%trunc-primitive-i64-i32
                   (unwrap (field (response 0 (some 42)) value))))"))))
+
+(test base-cond-evaluates-tests-once-and-only-the-selected-body
+  (let* ((executable (native-test-path "program"))
+         (unit (compile-file
+                (make-compiler :search-paths (list #P"projects/base/src/"))
+                #P"projects/base/tests/base-cond-client.vrn")))
+    (unwind-protect
+         (progn
+           (verona.backend.llvm:build-executable
+            (compilation-unit-semantic-program unit) executable)
+           (is (= 42 (nth-value 2
+                       (uiop:run-program (list (namestring executable))
+                                         :output :string :error-output :string
+                                         :ignore-error-status t)))))
+      (when (probe-file executable) (delete-file executable)))))

@@ -1,0 +1,206 @@
+#+TITLE: Code Generation for the Verona Compiler
+#+DATE: 2026-10-31
+#+STARTUP: overview
+
+* Purpose and handoff
+This document records the code-generation recommendations accepted by the user
+for a compiler and evaluator written in Verona. Load it alongside:
+- [[file:compiler-in-verona.org][Initial compiler and evaluator scope]]
+- [[file:compiler-foundations.org][Foundations and allocation strategies]]
+- [[file:compiler-reader.org][Reader and syntax representation]]
+- [[file:compiler-type-checking.org][Name resolution and type checking]]
+- [[file:compiler-evaluator.org][Evaluator design]]
+
+Implementation status: the binding-based backend and native driver are implemented in
+projects/compiler; see the implementation decisions below.
+Read repository instructions before implementation, including AGENT.md and
+/Users/dias/.codex/RTK.md. Prefix shell commands with rtk.
+
+* Design direction
+Lower the shared resolved, typed program representation through the existing
+LLVM bindings written in Verona under projects/llvm. LLVM owns construction,
+verification, native object emission, and textual printing. Do not write LLVM
+IR syntax by hand. Link the generated object with the pinned native toolchain.
+
+#+begin_example
+Checked typed program -> Verona LLVM bindings -> LLVM module
+  -> binding verification -> native object emission -> linking -> executable
+#+end_example
+
+The evaluator and backend consume the same analyzed representation. Keep
+LLVM-specific blocks, values, names, and types in backend-owned structures.
+
+* Lowering contract
+Accept only programs with:
+- No remaining semantic errors.
+- Resolved function and binding IDs.
+- Concrete types for every expression.
+- Explicit primitive operations.
+- Source spans suitable for runtime diagnostics.
+
+The backend must not redo name lookup or make new source-language type decisions.
+Malformed analyzed input is an internal compiler error, not a source type error.
+
+* Initial value representations
+| Source type | Private LLVM representation |
+|-------------+-----------------------------|
+| i64         | i64                         |
+| bool        | i64, canonical zero/one     |
+| unit        | i64, canonical zero         |
+
+Preserve the existing binding backend's consistent internal value convention for
+parameters, results, bindings, calls, and conditionals. LLVM void is never an
+ordinary source-language value or a phi operand.
+
+Internal function conventions are separate from native C ABI conventions.
+The initial subset does not require a general foreign-function interface.
+
+* Functions and immutable bindings
+- Assign stable native names to FunctionId values, avoiding collisions with
+  runtime helpers and the platform entry point.
+- Emit function signatures before bodies, supporting forward and mutual calls.
+- Map immutable parameters and local slots to LLVM values.
+- Use stack storage only when needed rather than allocating every local by default.
+- Preserve lexical scope through resolved binding/slot IDs.
+
+Create each LLVM function once through the binding, then populate its body.
+This supports forward and mutual calls without duplicate declarations.
+
+* Control flow and expression lowering
+Lower a conditional into:
+1. Evaluation of the condition.
+2. A conditional branch to separate then/else blocks.
+3. Evaluation of only the selected branch at runtime.
+4. A merge block with a phi value when the expression has a runtime result.
+
+Track both the resulting value and the ending block of each lowered expression.
+Nested expressions may add blocks; phi inputs must name actual predecessor
+blocks rather than the initial branch blocks by assumption.
+
+Handle terminated paths explicitly. Runtime failure paths do not continue to
+the merge. Every emitted block needs a valid terminator.
+
+* Shared execution semantics
+- Emit argument computations in left-to-right source order.
+- Preserve operand order for primitive computations.
+- Execute only the selected conditional branch.
+- Do not insert implicit numeric conversions.
+- Emit wrapping integer operations without overflow assumptions such as nsw/nuw.
+- Guard division by zero and signed division overflow before division.
+
+Invalid division must branch to a failure path before LLVM division can execute.
+Confirm signed division rounding semantics match the evaluator before lowering.
+Use the same language rules and behavioral fixtures across both execution paths.
+
+Optimizations may transform implementation details, but observable results and
+failure ordering must remain consistent with the defined language semantics.
+
+* Runtime failure interface
+The guarded division helper receives two i64 operands and a pointer to retained
+source-location metadata. It checks zero and signed overflow before division.
+Failure blocks report the source location and category to stderr, call exit(70),
+and end with unreachable even if exit unexpectedly returns. LLVM's global-string
+builder copies source paths and positions without hand-written IR escaping.
+Native call-stack reporting remains deferred; the evaluator retains its explicit
+call stack.
+
+* Backend and driver separation
+The backend owns LLVM lowering through the Verona bindings. LLVM's printer owns
+textual emission for emit-llvm.
+The driver owns:
+- Selecting the pinned toolchain and target configuration.
+- Verifying generated IR.
+- Emitting native objects through the binding and linking with explicit argument lists.
+- Managing temporary files and final output paths.
+- Reporting tool failures and cleaning up resources.
+- Adding the native entry-point wrapper once the main convention is settled.
+
+Do not construct shell command strings from paths or source identifiers.
+Inspect current repository configuration and pinned LLVM documentation when
+choosing commands; exact invocations are not settled by this plan.
+
+Keep target triple, layout, compiler options, and runtime helper ABI consistent.
+The initial output goal is a native executable for the selected host target.
+
+* Entry point and result reporting
+The source main signature and mapping to a native process entry point still
+need to be settled alongside the initial language plan.
+
+Process exit codes cannot represent all i64 values. Use a result-reporting test
+harness to compare full values between compiled execution and the evaluator.
+Choose an unambiguous encoding for unit, bool, and i64 results and report runtime
+failures separately from successful values and tool failures.
+
+* First milestone and validation
+Compile and execute:
+- Factorial.
+- Mutually recursive functions.
+- Nested conditional expressions.
+
+Start with optimization disabled. Verify every generated module and compare
+shared fixtures against evaluator results.
+
+Include focused cases for:
+- Literals, parameters, bindings, and shadowing.
+- Calls and forward references.
+- Left-to-right failure ordering in arguments and primitive operands.
+- Unselected branches containing operations that would fail if executed.
+- Integer boundaries and wrapping arithmetic.
+- Division by zero and minimum-i64 divided by negative one.
+- Nested control flow and correct phi predecessor blocks.
+- Unit parameters/results/conditionals under the chosen convention.
+- Source locations in native runtime failures.
+- Verification, compilation, and linking failures with cleanup.
+
+Once unoptimized execution passes, test optimized builds, especially arithmetic
+boundaries, conditional execution, and division guards. Compare semantic results
+and failure kinds/locations rather than requiring identical evaluator/native
+diagnostic text or native call stacks.
+
+* Deferred work
+- Debug information.
+- Custom optimization passes.
+- Additional native artifact formats beyond the initial executable path.
+- Native call-stack reporting.
+
+* Next decisions
+1. Confirm the analyzed-program interface and primitive semantics.
+2. Settle unit lowering and function naming/signature conventions.
+3. Use backend-owned LLVM handles and the existing binding builders.
+4. Define runtime helpers and source-location metadata.
+5. Settle main and the full-value comparison harness.
+6. Select exact pinned-toolchain verification, compilation, and linking commands.
+7. Implement factorial and validate both unoptimized and optimized execution.
+
+Resolve details incrementally. The user prefers short steps and gathering
+further information as implementation proceeds.
+
+* Implementation decisions
+- Use the existing Verona LLVM binding for all module construction, verification,
+  object emission and IR printing. No hand-written IR writer, external opt
+  verifier, temporary IR files, or Clang IR-compilation stage remains.
+- The checked tape is the sole semantic input; function/binding IDs index LLVM
+  handles. The original private i64 representation for all core values is retained.
+- Create function signatures through the binding before populating bodies.
+  Nested conditionals use their actual final blocks as phi predecessors.
+- Division receives a module-owned location string. Failure blocks write the
+  location/category to stderr, exit(70), and end in unreachable.
+- main remains nullary and returns i64. compile preserves low-byte process status;
+  compile-report prints i64:SIGNED_DECIMAL and exits zero on success.
+- The driver verifies through LLVM, emits a private temporary object through the
+  native target-machine API, invokes Clang only to link, and removes the object.
+  VERONA_CORE_CLANG selects the linker executable.
+- -O0 uses LLVMCodeGenLevelNone; -O2 uses LLVMCodeGenLevelDefault. These select
+  target-machine code-generation optimizations, not an IR pass pipeline. Existing
+  native-machine consumers retain their default behavior.
+- Shared fixtures compare full signed results and failure kinds/locations at
+  both levels. Binding tests cover invalid modules, targets and object paths;
+  driver fixtures cover linking failure and temporary-object cleanup.
+
+* Validation
+Run make test-compiler-core and make test-llvm-bindings in the pinned LLVM 23
+Nix development shell. The compiler support, bootstrap LLVM and compiler-driver
+suites provide additional regression checks.
+
+Native stack traces, cross-compilation, debug information, custom optimization
+passes and additional artifact formats remain deferred.

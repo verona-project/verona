@@ -44,7 +44,7 @@ Cross-compilation and additional architectures are future additions.
 | `llvm.types` | Distinct opaque `context-ref`, `module-ref`, `type-ref`, `value-ref`, `block-ref`, `builder-ref`, `target-ref`, `machine-ref`, `layout-ref`; 32-bit `boolean` for LLVMBool |
 | `llvm.core` | Raw context/module/message management; integer, pointer and function types; functions and parameters; constants; blocks/builders; arithmetic, comparisons, calls, branches, phi nodes, casts and global strings; verification and LLVM's text printer |
 | `llvm.enums` | Named LLVM 23 C enum constants for predicates, linkage, verification and object generation |
-| `llvm.target` | Raw target/target-machine/layout operations plus `native-machine`, `null-pointer`, and `is-null` helpers |
+| `llvm.target` | Raw target/target-machine/layout operations plus `native-machine`, `native-machine-with-optimization`, `null-pointer`, and `is-null` helpers |
 | `llvm` | Owning `session`, `create`, `destroy`, `verify`, fixed-arity direct `call-0` through `call-3`, and single-edge phi `incoming` helper |
 
 Raw binding names use Verona spelling, for example `llvm.core:build-add` binds
@@ -92,7 +92,12 @@ To generate an object, obtain a machine with
 `llvm.target:emit-file(machine, module, path, llvm.enums:object-file, out-message)`.
 It attaches the host triple and data layout, uses generic CPU/default codegen
 optimization and PIC relocation, and returns a caller-owned machine. Link the
-object using the host linker. The compiler core demonstrates the full flow.
+object using the host linker. `native-machine-with-optimization(module, level,
+out-message)` accepts an explicit LLVM code-generation level; use
+`llvm.enums:codegen-none` for no optimization or `codegen-default` for the default.
+The original `native-machine` keeps its default behavior. These levels control
+native code generation, not an IR optimization pass pipeline. The compiler core
+demonstrates the full flow.
 
 ## Ownership and errors
 

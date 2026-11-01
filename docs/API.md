@@ -559,6 +559,7 @@ explicit. Unicode characters are not supported yet.
 | --- | --- |
 | `(let ((name Type initializer) ...) body)` | Introduces sequential immutable lexical bindings. Each initializer is resolved before its own name enters scope; a binding's address may be taken with `&`, but it cannot be assigned through its name. |
 | `(match value (pattern expression) ...)` | Exhaustive pattern match. Supports `true`, `false`, integer literals, `_`, bindings, and sum constructor patterns. `_` discards its value and cannot be referenced in the case expression. |
+| `(base:cond (TEST BODY...) ...)` | Imported Base macro over boolean matches. Tests run once from left to right; only the first true clause runs its nonempty body and returns its last value. A final literal `true` supplies a default. No clauses or no matching clause returns `unit`; all result paths must have the same type. All bodies are statically checked. |
 | `(return value)` | Return from the enclosing function. |
 | `(do expression...)` | Evaluate expressions in order and return the last value. |
 | `(& place)`, `(address-of place)` | Create a pointer to an addressable place. |

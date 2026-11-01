@@ -138,3 +138,36 @@
          (body (semantic-function-declaration-body main)))
     (is (typep body 'semantic-call))
     (is (typep (semantic-call-callee body) 'semantic-reference))))
+
+(defun compile-base-cond (expression &optional (result "i32"))
+  (uiop:with-temporary-file (:stream stream :pathname path :type "vrn")
+    (format stream "(import base :as b) (b:function choose () ~A ~A)" result expression)
+    (finish-output stream)
+    (compile-file (make-compiler :search-paths
+                                (list (asdf:system-relative-pathname :verona "projects/base/src/")))
+                  path)))
+
+(test base-cond-expands-through-an-import-alias
+  (let* ((unit (compile-base-cond "(b:cond (false 1) (true 2))"))
+         (program (compilation-unit-semantic-program unit))
+         (function (semantic-program-declaration program (first (unit-declarations unit)))))
+    (is (typep (semantic-function-declaration-body function) 'match-expression))))
+
+(test base-cond-permits-unit-fallthrough
+  (is (typep (compile-base-cond "(b:cond)" "unit") 'verona:compilation-unit))
+  (is (typep (compile-base-cond "(b:cond (false unit))" "unit") 'verona:compilation-unit)))
+
+(test-cases base-cond-preserves-static-type-checking
+  (boolean-tests
+   (signals verona:semantic-error (compile-base-cond "(b:cond (1 2) (true 3))")))
+  (matching-results
+   (signals type-mismatch-error (compile-base-cond "(b:cond (false true) (true 3))")))
+  (implicit-unit-fallthrough
+   (signals type-mismatch-error (compile-base-cond "(b:cond (false 1))")))
+  (unselected-bodies
+   (signals unresolved-name-error (compile-base-cond "(b:cond (true 1) (true missing))"))))
+
+(test-cases base-cond-rejects-malformed-clauses
+  (atom (signals verona::evaluator-error (compile-base-cond "(b:cond 1)")))
+  (empty-clause (signals verona::evaluator-error (compile-base-cond "(b:cond ())")))
+  (empty-body (signals verona::evaluator-error (compile-base-cond "(b:cond (true))"))))
