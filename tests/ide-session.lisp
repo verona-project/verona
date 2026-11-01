@@ -1464,6 +1464,28 @@
         (is (= 2 (length (getf body :steps))))
         (is (equal '("do" 1 2) (second (fourth (getf whole :after)))))))))
 
+(test ide-inspection-selects-nested-non-macro-subtrees
+  (let* ((store (verona.ide:make-session-store))
+         (id (verona.ide:create-session store (verona.ide:make-configuration)))
+         (text "(macro keep (x) x) (function f () i32 (do (do (keep 1) (keep 2)) (keep 3))) (function g () i32 (do (keep 4) (keep 5)))")
+         (source (verona.ide:open-buffer store id "nested-subtrees" text :module "nested-subtrees"))
+         (key (list "nested-subtrees" (verona.ide:source-id source))))
+    (verona.ide:evaluate-module store id source)
+    (let ((verona::*expansion-observer* (lambda (&rest args) (declare (ignore args)) (error "Query expanded macro"))))
+      (let ((inner (verona.ide:inspect-expansion store id key :offset (search "(do (keep 1" text)))
+            (outer (verona.ide:inspect-expansion store id key :offset (search "(do (do" text)))
+            (other (verona.ide:inspect-expansion store id key :offset (search "(do (keep 4" text))))
+        (is (equal '("do" 1 2) (getf inner :after)))
+        (is (= 2 (length (getf inner :steps))))
+        (is (equal '("do" ("do" 1 2) 3) (getf outer :after)))
+        (is (= 3 (length (getf outer :steps))))
+        (is (equal '("do" 4 5) (getf other :after)))
+        (is (= 2 (length (getf other :steps)))))
+      (dolist (mode '(:once :full))
+        (let ((surface (verona.ide:inspect-expansion store id key :offset (search "(do (keep 1" text) :mode mode)))
+          (is (equal '("do" ("keep" 1) ("keep" 2)) (getf surface :after)))
+          (is (null (getf surface :steps))))))))
+
 (test ide-session-store-survives-loading-into-a-running-server
   (multiple-value-bind (out err code)
       (uiop:run-program

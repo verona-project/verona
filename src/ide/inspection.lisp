@@ -122,13 +122,30 @@
 (defun inspection-subform-p (syntax form)
   (or (eq syntax form) (some (lambda (child) (inspection-subform-p syntax child)) (nav-elements form))))
 
-(defun inspection-selected-steps (selected steps)
+(defun inspection-subtree-steps (syntax steps)
   ;; Follow only transformations of the selected subtree, excluding siblings.
-  (let ((forms (list (first selected))) (result nil))
-    (dolist (step (member selected steps :test #'eq) (nreverse result))
+  (let ((forms (list syntax)) (result nil))
+    (dolist (step steps (nreverse result))
       (when (some (lambda (form) (inspection-subform-p (first step) form)) forms)
         (push step result)
         (push (second step) forms)))))
+
+(defun inspection-selected-steps (selected steps)
+  (inspection-subtree-steps (first selected) (member selected steps :test #'eq)))
+
+(defun inspection-matching-subform (syntax form)
+  (if (inspection-same-form-p syntax form) form
+      (some (lambda (child) (inspection-matching-subform syntax child)) (nav-elements form))))
+
+(defun inspection-cached-subform (syntax path steps)
+  ;; Lowering can copy a non-macro expression along with its containing declaration.
+  ;; Find that expression in the closest enclosing expansion, then use identity to
+  ;; follow its children's recorded steps. Never match across top-level forms.
+  (loop for ancestor in (reverse path)
+        thereis (loop for (input output) in steps
+                      thereis (and (nav-contains (first path) (nav-start input))
+                                   (inspection-same-form-p ancestor input)
+                                   (inspection-matching-subform syntax output)))))
 
 (defun inspection-lowering-step-p (step)
   "Recognize bootstrap lowering, retaining the surface invocation for display."
@@ -171,18 +188,17 @@ LIMIT is a shared node/character budget."
                                           (and (nav-contains (first path) (nav-start (first step)))
                                                (inspection-same-form-p before (first step))))
                                         all-steps)))
+           (cached-before (and before (eq mode :analysis) (null selected-step)
+                               (or (inspection-cached-subform before path all-steps) before)))
            (steps (if (not (eq mode :analysis))
                       (inspection-surface-steps selected-step all-steps mode)
                       (if selected-step
                       (inspection-selected-steps selected-step all-steps)
                       ;; A surrounding expression need not itself be a macro.
                       ;; Include expansions of its children in the result.
-                      (and before
-                           (remove-if-not
-                            (lambda (step) (inspection-subform-p (first step) before))
-                            all-steps)))))
+                      (and cached-before (inspection-subtree-steps cached-before all-steps)))))
            (after (if (eq mode :analysis)
-                      (or (and selected-step (first selected-step)) before)
+                      (or (and selected-step (first selected-step)) cached-before before)
                       (if steps (second (car (last steps))) before)))
            (availability (getf (query-product state :expanded-forms) :availability))
            (budget (cons limit nil)))
