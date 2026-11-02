@@ -44,6 +44,7 @@ help:
 	@printf '%s\n' '  make test-compiler-support Run compiler support unit tests'
 	@printf '%s\n' '  make compiler-core  Build the compiler and evaluator written in Verona'
 	@printf '%s\n' '  make test-compiler-core Compare core evaluation with native LLVM execution'
+	@printf '%s\n' '  make bootstrap-compiler Attempt recorded A/B/C self-hosting (language expansion pending)'
 	@printf '%s\n' '  make test-swank     Run optional Swank adapter integration tests'
 	@printf '%s\n' '  make test-editor    Run optional Emacs integration tests'
 	@printf '%s\n' '  make test-workflows Run all compiler, Swank and editor acceptance tests'
@@ -158,7 +159,7 @@ test-release:
 # The independently designed core compiler/evaluator is bootstrapped by Verona.
 VERONA_CORE = $(abs_top_builddir)/build/compiler/verona-core
 verona_core_files = $(shell find $(verona_srcdir)/projects/compiler/src $(verona_srcdir)/projects/llvm/src $(verona_srcdir)/projects/foundation/src $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
-.PHONY: compiler-core test-compiler-core
+.PHONY: compiler-core test-compiler-core bootstrap-compiler
 compiler-core: $(VERONA_CORE)
 
 $(VERONA_CORE): $(VERONA_EXECUTABLE) $(verona_srcdir)/projects/compiler/verona.build $(verona_core_files)
@@ -168,6 +169,7 @@ $(VERONA_CORE): $(VERONA_EXECUTABLE) $(verona_srcdir)/projects/compiler/verona.b
 test-compiler-core: compiler-core
 	$(SBCL) --script $(verona_srcdir)/tests/run-core.lisp $(VERONA_CORE)
 	$(PYTHON) $(verona_srcdir)/projects/compiler/tests/test_core.py $(VERONA_CORE)
+	$(PYTHON) $(verona_srcdir)/projects/compiler/tests/shared_suite.py $(VERONA_CORE)
 
 # LLVM bindings are independently consumable Verona source modules.
 VERONA_LLVM_LIBRARY = $(abs_top_builddir)/build/llvm/libverona-llvm.a
@@ -193,3 +195,7 @@ test-compiler-support: $(VERONA_EXECUTABLE)
 	@$(MKDIR_P) $(abs_top_builddir)/build/compiler
 	cd $(verona_srcdir)/projects/compiler && $(VERONA_EXECUTABLE) build compiler-tests $(abs_top_builddir)/build/compiler
 	$(abs_top_builddir)/build/compiler/compiler-tests
+
+# Self-hosting is a readiness gate until the implementation language is supported.
+bootstrap-compiler: $(VERONA_EXECUTABLE)
+	$(PYTHON) $(verona_srcdir)/projects/compiler/bootstrap.py --bootstrap $(VERONA_EXECUTABLE) --output $(abs_top_builddir)/build/self-hosting

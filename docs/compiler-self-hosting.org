@@ -1,0 +1,171 @@
+#+TITLE: Self-Hosting and Shared Validation for the Verona Compiler
+#+DATE: 2026-11-01
+#+STARTUP: overview
+
+* Purpose and handoff
+This document records the self-hosting and validation recommendations accepted
+by the user for a compiler and evaluator written in Verona. Load it alongside:
+- [[file:compiler-in-verona.org][Initial compiler and evaluator scope]]
+- [[file:compiler-foundations.org][Foundations and allocation strategies]]
+- [[file:compiler-reader.org][Reader and syntax representation]]
+- [[file:compiler-type-checking.org][Name resolution and type checking]]
+- [[file:compiler-evaluator.org][Evaluator design]]
+- [[file:compiler-code-generation.org][Code generation]]
+- [[file:compiler-language-expansion.org][Incremental language expansion]]
+
+The initial readiness tooling and shared fixtures are implemented; see the
+implementation record below. Full self-hosting is still pending.
+Read repository instructions before implementation, including AGENT.md and
+/Users/dias/.codex/RTK.md. Prefix shell commands with rtk.
+
+* Goal
+Reach self-hosting through reproducible milestones. The generated compiler must
+rebuild itself, and its evaluator and native execution paths must pass the agreed
+shared suite. Native self-compilation alone does not validate evaluation.
+
+Keep the existing Common Lisp compiler as a bootstrap and recovery tool.
+Removing it and tuning performance are later tasks.
+
+* Audit implementation requirements
+Inventory everything used by the new compiler's source and transitive libraries:
+- Language features and compile-time macros.
+- Collections, strings, and numeric operations.
+- Memory allocation and ownership operations.
+- File and process access.
+- Native bindings and ABI requirements.
+- Build configuration and runtime helpers.
+
+Turn this inventory into a self-hosting checklist. The initial scalar language
+subset must grow to cover the compiler's actual implementation requirements.
+Do not equate completing factorial with readiness to compile the whole compiler.
+
+Decide which dependencies are compiled from source, linked as native libraries,
+or supplied as host tools, and pin the versions used by the bootstrap.
+
+* Shared behavioral suite
+Each fixture specifies:
+- A source program and any module dependencies.
+- An entry function and arguments.
+- An expected typed value or expected failure.
+- Expected failure kind and relevant source locations where applicable.
+
+Run applicable fixtures through both:
+1. The evaluator over the checked program.
+2. Native compilation and execution of that program.
+
+Compare full values through a result-reporting harness; process exit codes cannot
+represent all i64 values. Distinguish language failures, resource-limit outcomes,
+tool failures, and internal compiler errors.
+
+Native and evaluator diagnostic formatting need not be identical. Native call
+stacks are deferred in the code-generation plan, so do not require them merely
+to match evaluator stack diagnostics.
+
+** Independent expectations
+Agreement between both execution paths is necessary but insufficient: both
+consume shared analysis and can agree on an incorrect interpretation.
+
+Keep explicit expected results and focused reader, resolution, and type-checking
+tests. Include invalid programs that must be rejected before execution.
+Inspect diagnostics and analyzed output where these provide independent evidence.
+
+** Coverage
+Retain fixtures for:
+- Scalar values, bindings, scope, calls, recursion, and conditional execution.
+- Arithmetic boundaries, wrapping, and invalid division.
+- Argument/operand evaluation order and runtime failure locations.
+- Modules, structured values, generics, and protocols as implemented.
+- Macro expansion, hygiene, and compile-time failures as implemented.
+- Repeated evaluator runs and execution-state cleanup.
+- Invalid syntax, names, types, and declarations.
+
+* Bootstrap stages
+Use the same new-compiler source revision for these stages:
+
+| Artifact   | Built by                                                        |
+|------------+-----------------------------------------------------------------|
+| Compiler A | Existing Common Lisp compiler compiling the new compiler source |
+| Compiler B | Compiler A compiling the new compiler source                    |
+| Compiler C | Compiler B compiling the same new compiler source               |
+
+Run the agreed shared suite with each stage. In particular, use each stage's
+evaluator and its native compilation path. Exercise macro execution separately
+when macros are available.
+
+B successfully building C demonstrates that the generated compiler can continue
+the bootstrap. Running C and its tests checks that the resulting artifact works;
+successful compilation alone is insufficient.
+
+* Reproducibility
+Fix and record:
+- Compiler and library source revisions, including relevant working-tree changes.
+- Dependency and host-tool versions.
+- Target and ABI configuration.
+- Build options, optimization level, and relevant environment settings.
+
+Build stages in separate output directories. Once output is deterministic,
+compare B and C artifacts. Before that, compare behavior and normalized generated
+IR while documenting differences such as embedded paths or metadata.
+
+Normalization must remove only known irrelevant differences. Preserve meaningful
+changes in instructions, constants, control flow, signatures, and runtime helpers.
+Behavioral agreement and artifact comparison complement one another; neither is
+a general proof of correctness.
+
+* Repeatable bootstrap command
+Provide one repeatable command or build target that:
+1. Checks prerequisites and records the selected inputs/toolchain.
+2. Builds Compiler A in its own directory.
+3. Runs A's evaluator and native-path shared tests.
+4. Uses A to build B, then runs B's shared tests on both paths.
+5. Uses B to build C, then runs C's shared tests on both paths.
+6. Performs the agreed B/C artifact or normalized-IR comparison.
+7. Reports success or the precise failing stage.
+
+Stop on a mismatch. Retain useful failure logs and generated IR without allowing
+stale stage outputs to count as a successful rebuild. Keep generated artifacts
+out of source control according to repository instructions.
+
+Start with one supported host target. Broaden operating-system, target, and
+optimization coverage after the bootstrap is reliable.
+
+* Milestones and completion criteria
+1. Compiler A compiles a small component of its own implementation.
+2. Compiler A compiles the complete new compiler into B.
+3. Compiler B compiles the same source into C.
+4. A, B, and C pass the agreed shared suite through evaluation and native execution.
+5. The bootstrap is repeatable with recorded inputs and understood comparisons.
+
+Declare self-hosting achieved when the generated compiler rebuilds itself and
+both execution paths pass the agreed suite. Report reproducibility status
+separately if exact artifact equality is not yet available.
+
+* Open decisions
+- Concrete self-hosting feature/dependency checklist.
+- First compiler component suitable for partial self-compilation.
+- Shared fixture format and full-value result protocol.
+- Bootstrap command name and stage-directory layout.
+- Initial supported host target and optimization settings.
+- Deterministic-output requirements and permitted IR normalization.
+- Exact suite required for the self-hosting milestone.
+
+Resolve these incrementally. The user prefers short steps and gathering further
+information as implementation proceeds.
+
+* Implementation record
+The initial audit and validation step lives in
+[[file:../projects/compiler/SELF_HOSTING.md][the compiler self-hosting checklist]]. It records concrete source/library
+requirements, dependency policy, initial arm64 Darwin target, fixture protocol,
+and outstanding build-driver requirements.
+
+=make test-compiler-core= now also runs explicit JSON shared fixtures against
+evaluation and full-value native reporting at -O0 and -O2. Existing independent
+reader/checker and differential regressions remain in place.
+
+=make bootstrap-compiler= creates fresh A/B/C stage directories, records source
+hashes and toolchain inputs, retains logs and shared-test IR, and fails at the
+first unsuccessful stage. The current expected boundary is B/build: the actual
+implementation first encounters unsupported string literals; it also needs
+surface imports, macros, data types, pointers, and native bindings. The command is a readiness gate; it does not implement the
+missing language or claim a completed bootstrap. The partial component, B/C
+rebuild, macro validation, and determinism milestones remain open.
