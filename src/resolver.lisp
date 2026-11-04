@@ -247,9 +247,8 @@ the semantic type of a unit expression remains UnitType."
 		    :reader primitive-operation-parameter-types)
    (result-type :initarg :result-type :reader primitive-operation-result-type)
    (kind :initarg :kind :reader primitive-operation-kind)
-   ;; Floating comparisons are explicitly ordered: any NaN operand yields
-   ;; false, including for equality.  This is semantic policy, not an LLVM
-   ;; default the backend is allowed to choose.
+   ;; C-style inequality is true for NaN operands. The other floating
+   ;; comparisons are false for unordered operands.
    (nan-semantics :initarg :nan-semantics :initform nil
 		  :reader primitive-operation-nan-semantics)))
 
@@ -778,14 +777,16 @@ than recovered later through ad-hoc string comparisons."
 			  ("%*" :float-multiply) ("%/" :float-divide)))
 	    (bind (format nil "~A-primitive-~A" (first spec) suffix)
 		  (list type type) type (second spec)))
-	  (dolist (spec '(("%=" :float-ordered-equal) ("%/=" :float-ordered-not-equal)
+	  (dolist (spec '(("%=" :float-ordered-equal) ("%/=" :float-unordered-not-equal)
 			  ("%<" :float-ordered-less-than)
 			  ("%<=" :float-ordered-less-than-or-equal)
 			  ("%>" :float-ordered-greater-than)
 			  ("%>=" :float-ordered-greater-than-or-equal)))
 	    (bind (format nil "~A-primitive-~A" (first spec) suffix)
 		  (list type type) (type-context-boolean-type type-context) (second spec)
-		  :nan-semantics :ordered-false))))
+		  :nan-semantics (if (eq (second spec) :float-unordered-not-equal)
+                                     :unordered-true
+                                     :ordered-false)))))
       (let ((bool (type-context-boolean-type type-context)))
 	(bind "%not-primitive-bool" (list bool) bool :boolean-not)
 	(bind "%and-primitive-bool" (list bool bool) bool :boolean-and)

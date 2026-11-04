@@ -179,7 +179,26 @@
 (base:external-function build-lshr "LLVMBuildLShr" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
 (base:external-function build-urem "LLVMBuildURem" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
 
-(export build-sext build-udiv build-or build-xor build-shl build-ashr build-lshr build-urem const-null struct-type build-insert build-extract
+(base:external-function float-type "LLVMFloatTypeInContext" (t:context-ref) t:type-ref)
+(base:external-function double-type "LLVMDoubleTypeInContext" (t:context-ref) t:type-ref)
+(base:external-function const-real "LLVMConstReal" (t:type-ref f64) t:value-ref)
+(base:external-function build-fcmp "LLVMBuildFCmp" (t:builder-ref i32 t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-fadd "LLVMBuildFAdd" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-fsub "LLVMBuildFSub" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-fmul "LLVMBuildFMul" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-fdiv "LLVMBuildFDiv" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-fpext "LLVMBuildFPExt" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
+(base:external-function build-fptrunc "LLVMBuildFPTrunc" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
+(base:external-function build-sitofp "LLVMBuildSIToFP" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
+(base:external-function build-uitofp "LLVMBuildUIToFP" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
+(base:external-function build-fptosi "LLVMBuildFPToSI" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
+(base:external-function build-fptoui "LLVMBuildFPToUI" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
+(base:external-function build-bitcast "LLVMBuildBitCast" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
+
+(export
+  float-type double-type const-real build-fcmp build-fadd build-fsub build-fmul build-fdiv
+  build-fpext build-fptrunc build-sitofp build-uitofp build-fptosi build-fptoui build-bitcast
+  build-sext build-udiv build-or build-xor build-shl build-ashr build-lshr build-urem const-null struct-type build-insert build-extract
   context-create
   context-dispose
   module-create

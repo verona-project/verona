@@ -45,7 +45,7 @@
         (:unsigned-integer-greater-than (compare :unsigned->))
         (:unsigned-integer-greater-than-or-equal (compare :unsigned->=))
         (:float-ordered-equal (float-compare :=))
-        (:float-ordered-not-equal (float-compare :/=))
+        (:float-unordered-not-equal (float-compare :unordered-/=))
         (:float-ordered-less-than (float-compare :<))
         (:float-ordered-less-than-or-equal (float-compare :<=))
 		(:float-ordered-greater-than (float-compare :>))
