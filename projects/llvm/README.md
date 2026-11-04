@@ -147,3 +147,8 @@ compiler driver (189), Verona/Base/Foundation, and formatter suites also pass.
 `make -k test` still reports the same two existing
 `IDE-INSPECTION-SELECTS-EXPANSION-SUBTREES` failures in the frontend suite.
 Linux and x86-64 execution have not been independently verified here.
+
+The core bindings also expose context-owned literal `struct-type`, `const-null`,
+and the `build-insert`/`build-extract` aggregate SSA builders. Struct
+element type arrays are borrowed for the call; LLVM owns the resulting type.
+Aggregate indices are zero-based `u32`. LLVM computes native field layout.

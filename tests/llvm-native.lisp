@@ -235,3 +235,20 @@
                                          :output :string :error-output :string
                                          :ignore-error-status t)))))
       (when (probe-file executable) (delete-file executable)))))
+
+(test executes-contextually-typed-sequence-literals-and-conversions
+  (is (= 42
+         (compile-and-run-native
+          "(generic convert (value))
+           (implementation convert ((value i32)) u8
+             (%trunc-primitive-i32-u8 value))
+           (implementation convert ((value i32)) u64
+             (%sext-primitive-i32-u64 value))
+           (function zero () u64 (do unit 0))
+           (function choose ((flag bool)) u64
+             (do unit (match flag
+                        (true (do unit (convert 42)))
+                        (false (do unit 0)))))
+           (function main () exit-code
+             (%trunc-primitive-u64-i32
+               (%+-primitive-u64 (zero) (choose true))))"))))

@@ -367,3 +367,39 @@
     (is (not (eq (type-context-unit-type context64)
 		 (type-context-unit-representation-type context64))))
     (is (= 0 (unit-machine-representation context64 (type-context-unit-value context64))))))
+
+(test contextualizes-final-sequence-literals-through-branches-and-bindings
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(function zero () u64 (do 7 0))
+                 (function choose ((flag bool)) u64
+                   (match flag (true (do unit 0)) (false (do unit 1))))
+                 (function nested () u64
+                   (let ((value u64 (do unit
+                                      (match true
+                                        (true (do unit 0))
+                                        (false (do unit 1))))))
+                     (do unit value)))
+                 (function byte () u8 (do unit 255))
+                 (function fraction () f32 (do unit 1.5))"))
+         (program (compilation-unit-semantic-program unit)))
+    (dolist (declaration (unit-declarations unit))
+      (let* ((function (semantic-program-declaration program declaration))
+             (body (semantic-function-declaration-body function)))
+        (is (eq (semantic-function-declaration-return-type function)
+                (semantic-expression-type body)))))
+    ;; Only the final expression receives the expected result type.
+    (let* ((function (semantic-program-declaration program (first (unit-declarations unit))))
+           (expressions (sequence-expression-expressions
+                         (semantic-function-declaration-body function))))
+      (is (= 32 (integer-type-width (semantic-expression-type (first expressions)))))
+      (is (= 64 (integer-type-width (semantic-expression-type (second expressions))))))))
+
+(test-cases sequence-context-does-not-convert-typed-values-or-empty-sequences
+  (typed-value
+   (signals type-mismatch-error
+     (compile-string (make-compiler)
+                     "(function wrong ((value i32)) u64 (do unit value))")))
+  (empty-sequence
+   (signals type-mismatch-error
+     (compile-string (make-compiler) "(function wrong () u64 (do))"))))

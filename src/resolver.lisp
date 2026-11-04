@@ -2821,13 +2821,18 @@ runtime dictionary or a new generic instance in the importing module."
           (make-instance 'field-expression :syntax syntax :value value :field field
                          :type (product-field-type field)))))))
 
-(defun infer-sequence-expression (syntax scope)
-  (let ((expressions '()))
-    (dolist (form (rest (verona-list-elements (syntax-datum syntax))))
+(defun infer-sequence-expression (syntax scope &optional expected-type)
+  (let* ((forms (rest (verona-list-elements (syntax-datum syntax))))
+         (last-form (car (last forms)))
+         (expressions '()))
+    (dolist (form forms)
       (when (and expressions (typep (expression-type (car (last expressions))) 'never-type))
         (error 'unreachable-expression-error :syntax form
                :message "expression follows terminating control flow"))
-      (push (infer-value-expression form scope) expressions))
+      (push (if (and expected-type (eq form last-form))
+                (check-expression form scope expected-type)
+                (infer-value-expression form scope))
+            expressions))
     (setf expressions (nreverse expressions))
     (make-instance 'sequence-expression :syntax syntax :expressions expressions
 					:type (if expressions
@@ -3312,7 +3317,7 @@ expression position."
 						:message "an empty list is compile-time-only, not a runtime expression"))
 	     (let ((special (expression-special-form-name syntax)))
 	       (cond ((and special (string= special "do"))
-		      (infer-sequence-expression syntax scope))
+		      (infer-sequence-expression syntax scope expected-type))
 		     ((and special (string= special "array-of"))
 		      (infer-array-construct-expression syntax scope (rest elements)))
 		     ((and special (string= special "tuple"))

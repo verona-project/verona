@@ -17,15 +17,17 @@ backends.
 
 The separate [`projects/compiler`](../projects/compiler/README.md) bootstrap
 implements a small typed core with `unit`, `bool`, and `i64`, explicit functions,
-lexical `let`, built-in `if`, and typed `%OP-primitive-i64` primitives. Its
-compiler input uses `%function`, matching expanded Base declarations. Build with
+lexical `let`, built-in `if`, immutable products/tuples/sums, exhaustive matching,
+and typed `%OP-primitive-i64` primitives. Its
+compiler input uses `%function` and `%type`, matching expanded Base declarations. Build with
 `make compiler-core`; `build/compiler/verona-core read FILE` prints the separate
 S-expression tree with source spans and interned identifiers without checking
 integer ranges or language forms. The reader accepts ASCII tokens, decimal
 integers with an optional sign, and semicolon comments. Use `build/compiler/verona-core check FILE`, `eval FILE`,
 `emit-llvm FILE`, or `compile FILE -o EXECUTABLE`. Both paths share name resolution
-and type checking; the evaluator prints a signed result, while the compiled
-program returns that result modulo 256 as process status. Its grammar and limits
+and type checking; the evaluator prints signed i64 results or recursive typed structured results.
+`compile-report` prints the full typed encoding, while `compile` returns i64 modulo
+256 as process status (zero for other result types). Its grammar and limits
 are documented in the package README. The existing language/API below is unchanged.
 Core locals use `(let ((NAME VALUE) ...) BODY)` with inferred types; optional
 `(NAME TYPE VALUE)` annotations require exact equality. Semantic errors are
@@ -35,18 +37,37 @@ mismatches include expected/actual types and relevant declaration locations.
 Core modules use `(%import math.vrn :as math)`, `(%export answer)`, and qualified
 calls such as `(math:answer)`. Imports resolve relative to the importing file;
 canonical paths (including symlink resolution) identify modules loaded once per
-invocation. Functions are private by default, unqualified calls remain local,
+invocation. Functions and nominal types are private by default, unqualified calls remain local,
 and duplicate aliases, invalid exports, and import cycles are rejected. Only the
 root module supplies the entry `main`. Both execution paths retain dependency
 source locations. See the package README for visibility, ordering, and limits.
 
-The reusable core evaluator executes with explicit stacks and tagged scalar values.
+The reusable core evaluator executes with explicit stacks, tagged scalars, and immutable aggregate handles.
 `core.eval:run` accepts a checked context, entry function, typed arguments, optional
 step/depth limits, and an allocator. Its structured outcome distinguishes runtime,
 limit, allocation, and invariant failures, with source IDs and call frames. Release
 every outcome with `core.eval:destroy`; the checked program remains reusable after
 failure. The CLI retains its 512-frame depth limit. See the package README for
-step counting and ownership.
+step counting and ownership. `run-with-aggregates` copies borrowed aggregate
+backing storage from a prior outcome for the same checked program; invalid handles,
+component types, counts, tags, and cyclic storage fail validation. Successful
+outcomes own result storage until destroyed.
+
+Core products use `(%type Point (product (x i64) (y i64)))`, `(Point 1 2)`,
+and `(field p x)`. Tuple types and values use `(tuple TYPE...)` and
+`(tuple VALUE...)`; `(tuple-get t 0)` resolves a literal index statically.
+Sums use `(%type Result (sum (Ok Point) (Error i64) (Empty)))`, with
+`(Result:Ok p)` or expected-type constructor selection. Imported qualification
+is `(module:Result:Ok p)`; exporting a type exposes its constructors.
+`(match r ((Ok p) BODY) ((Error code) BODY) (_ BODY))` checks all arms, requires
+equal result types and complete coverage, and evaluates the scrutinee once.
+Duplicate/unreachable arms and duplicate payload names are errors. Empty products
+and empty/singleton tuples work; empty sums, recursive layouts, nested patterns,
+and guards are rejected. Products/sums have nominal identity; tuples are structural.
+Forward nonrecursive type references work. Native products/tuples are LLVM structs;
+sums have a tag and separately typed case payload fields, with layout computed by
+LLVM. This is a private ABI, not C interoperability.
+
 
 ## libc I/O, process, and error bindings
 
@@ -238,7 +259,16 @@ Every pair of numeric types is supported: `i8`, `i16`, `i32`, `i64`, `u8`,
 `u16`, `u32`, `u64`, `f32`, and `f64`. Integer widening preserves the source
 signedness; narrowing discards high bits; same-width signed/unsigned
 conversions preserve the underlying bits. An uncontextualized conversion is
-rejected because its target type is unknown.
+rejected because its target type is unknown. The expected result type flows through
+`do`, including sequences inside match branches and annotated bindings. Numeric
+literals take that type directly; already typed numeric values still require
+`base:convert` when their type differs.
+
+```lisp
+(base:function zero () u64 (do unit 0))
+(base:function converted-zero () u64 (do unit (base:convert 0)))
+```
+
 
 ### Testing library
 
@@ -569,7 +599,7 @@ explicit. Unicode characters are not supported yet.
 | `(match value (pattern expression) ...)` | Exhaustive pattern match. Supports `true`, `false`, integer literals, `_`, bindings, and sum constructor patterns. `_` discards its value and cannot be referenced in the case expression. |
 | `(base:cond (TEST BODY...) ...)` | Imported Base macro over boolean matches. Tests run once from left to right; only the first true clause runs its nonempty body and returns its last value. A final literal `true` supplies a default. No clauses or no matching clause returns `unit`; all result paths must have the same type. All bodies are statically checked. |
 | `(return value)` | Return from the enclosing function. |
-| `(do expression...)` | Evaluate expressions in order and return the last value. |
+| `(do expression...)` | Evaluate expressions in order and return the last value. The surrounding expected type applies to the final expression. |
 | `(& place)`, `(address-of place)` | Create a pointer to an addressable place. |
 | `(deref pointer)`, `(dereference pointer)` | Turn a pointer to a complete type into a place. |
 | `(pointer-offset pointer integer)` | Advance a pointer by an element count. The pointer must target a complete type; callers are responsible for bounds and lifetime. |

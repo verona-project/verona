@@ -305,3 +305,22 @@
          a
          (expand (array-of value)))
        (function main () i32 (expand 1))"))))
+
+(test result-directed-conversion-of-literals-through-sequences
+  (let* ((unit (compile-string
+                (make-compiler)
+                "(generic convert (value))
+                 (implementation convert ((value i32)) u8
+                   (%trunc-primitive-i32-u8 value))
+                 (implementation convert ((value i32)) u64
+                   (%sext-primitive-i32-u64 value))
+                 (function value ((flag bool)) u64
+                   (do unit
+                     (match flag
+                       (true (do unit (convert 0)))
+                       (false (do unit (convert 42))))))"))
+         (function (semantic-program-declaration
+                    (compilation-unit-semantic-program unit)
+                    (fourth (unit-declarations unit)))))
+    (is (= 64 (integer-type-width
+               (semantic-expression-type (semantic-function-declaration-body function)))))))

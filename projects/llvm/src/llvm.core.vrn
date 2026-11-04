@@ -164,7 +164,13 @@
   (t:module-ref i32 (pointer (pointer u8)))
   t:boolean)
 
-(export
+(base:external-function struct-type "LLVMStructTypeInContext" (t:context-ref (pointer t:type-ref) u32 t:boolean) t:type-ref)
+(base:external-function build-insert "LLVMBuildInsertValue" (t:builder-ref t:value-ref t:value-ref u32 (pointer u8)) t:value-ref)
+(base:external-function build-extract "LLVMBuildExtractValue" (t:builder-ref t:value-ref u32 (pointer u8)) t:value-ref)
+
+(base:external-function const-null "LLVMConstNull" (t:type-ref) t:value-ref)
+
+(export const-null struct-type build-insert build-extract
   context-create
   context-dispose
   module-create
