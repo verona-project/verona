@@ -2583,6 +2583,44 @@ runtime dictionary or a new generic instance in the importing module."
                       (pushnew method candidates :test #'eq))))))))))
     (nreverse candidates)))
 
+(defun infer-overloaded-arguments (generic arguments scope expected-type)
+  "Check arguments in order, using only the surrounding result and earlier arguments."
+  (let ((candidates (mapcar #'cdr (generic-implementations generic))))
+    (loop for argument in arguments
+          for index from 0
+          for expanded = (expand-expression-macros argument scope)
+          for literal = (syntax-datum expanded)
+          for contextual = (when (and expected-type (numberp literal))
+                             (remove-if-not
+                              (lambda (implementation)
+                                (same-type-p (generic-implementation-result-type implementation)
+                                             expected-type))
+                              candidates))
+          for expression =
+            (if (numberp literal)
+                (let* ((eligible (or contextual candidates))
+                       (type (and eligible
+                                  (nth index (generic-implementation-parameter-types
+                                              (first eligible))))))
+                  (unless (and type
+                               (typep type (if (integerp literal) 'integer-type 'float-type))
+                               (every (lambda (implementation)
+                                        (same-type-p type
+                                                     (nth index (generic-implementation-parameter-types
+                                                                 implementation))))
+                                      eligible))
+                    (error 'invalid-expression-error :syntax expanded
+                           :message "ambiguous numeric literal; supply a type with cast"))
+                  (check-expression argument scope type))
+                (infer-value-expression argument scope))
+          do (setf candidates
+                   (remove-if-not
+                    (lambda (implementation)
+                      (same-type-p (expression-type expression)
+                                   (nth index (generic-implementation-parameter-types implementation))))
+                    candidates))
+          collect expression)))
+
 (defun infer-call-expression (syntax scope &optional expected-type)
   (let* ((elements (verona-list-elements (syntax-datum syntax)))
 	 (head (first elements))
@@ -2616,9 +2654,7 @@ runtime dictionary or a new generic instance in the importing module."
               (unless (= (length argument-syntax) (generic-arity generic))
                 (error 'wrong-argument-count-error :syntax syntax
                        :expected (generic-arity generic) :actual (length argument-syntax)))
-              (let* ((arguments (mapcar (lambda (argument)
-                                          (infer-value-expression argument scope))
-                                        argument-syntax))
+              (let* ((arguments (infer-overloaded-arguments generic argument-syntax scope expected-type))
                      (argument-types (mapcar #'expression-type arguments))
                      (candidates (generic-find-implementations generic argument-types))
                      (protocol-candidates
@@ -2705,15 +2741,22 @@ runtime dictionary or a new generic instance in the importing module."
             (unless (= (length argument-syntax) (length parameters))
               (error 'wrong-argument-count-error :syntax syntax
                      :expected (length parameters) :actual (length argument-syntax)))
-            (let* ((arguments (mapcar (lambda (argument)
-                                        (infer-value-expression argument scope))
-                                      argument-syntax))
-                   (substitution (make-type-substitution)))
-              (loop for parameter in parameters
-                    for argument in arguments
-                    unless (unify-types (parameter-binding-type parameter)
-                                        (expression-type argument) substitution)
-                      do (error 'conflicting-type-inference-error :syntax syntax))
+            (let* ((context (semantic-scope-owning-type-context scope))
+                   (substitution (make-type-substitution))
+                   (arguments
+                     (loop for parameter in parameters
+                           for argument in argument-syntax
+                           for template = (parameter-binding-type parameter)
+                           for type = (apply-type-substitution context template substitution)
+                           for datum = (syntax-datum (expand-expression-macros argument scope))
+                           for expression =
+                             (if (or (and (integerp datum) (typep type 'integer-type))
+                                     (and (floatp datum) (typep type 'float-type)))
+                                 (check-expression argument scope type)
+                                 (infer-value-expression argument scope))
+                           unless (unify-types template (expression-type expression) substitution)
+                             do (error 'conflicting-type-inference-error :syntax syntax)
+                           collect expression)))
               (dolist (parameter (semantic-function-declaration-type-parameters function))
                 (unless (type-substitution-find substitution parameter)
                   (error 'cannot-infer-type-parameter-error :syntax syntax)))
@@ -3170,22 +3213,36 @@ therefore visible, while the binding being built cannot see itself."
 					     :type (pointer-type-target operand-type)
 			     :addressable t :writable t))))
 
-(defun infer-pointer-cast-expression (syntax scope)
-  "Apply the only initial pointer conversion: T* <-> void*."
+(defun infer-cast-expression (syntax scope)
+  "Contextually type numeric literals or convert between T* and void*."
   (let ((arguments (rest (verona-list-elements (syntax-datum syntax)))))
     (unless (= (length arguments) 2)
       (error 'invalid-expression-error :syntax syntax
              :message "cast requires a target type and one operand"))
     (let* ((context (semantic-scope-owning-type-context scope))
            (target (resolve-type context (resolve-type-syntax scope (first arguments))))
-           (operand (infer-value-expression (second arguments) scope))
-           (source (expression-type operand)))
-      (unless (and (typep target 'pointer-type) (typep source 'pointer-type)
-                   (or (typep (pointer-type-pointee target) 'void-type)
-                       (typep (pointer-type-pointee source) 'void-type)))
-        (error 'invalid-expression-error :syntax syntax
-               :message "cast permits only (pointer T) to or from (pointer void)"))
-      (make-instance 'pointer-cast-expression :syntax syntax :operand operand :type target))))
+           (source-syntax (second arguments))
+           (datum (syntax-datum (expand-expression-macros source-syntax scope))))
+      (when (typep target '(or integer-type float-type))
+        (unless (if (typep target 'integer-type) (integerp datum) (floatp datum))
+          (error 'invalid-expression-error :syntax source-syntax
+                 :message "numeric cast requires a literal of the target numeric kind"))
+        (when (typep target 'integer-type)
+          (let* ((signed (integer-type-signed target))
+                 (limit (ash 1 (- (integer-type-width target) (if signed 1 0))))
+                 (minimum (if signed (- limit) 0)))
+            (unless (<= minimum datum (1- limit))
+              (error 'invalid-expression-error :syntax source-syntax
+                     :message "integer literal out of range for cast target"))))
+        (return-from infer-cast-expression (check-expression source-syntax scope target)))
+      (let* ((operand (infer-value-expression source-syntax scope))
+             (source (expression-type operand)))
+        (unless (and (typep target 'pointer-type) (typep source 'pointer-type)
+                     (or (typep (pointer-type-pointee target) 'void-type)
+                         (typep (pointer-type-pointee source) 'void-type)))
+          (error 'invalid-expression-error :syntax syntax
+                 :message "cast permits only (pointer T) to or from (pointer void)"))
+        (make-instance 'pointer-cast-expression :syntax syntax :operand operand :type target)))))
 
 (defun infer-pointer-offset-expression (syntax scope)
   "Compute POINTER plus OFFSET elements, preserving POINTER's pointee type."
@@ -3195,7 +3252,13 @@ therefore visible, while the binding being built cannot see itself."
              :message "pointer-offset requires a pointer and an integer offset"))
     (let* ((pointer (infer-value-expression (first arguments) scope))
            (pointer-type (expression-type pointer))
-           (offset (infer-value-expression (second arguments) scope)))
+           (offset-syntax (second arguments))
+           (offset (if (integerp (syntax-datum (expand-expression-macros offset-syntax scope)))
+                       (let ((context (semantic-scope-owning-type-context scope)))
+                         (check-expression offset-syntax scope
+                                           (type-context-integer-type context t
+                                                                      (type-context-pointer-width context))))
+                       (infer-value-expression offset-syntax scope))))
       (unless (typep pointer-type 'pointer-type)
         (error 'invalid-expression-error :syntax (first arguments)
                :message "pointer-offset requires a pointer"))
@@ -3290,13 +3353,10 @@ expression position."
 		    :message "character literals are ASCII-only; Unicode characters are not supported yet"))
 	   (make-instance 'character-literal :syntax syntax :value datum
 					     :type (type-context-char-type context)))
-	  ((integerp datum)
-	   (make-instance 'integer-literal :syntax syntax :value datum
-					   :type (type-context-integer-type context t 32)))
-	  ((floatp datum)
-	   (make-instance 'float-literal :syntax syntax :value datum
-					 :type (type-context-float-type context 64)))
-	  ((stringp datum)
+	  ((numberp datum)
+           (error 'invalid-expression-error :syntax syntax
+                  :message "ambiguous numeric literal; supply a type with cast"))
+          ((stringp datum)
 	   ;; Reader-produced strings are ASCII-only.  Keep the semantic boundary
 	   ;; just as strict because macros can manufacture string syntax directly.
 	   (unless (every (lambda (character) (<= (char-code character) #x7f)) datum)
@@ -3354,7 +3414,7 @@ expression position."
 		     ((and special (string= special "dereference"))
 		      (infer-dereference-expression syntax scope))
 		     ((and special (string= special "cast"))
-		      (infer-pointer-cast-expression syntax scope))
+		      (infer-cast-expression syntax scope))
 		     ((and special (string= special "pointer-offset"))
 		      (infer-pointer-offset-expression syntax scope))
 		     (t (infer-call-expression syntax scope expected-type))))))

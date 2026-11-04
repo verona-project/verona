@@ -220,7 +220,7 @@
                    ((value a))
                    i32
                    (display value))
-                 (function main () i32 (print 42))"))
+                 (function main () i32 (print (cast i32 42)))"))
          (program (compilation-unit-semantic-program unit))
          (main (semantic-program-declaration program (fourth (unit-declarations unit))))
          (call (semantic-function-declaration-body main))
@@ -294,7 +294,7 @@
          ((left a) (right a))
          a
          left)
-       (function main () i32 (select 1 true))")))
+       (function main () i32 (select (cast i32 1) true))")))
   (recursive-specialization
    (signals verona:recursive-specialization-error
      (compile-string
@@ -304,7 +304,7 @@
          ((value a))
          a
          (expand (array-of value)))
-       (function main () i32 (expand 1))"))))
+       (function main () i32 (expand (cast i32 1)))"))))
 
 (test result-directed-conversion-of-literals-through-sequences
   (let* ((unit (compile-string
@@ -324,3 +324,26 @@
                     (fourth (unit-declarations unit)))))
     (is (= 64 (integer-type-width
                (semantic-expression-type (semantic-function-declaration-body function)))))))
+
+(test numeric-literals-follow-overload-signatures-in-argument-order
+  ;; A non-final sequence operand has no expected result type.
+  (dolist (expression '("(+ 1 (cast u8 1))" "(+ 1 1)" "1"))
+    (signals verona:invalid-expression-error
+      (compile-string (make-compiler)
+                      (format nil "(function f () unit (do ~A unit))" expression))))
+  (let* ((unit (compile-string (make-compiler)
+                 "(function f () unit (do (+ (cast u8 1) 1) unit))
+                  (function g () u8 (+ 1 1))"))
+         (program (compilation-unit-semantic-program unit))
+         (f (semantic-program-declaration program (first (unit-declarations unit))))
+         (sum (first (sequence-expression-expressions
+                      (semantic-function-declaration-body f)))))
+    (is (= 8 (integer-type-width (semantic-expression-type sum))))
+    (is (= 8 (integer-type-width
+              (semantic-expression-type (second (semantic-call-arguments sum))))))))
+
+(test rejects-invalid-numeric-casts
+  (dolist (source '("(function f () u8 (cast u8 256))"
+                    "(function f () u8 (cast u8 -1))"
+                    "(function f ((x i32)) u8 (cast u8 x))"))
+    (signals verona:invalid-expression-error (compile-string (make-compiler) source))))

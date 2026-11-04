@@ -55,7 +55,7 @@
            (lambda ()
               (verona:compile-string
               (verona:make-compiler)
-              "(function f () i64 (+ 1 2))")))))
+              "(function f () i64 (+ (cast i32 1) 2))")))))
     (is (string= "E0401" (verona:diagnostic-code diagnostic)))
     (is (getf (verona:diagnostic-data diagnostic) :expected-type))
     (is (getf (verona:diagnostic-data diagnostic) :actual-type))))

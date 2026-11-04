@@ -252,3 +252,9 @@
            (function main () exit-code
              (%trunc-primitive-u64-i32
                (%+-primitive-u64 (zero) (choose true))))"))))
+
+(test executes-numeric-casts-and-contextual-overload-operands
+  (is (= 42
+         (compile-and-run-native
+          "(function main () exit-code
+             (%zext-primitive-u8-i32 (+ (cast u8 40) 2)))"))))

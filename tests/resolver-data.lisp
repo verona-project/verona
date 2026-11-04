@@ -123,7 +123,7 @@
                 (make-compiler)
                 "(generic choose (value))
                  (implementation choose ((value (array i32 2))) i64 42)
-                 (function dispatch () i64 (choose (array-of 1 2)))"))
+                 (function dispatch () i64 (choose (array-of (cast i32 1) 2)))"))
          (program (compilation-unit-semantic-program unit))
          (dispatch (semantic-program-declaration program (third (unit-declarations unit)))))
     (is (typep (semantic-function-declaration-body dispatch) 'semantic-call))
@@ -148,7 +148,7 @@
   (constant-index-out-of-bounds
    (signals verona:array-index-out-of-bounds-error
      (compile-string (make-compiler)
-                     "(function bad () i32 (index (array-of 1 2) 2))")))
+                     "(function bad () i32 (index (array-of (cast i32 1) 2) 2))")))
   (void-elements
    (signals error
      (compile-string (make-compiler)
@@ -156,7 +156,7 @@
   (mixed-element-types
    (signals verona:array-element-type-mismatch-error
      (compile-string (make-compiler)
-                     "(function bad () unit (do (array-of 1 true) unit))"))))
+                     "(function bad () unit (do (array-of (cast i32 1) true) unit))"))))
 
 (test-cases rejects-invalid-product-definitions-construction-and-fields
   (duplicate-field
@@ -175,7 +175,7 @@
                      "(type point (product (x i64))) (function main () i64 (field (point 20) z))")))
   (field-on-non-product
    (signals field-access-requires-product-error
-     (compile-string (make-compiler) "(function main () i64 (field 42 x))")))
+     (compile-string (make-compiler) "(function main () i64 (field (cast i32 42) x))")))
   (nominal-type-mismatch
    (signals type-mismatch-error
      (compile-string (make-compiler)

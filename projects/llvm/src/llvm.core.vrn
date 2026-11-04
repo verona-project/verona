@@ -170,7 +170,16 @@
 
 (base:external-function const-null "LLVMConstNull" (t:type-ref) t:value-ref)
 
-(export const-null struct-type build-insert build-extract
+(base:external-function build-sext "LLVMBuildSExt" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
+(base:external-function build-udiv "LLVMBuildUDiv" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-or "LLVMBuildOr" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-xor "LLVMBuildXor" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-shl "LLVMBuildShl" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-ashr "LLVMBuildAShr" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-lshr "LLVMBuildLShr" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-urem "LLVMBuildURem" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+
+(export build-sext build-udiv build-or build-xor build-shl build-ashr build-lshr build-urem const-null struct-type build-insert build-extract
   context-create
   context-dispose
   module-create

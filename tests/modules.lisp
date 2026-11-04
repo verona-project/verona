@@ -156,7 +156,7 @@
                        (compiler:state-set! 'count (+ n 1))
                        7))
                    (function identity (for (T)) ((x T)) T (let ((ignored i32 (tick))) x))
-                   (function a () i32 (identity 1))
+                   (function a () i32 (identity (cast i32 1)))
                    (function b ((value i64)) i64 (identity value))")))
          (verona::*expansion-context* (verona::module-expansion-context unit)))
     (is (= 1 (verona::compile-time-state-ref (make-verona-name "count"))))))

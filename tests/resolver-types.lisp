@@ -262,7 +262,7 @@
   (address-of-temporary
    (signals not-addressable-error
      (compile-string (make-compiler)
-                     "(function address () (pointer i32) (& (+ 1 2)))"))))
+                     "(function address () (pointer i32) (& (+ (cast i32 1) 2)))"))))
 
 (test bootstraps-concrete-primitive-identities-and-explicit-conversions
   (let* ((unit (compile-string
@@ -371,7 +371,7 @@
 (test contextualizes-final-sequence-literals-through-branches-and-bindings
   (let* ((unit (compile-string
                 (make-compiler)
-                "(function zero () u64 (do 7 0))
+                "(function zero () u64 (do (cast i32 7) 0))
                  (function choose ((flag bool)) u64
                    (match flag (true (do unit 0)) (false (do unit 1))))
                  (function nested () u64

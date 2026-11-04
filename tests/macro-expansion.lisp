@@ -110,7 +110,7 @@
                   (make-compiler)
                   "(macro identity (form) form)
                    (function literal () i8 (identity 42))
-                   (function nested () i32 (do (identity 0) (identity 7)))"
+                   (function nested () i32 (do (cast i32 (identity 0)) (identity 7)))"
                   :name "expression-macros.vrn"))
          (declarations (unit-declarations module))
          (program (compilation-unit-semantic-program module))

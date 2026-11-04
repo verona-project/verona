@@ -26,13 +26,20 @@ integer ranges or language forms. The reader accepts ASCII tokens, decimal
 integers with an optional sign, and semicolon comments. Use `build/compiler/verona-core check FILE`, `eval FILE`,
 `emit-llvm FILE`, or `compile FILE -o EXECUTABLE`. Both paths share name resolution
 and type checking; the evaluator prints signed i64 results or recursive typed structured results.
-`compile-report` prints the full typed encoding, while `compile` returns i64 modulo
+`compile-report` prints the full typed encoding, while `compile` returns integer results modulo
 256 as process status (zero for other result types). Its grammar and limits
 are documented in the package README. The existing language/API below is unchanged.
 Core locals use `(let ((NAME VALUE) ...) BODY)` with inferred types; optional
 `(NAME TYPE VALUE)` annotations require exact equality. Semantic errors are
 collected across independent functions and block both execution paths. Type
 mismatches include expected/actual types and relevant declaration locations.
+
+The Verona core supports signed and unsigned 8-, 16-, 32-, and 64-bit integers,
+with concrete arithmetic, comparisons, and explicit conversions. It also exposes
+typed integer bit operations and shifts. Shift counts are reduced modulo the
+operand width. Native integer values use their LLVM width, and structured results
+preserve the full unsigned range. See the core package README for syntax and
+reporting details.
 
 Core modules use `(%import math)` or `(%import math :as math)`, `(%export answer)`,
 and qualified calls such as `(math:answer)`. Module `core.model` maps to
@@ -264,16 +271,26 @@ Every pair of numeric types is supported: `i8`, `i16`, `i32`, `i64`, `u8`,
 `u16`, `u32`, `u64`, `f32`, and `f64`. Integer widening preserves the source
 signedness; narrowing discards high bits; same-width signed/unsigned
 conversions preserve the underlying bits. An uncontextualized conversion is
-rejected because its target type is unknown. The expected result type flows through
-`do`, including sequences inside match branches and annotated bindings. Numeric
-literals take that type directly; already typed numeric values still require
-`base:convert` when their type differs.
+rejected because its target type is unknown. The expected result type flows
+through the final expression of `do`, including sequences inside match branches
+and annotated bindings.
+
+Numeric literals require a concrete numeric type from context or a cast such as
+`(cast u8 1)`. An integer literal cast checks representability. Already typed
+numeric values use `base:convert` for conversion. A literal argument to a
+result-directed conversion must still have a source type.
+
+Overload resolution checks operands in order. Earlier typed operands constrain
+the signatures available to later operands. An expected result type can narrow
+the available signatures before checking a literal. A literal is ambiguous if
+the remaining signatures do not agree on its parameter type. With no enclosing
+result type, `(+ (cast u8 1) 1)` succeeds, while `(+ 1 (cast u8 1))` and
+`(+ 1 1)` report ambiguity.
 
 ```lisp
 (base:function zero () u64 (do unit 0))
-(base:function converted-zero () u64 (do unit (base:convert 0)))
+(base:function converted-zero () u64 (do unit (base:convert (cast i32 0))))
 ```
-
 
 ### Testing library
 
@@ -609,7 +626,7 @@ explicit. Unicode characters are not supported yet.
 | `(deref pointer)`, `(dereference pointer)` | Turn a pointer to a complete type into a place. |
 | `(pointer-offset pointer integer)` | Advance a pointer by an element count. The pointer must target a complete type; callers are responsible for bounds and lifetime. |
 | `(assign place value)`, `(store place value)` | Write a writable place. |
-| `(cast Type value)` | Explicit pointer cast. |
+| `(cast Type value)` | Give a numeric literal an explicit type or convert a pointer to or from `(pointer void)`. |
 | Function pointers | Write `(pointer (function (ParameterType...) ResultType))`. A named function automatically decays to that type when it is expected, including as an element of a fixed array. A function-pointer value, including an indexed array element, can be called with ordinary call syntax. |
 | Numeric and comparison operators | Import `base` for the public protocol operations: `+`, `-`, `*`, `/`, `=`, `<`, `<=`, `>`, and `>=`. `base:numeric`, `base:equality`, and `base:ordering` provide them for constrained parametric code. |
 
