@@ -164,7 +164,7 @@
 (test allows-a-macro-to-generate-multiple-definitions
   (let* ((module (compile-string
 		  (make-compiler)
-		  "(macro make-pair (left right) (definitions left right))\
+		  "(macro make-pair (left right) `(,left ,right))\
 		   (make-pair (constant first i32 1) (constant second i32 2))"))
 	 (declarations (unit-declarations module)))
     (is (= 3 (length declarations)))
@@ -175,6 +175,23 @@
 	       (mapcar (lambda (declaration)
 			 (verona-name-value (declaration-name declaration)))
 		       declarations)))))
+
+(test collects-macro-result-forms-in-order
+  (let ((module (compile-string
+                 (make-compiler)
+                 "(macro batch ()
+                    '((%macro identity (x) x)
+                      (identity (constant answer i32 42))))
+                  (batch)")))
+    (is (typep (find-declaration module (make-verona-name "answer"))
+               'constant-declaration))))
+
+(test rejects-invalid-macro-result-lists
+  (dolist (result '("((constant answer i32 42) 7)"
+                    "(((constant answer i32 42)))"))
+    (signals verona::invalid-macro-result-error
+      (compile-string (make-compiler)
+                      (format nil "(macro bad () '~A) (bad)" result)))))
 
 (test macro-generated-macros-affect-following-source-forms
   (let* ((module (compile-string

@@ -343,7 +343,7 @@ definition form itself; it needs no compiler-only definition constructor.
 | Function | Signature | Result / notes |
 | --- | --- | --- |
 | `+` | `(+ NUMBER...)` | Compile-time addition; zero arguments return 0. |
-| `definitions` | `(definitions FORM...)` | Returns zero or more top-level S-expression forms from one macro expansion. Each argument must be an S-expression. |
+| `definitions` | `(definitions FORM...)` | Compatibility helper for returning multiple top-level forms. Source macros can return a flat list directly. |
 | `compiler:call` | `(compiler:call HEAD FORM...)` | Constructs a call S-expression headed by the identifier `HEAD`. |
 | `compiler:map` | `(compiler:map HEAD LIST...)` | Constructs one call to `HEAD` per parallel set of elements. Lists must be proper and equally long. |
 | `compiler:reduce` | `(compiler:reduce HEAD INITIAL FORMS)` | Builds left-associated binary calls to `HEAD`, reducing `INITIAL` over `FORMS`. |
@@ -389,7 +389,9 @@ All compile-time lists are finite, proper S-expression lists.
 
 `nil`, `'nil`, `'()`, and `()` evaluate to the empty compile-time list.
 It is distinct from `false` and `unit`, and cannot be used as a runtime value.
-Empty data never means zero declarations: return `(definitions)` for that.
+A top-level macro can return one form or a flat list of forms. The compiler
+expands and collects each form in order. An empty list emits zero forms.
+Each batch element must be a valid top-level form. Nested batches are rejected.
 Conditions require `true` or `false`; predicates return Verona booleans.
 
 | Form | Evaluation |

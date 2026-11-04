@@ -12,10 +12,9 @@
   (let ((types (compiler:state-ref 'models:types))
         (rectangle (nth 0 types))
         (scale (nth 1 types)))
-    (definitions
-      `(base:type ,(plist-ref rectangle ':name)
+    `((base:type ,(plist-ref rectangle ':name)
          ,(cons 'product (plist-ref rectangle ':fields)))
-      `(base:type ,(plist-ref scale ':name)
+      (base:type ,(plist-ref scale ':name)
          ,(cons 'product (plist-ref scale ':fields))))))
 
 (export generate-types)

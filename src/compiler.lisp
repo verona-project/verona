@@ -886,26 +886,38 @@ expands syntax; this processor is the boundary that creates compiler objects."
                                          :parameters (second arguments) :return-type (third arguments)
 				         :body (fourth arguments)))))))))))
 
-(defun expand-top-level (syntax environment)
+(defun expand-top-level (syntax environment &optional collect-form)
   "Expand SYNTAX into a TOP-LEVEL-EXPANSION-RESULT.
 
-Unlike ordinary EXPAND, this protocol permits a macro to return an explicit
-TOP-LEVEL-EXPANSION-RESULT containing zero or more definition forms."
+Unlike ordinary EXPAND, this protocol accepts a flat list of definition forms.
+When COLLECT-FORM is supplied, visit final forms as expansion produces them."
   (check-type syntax syntax)
   (check-type environment environment)
   (let ((*macro-expansion-count* 0))
-    (labels ((expand-one (form)
+    (labels ((form-p (value)
+               (and (consp value)
+                    (or (verona-name-p (first value))
+                        (qualified-name-p (first value)))))
+             (expand-one (form)
                (check-type form syntax)
                (let ((macro (macro-at-head form environment)))
                  (if (not macro)
-                     (list form)
+                     (if collect-form
+                         (progn (funcall collect-form form) nil)
+                         (list form))
                      (let ((result (invoke-verona-macro
                                     macro form
                                     (rest (verona-list-elements
                                            (syntax-datum form))))))
                        (cond ((typep result 'syntax) (expand-one result))
                              ((macro-s-expression-p result)
-                              (expand-one (macro-result-syntax result form macro)))
+                              (cond ((form-p result)
+                                     (expand-one (macro-result-syntax result form macro)))
+                                    ((and (listp result) (every #'form-p result))
+                                     (mapcan (lambda (definition)
+                                               (expand-one (macro-result-syntax definition form macro)))
+                                             result))
+                                    (t (error 'invalid-macro-result-error :value result))))
                              ((typep result 'top-level-expansion-result)
                               (mapcan #'expand-one
                                       (mapcar (lambda (definition)
@@ -1258,15 +1270,15 @@ with a Verona module EXPORT."
                    (append (module-export-names module) (parse-export-form form))))
             ((string= (or (top-level-form-head form) "") "native-export")
              (push (parse-native-export-form form) (module-native-export-specs module)))
-            (t (dolist (expanded-syntax
-                         (top-level-expansion-result-definitions
-                          (expand-top-level form environment)))
-                 (when *collection-observer*
-                   (funcall *collection-observer* :expanded module expanded-syntax))
-                 (if (top-level-compile-time-expression-p expanded-syntax)
-                     ;; Statement results are data, never implicit declarations.
-                     (evaluate expanded-syntax environment)
-                     (process-definition environment module form expanded-syntax)))))
+            (t (expand-top-level
+                form environment
+                (lambda (expanded-syntax)
+                  (when *collection-observer*
+                    (funcall *collection-observer* :expanded module expanded-syntax))
+                  (if (top-level-compile-time-expression-p expanded-syntax)
+                      ;; Statement results are data, never implicit declarations.
+                      (evaluate expanded-syntax environment)
+                      (process-definition environment module form expanded-syntax))))))
       (when *collection-observer* (funcall *collection-observer* :collected module form)))
     (resolve-module-exports module)
     (setf (module-native-export-specs module) (nreverse (module-native-export-specs module)))
