@@ -77,7 +77,7 @@
   (uiop:with-temporary-file (:pathname library :stream stream :type "vrn")
     (write-string "(%export answer)(%function answer () i64 (hidden))(%function hidden () i64 42)" stream)
     (finish-output stream)
-    (let ((prefix (format nil "(%import ~A :as library)" (file-namestring library))))
+    (let ((prefix (format nil "(%import ~A :as library)" (pathname-name library))))
       (multiple-value-bind (output diagnostics status)
           (invoke "eval" (concatenate 'string prefix "(%function main () i64 (library:answer))"))
         (is (= 0 status))

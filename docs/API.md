@@ -34,10 +34,15 @@ Core locals use `(let ((NAME VALUE) ...) BODY)` with inferred types; optional
 collected across independent functions and block both execution paths. Type
 mismatches include expected/actual types and relevant declaration locations.
 
-Core modules use `(%import math.vrn :as math)`, `(%export answer)`, and qualified
-calls such as `(math:answer)`. Imports resolve relative to the importing file;
-canonical paths (including symlink resolution) identify modules loaded once per
-invocation. Functions and nominal types are private by default, unqualified calls remain local,
+Core modules use `(%import math)` or `(%import math :as math)`, `(%export answer)`,
+and qualified calls such as `(math:answer)`. Module `core.model` maps to
+`core.model.vrn` in the ordered search roots, matching the Common Lisp compiler.
+Use repeated `--module-path DIRECTORY` options; file compilation prepends the
+entry directory. All dependencies use the session roots. Full module names
+identify modules loaded once per invocation; different names remain distinct even
+when their files resolve to one canonical path. Without an alias, the full module
+name is the qualifier. Export declarations append and may repeat names. Dependencies
+are checked and lowered before importers in source import order. Functions and nominal types are private by default, unqualified calls remain local,
 and duplicate aliases, invalid exports, and import cycles are rejected. Only the
 root module supplies the entry `main`. Both execution paths retain dependency
 source locations. See the package README for visibility, ordering, and limits.
