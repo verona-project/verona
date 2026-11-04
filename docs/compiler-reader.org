@@ -30,13 +30,14 @@ Support:
 - Opening and closing parentheses.
 - Identifiers.
 - Signed decimal integer literals.
+- Double-quoted ASCII data literals and =#\= character literals.
 - Whitespace.
 - Semicolon comments extending to the end of the line.
 
 Read true, false, and unit as identifiers; recognize their language meaning
 during syntax lowering.
 
-Defer strings, quoting, and reader extensions for the first version.
+Quoting and other reader extensions remain deferred.
 Exact identifier characters, whitespace rules, sign/token boundaries, and
 non-ASCII handling still need to be specified before implementation.
 In particular, distinguish an operator identifier such as - from a signed
