@@ -168,7 +168,8 @@ first unsuccessful stage. The current boundary is B/build. The core accepts surf
 module directives and can compile a client of the real Base module. Building
 the compiler itself now loads =core.check.vrn= and reaches semantic checking.
 Platform reader conditionals select the native libc declarations. The first
-remaining diagnostics concern unsupported types in the Foundation allocator.
+remaining diagnostics concern function-pointer signatures in the Foundation
+allocator. Its =(pointer void)= context type resolves.
 Additional expansion support, general pointer operations, and native bindings
 are still required. The partial component, B/C
 rebuild, macro validation, and determinism milestones remain open.
