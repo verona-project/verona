@@ -39,8 +39,11 @@
 
 ; LLVMBool and C enum values use int, not the one-byte Verona bool.
 (base:type boolean i32)
+(base:type attribute-handle)
+(base:type attribute-ref (pointer attribute-handle))
 
 (export
+  attribute-ref
   context-ref
   module-ref
   type-ref

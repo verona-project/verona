@@ -49,6 +49,17 @@
   t:value-ref)
 
 (base:external-function function-type-of "LLVMGlobalGetValueType" (t:value-ref) t:type-ref)
+(base:external-function value-type "LLVMTypeOf" (t:value-ref) t:type-ref)
+(base:external-function struct-element "LLVMStructGetTypeAtIndex" (t:type-ref u32) t:type-ref)
+(base:external-function build-ret-void "LLVMBuildRetVoid" (t:builder-ref) t:value-ref)
+(base:external-function function-get "LLVMGetNamedFunction" (t:module-ref (pointer u8)) t:value-ref)
+(base:external-function linkage-get "LLVMGetLinkage" (t:value-ref) i32)
+(base:external-function struct-gep "LLVMBuildStructGEP2" (t:builder-ref t:type-ref t:value-ref u32 (pointer u8)) t:value-ref)
+(base:external-function attribute-kind "LLVMGetEnumAttributeKindForName" ((pointer u8) u64) u32)
+(base:external-function enum-attribute "LLVMCreateEnumAttribute" (t:context-ref u32 u64) t:attribute-ref)
+(base:external-function type-attribute "LLVMCreateTypeAttribute" (t:context-ref u32 t:type-ref) t:attribute-ref)
+(base:external-function function-attribute "LLVMAddAttributeAtIndex" (t:value-ref u32 t:attribute-ref) void)
+(base:external-function call-attribute "LLVMAddCallSiteAttribute" (t:value-ref u32 t:attribute-ref) void)
 
 (base:external-function function-param "LLVMGetParam" (t:value-ref u32) t:value-ref)
 
@@ -209,6 +220,7 @@
   (t:builder-ref t:type-ref t:value-ref (pointer t:value-ref) u32 (pointer u8)) t:value-ref)
 
 (export
+  value-type struct-element build-ret-void function-get linkage-get struct-gep attribute-kind enum-attribute type-attribute function-attribute call-attribute
   global-add initializer-set global-constant-set const-string
   array-type build-alloca build-load build-store build-gep
   float-type double-type const-real build-fcmp build-fadd build-fsub build-fmul build-fdiv
