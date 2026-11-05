@@ -292,6 +292,27 @@ result type, `(+ (cast u8 1) 1)` succeeds, while `(+ 1 (cast u8 1))` and
 (base:function converted-zero () u64 (do unit (base:convert (cast i32 0))))
 ```
 
+#### Runtime boolean operations
+
+Base provides five runtime boolean operations. Every operand must have type
+`bool`. Variadic forms require at least one operand, and `base:not` takes
+exactly one.
+
+| Form | Evaluation |
+| --- | --- |
+| `(base:and TEST...)` | Eager conjunction over the binary boolean primitive |
+| `(base:or TEST...)` | Eager disjunction over the binary boolean primitive |
+| `(base:not TEST)` | Unary complement using the boolean complement primitive |
+| `(base:and-then TEST...)` | Short-circuit conjunction that stops at the first false operand |
+| `(base:or-else TEST...)` | Short-circuit disjunction that stops at the first true operand |
+
+Reached operands run exactly once from left to right. Eager forms run all
+operands unless evaluation fails or terminates. Short-circuit forms expand
+into exhaustive boolean matches and statically check even skipped operands.
+Each variadic form returns its operand when called with one boolean.
+
+Compile-time evaluator forms retain their existing behavior.
+
 ### Testing library
 
 The bundled `projects/testing/` package provides Verona-native test results

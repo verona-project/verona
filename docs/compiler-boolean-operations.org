@@ -2,134 +2,40 @@
 #+DATE: 2026-11-01
 #+STARTUP: overview
 
-* Scope
-Provide both ordinary eager boolean functions and short-circuiting runtime
-forms in Base, then use the appropriate forms to simplify projects/compiler.
-This is an implementation plan; it does not add either public API yet.
+* Base API
+| Form                       | Evaluation                                    |
+|----------------------------+-----------------------------------------------|
+| (base:and TEST...)         | Eager conjunction                             |
+| (base:or TEST...)          | Eager disjunction                             |
+| (base:not TEST)            | Unary complement                              |
+| (base:and-then TEST...)    | Stop at the first false operand               |
+| (base:or-else TEST...)     | Stop at the first true operand                |
 
-Read AGENT.md, projects/base/AGENT.md, projects/compiler/AGENTS.md and
-/Users/dias/.codex/RTK.md before implementation. Prefix shell commands with rtk.
-Use the pinned Nix development shell for native builds and tests.
+Every operand and result is bool. The variadic macros require at least one
+operand, and not takes exactly one. Reached operands evaluate once from
+left to right. Eager macros expand to calls to the binary boolean primitives
+and evaluate every operand unless evaluation fails or terminates. Short-circuit
+macros construct nested exhaustive boolean matches, and every operand is
+statically checked, including runtime-skipped operands. A single operand
+still undergoes boolean checking and yields its original value.
 
-* Existing support
-The bootstrap compiler already registers these concrete operations in
-src/resolver.lisp and lowers them in src/backend/llvm/primitives.lisp:
-- %or-primitive-bool: (bool, bool) -> bool.
-- %and-primitive-bool: (bool, bool) -> bool.
-- %not-primitive-bool: (bool) -> bool.
-
-The compile-time evaluator already provides short-circuiting and/or forms.
-Base now provides a runtime cond macro over boolean match expressions.
-Runtime and/or macros should follow its approach: build the complete expansion
-in the macro definition's environment so private helper names and module
-qualifiers do not escape into client code. Test aliased imports explicitly.
-
-* Proposed public API
-| Form                          | Evaluation                       | Result |
-|-------------------------------+----------------------------------+--------|
-| (base:bool-or LEFT RIGHT)      | Both operands, left to right     | bool   |
-| (base:bool-and LEFT RIGHT)     | Both operands, left to right     | bool   |
-| (base:bool-not VALUE)          | One operand                      | bool   |
-| (base:or TEST...)              | Stop at the first true operand   | bool   |
-| (base:and TEST...)             | Stop at the first false operand  | bool   |
-
-The bool-* names are proposed spellings for the eager functions. Keep the
-public names distinct from and/or, which describe control flow.
-No new protocol or general truthiness rules are needed: every operand is bool.
-Use true/false, not Lisp nil or arbitrary values, for results.
-
-* Eager function semantics
-Define the functions in projects/base/src/base.vrn using the existing concrete
-boolean primitives, and export them.
-- Argument evaluation follows ordinary function-call semantics.
-- Both operands run even when the first already determines the boolean result,
-  provided evaluation has not terminated or failed.
-- Evaluate each operand exactly once, in source order.
-- bool-not complements one bool; it needs no short-circuiting counterpart.
-- These are ordinary runtime functions and can be used wherever functions are
-  supported. They do not receive unevaluated syntax.
-
-Do not add new bootstrap compiler primitives merely to expose existing ones.
-
-* Short-circuiting macro semantics
-Add exported Base macros or and and, with private expansion helpers.
-- (base:or) returns false; (base:and) returns true.
-- Evaluate operands exactly once, from left to right.
-- or skips the remaining operands after true; and skips them after false.
-- A single operand is still checked as bool and evaluated once.
-- Every operand is statically checked, including runtime-unselected operands.
-- No runtime temporary binding names are necessary.
-
-Build nested exhaustive boolean match expressions. Conceptually:
-
-#+begin_example
-or(a, rest...)  -> match a: true => true;  false => or(rest...)
-and(a, rest...) -> match a: true => and(rest...); false => false
-#+end_example
-
-Fully construct these forms at compile time; do not emit references to private
-helper macros or hard-coded client import aliases. Keep compile-time and/or
-behavior unchanged. Keep this as library syntax rather than introducing new
-special forms into the bootstrap compiler.
+Base builds each expansion in its macro definition environment. The result
+uses primitive names or boolean matches directly. The compile-time evaluator
+keeps its own boolean forms.
 
 * Compiler adoption
-Replace command validation with a short-circuiting predicate followed by one
-shared action. For argc=3, the intended form is:
+The command driver uses and-then for guarded argument access, or-else for
+mode and option selection, and eager or for checks of already computed
+validation results. Invalid commands still share the usage diagnostic.
 
-#+begin_src lisp
-(match (base:or
-         (equal mode "eval")
-         (equal mode "read")
-         (equal mode "check")
-         (equal mode "emit-llvm"))
-  (true (execute mode (deref (pointer-offset argv 2)) "" "-O0"))
-  (false (usage)))
-#+end_src
-
-Likewise consolidate duplicate actions when checking optimization levels and
-compile/compile-report modes. Use and for guarded conjunctions, especially where
-the second expression is only valid after a bounds or null check. Preserve the
-order of diagnostics and failures. Keep cond for choosing different actions and
-match for value dispatch and destructuring.
-
-Prefer the short-circuiting forms for ordinary conditional logic. The eager
-functions remain available when both operand computations are intended.
+The Verona core separately recognizes the five expanded boolean primitives.
+The Base APIs are library definitions used when bootstrapping the compiler
+implementation. Short-circuit expansion uses the reference compiler's
+boolean match support.
 
 * Validation
-Add focused frontend and native behavior tests covering:
-- All eager truth-table combinations, including bool-not.
-- Eager evaluation of both operands, exactly once and left to right, even when
-  the left value alone determines the result.
-- Zero, one and multiple operands for both macros.
-- Macro early stopping and continuation, with ordered side effects proving
-  that each operand runs at most once.
-- A skipped RHS that would terminate execution if reached; use defined runtime
-  behavior, not an operation whose LLVM semantics are undefined.
-- Safe guarded access: a later expression must not execute after a failed guard.
-- Rejection of nonboolean operands, including the single-operand case and
-  runtime-unselected operands.
-- Qualified and aliased imports, nested macro use, and local names matching
-  the private compile-time expansion variables.
-- Existing CLI command handling, invalid arguments, diagnostics and native parity.
-
-Exercise native tests with optimization disabled and enabled. Compare observable
-behavior; do not require a particular LLVM instruction spelling or block shape.
-
-Run make test-frontend and make test-llvm for Base behavior, plus
-make test-compiler-core and make test-compiler-support after compiler adoption.
-Run the affected Base project tests as required by repository instructions.
-
-* Implementation sequence
-1. Confirm the existing primitive types and ordinary argument evaluation order;
-   add eager behavior tests and Base bool-* wrappers.
-2. Add runtime or and and macros with evaluation-order, type and alias tests.
-3. Replace duplicate-action conditions and guarded boolean chains in the compiler.
-4. Update projects/base/README.md, docs/API.md and site/manual/index.html to
-   document eager functions versus short-circuiting forms.
-5. Run the relevant suites in the pinned shell and report their results.
-
-The independently implemented compiler core currently accepts a smaller set of
-expanded forms and primitives. Using Base macros in its implementation does not
-extend that accepted source language. Adding eager boolean primitives to the
-core's own checked representation, evaluator and LLVM backend is separate work
-and must be explicitly scoped before changing its input contract.
+The core suite checks truth tables, strict types and arity, and eager failure
+behavior in the evaluator and native builds. Base integration tests check
+left-to-right evaluation using an observable trace, short-circuit skipping,
+guarded pointer access, aliased imports, nested macros, and arity and type
+errors. Native tests run at optimization levels 0 and 2.
