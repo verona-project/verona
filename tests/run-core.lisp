@@ -57,13 +57,17 @@
     (is (string= "" output))
     (is (not (null (search "only %function declarations" diagnostics))))))
 
-(test rejects-unexpanded-module-declarations
-  (dolist (form '("(import missing.vrn :as m)" "(export main)"))
-    (multiple-value-bind (output diagnostics status)
-        (invoke "check" (concatenate 'string form "(%function main () i64 0)"))
-      (is (= 2 status))
-      (is (string= "" output))
-      (is (not (null (search "only %function declarations" diagnostics)))))))
+(test accepts-surface-module-directives
+  (multiple-value-bind (output diagnostics status)
+      (invoke "check" "(export main)(%function main () i64 0)")
+    (is (= 0 status))
+    (is (string= "" output))
+    (is (string= "" diagnostics)))
+  (multiple-value-bind (output diagnostics status)
+      (invoke "check" "(import missing.vrn :as m)(%function main () i64 0)")
+    (is (= 2 status))
+    (is (string= "" output))
+    (is (not (null (search "module not found" diagnostics))))))
 
 (test signed-minimum-through-runtime-bindings
   (multiple-value-bind (output diagnostics status)
