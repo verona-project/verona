@@ -195,7 +195,15 @@
 (base:external-function build-fptoui "LLVMBuildFPToUI" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
 (base:external-function build-bitcast "LLVMBuildBitCast" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
 
+(base:external-function array-type "LLVMArrayType2" (t:type-ref u64) t:type-ref)
+(base:external-function build-alloca "LLVMBuildAlloca" (t:builder-ref t:type-ref (pointer u8)) t:value-ref)
+(base:external-function build-load "LLVMBuildLoad2" (t:builder-ref t:type-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function build-store "LLVMBuildStore" (t:builder-ref t:value-ref t:value-ref) t:value-ref)
+(base:external-function build-gep "LLVMBuildGEP2"
+  (t:builder-ref t:type-ref t:value-ref (pointer t:value-ref) u32 (pointer u8)) t:value-ref)
+
 (export
+  array-type build-alloca build-load build-store build-gep
   float-type double-type const-real build-fcmp build-fadd build-fsub build-fmul build-fdiv
   build-fpext build-fptrunc build-sitofp build-uitofp build-fptosi build-fptoui build-bitcast
   build-sext build-udiv build-or build-xor build-shl build-ashr build-lshr build-urem const-null struct-type build-insert build-extract
