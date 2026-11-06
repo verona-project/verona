@@ -84,7 +84,7 @@ that all earlier state operations behaved correctly.
 Completion check: build and run =macro-expansion=, expecting output =42=,
 and verify that independent compilations do not share mutable compiler state.
 
-** TODO Support pointer equality through the default generics
+** DONE Support pointer equality through the default generics
 The =bootstrap= tool compares =getenv= results using ====. After mutable global
 support, =foundation-tests= also reaches pointer comparisons in its allocation
 tracker and arena tests. The self-hosted compiler currently reports no matching
@@ -281,9 +281,45 @@ outside this completed item.
 Follow-up evidence: [[file:../build/self-hosted-tools/state-g53s6tc3/results.json][Self-hosted compiler and macro-expansion results]] and
 [[file:../build/self-hosted-tools/state-g53s6tc3/verification.json][validation summary]]. The complete A/B/C gate was not repeated in this step.
 
+** Pointer equality completed
+Equality generics named ==== and =!== now fall back to pointer identity after
+ordinary generic resolution. Operands must have exactly matching pointer types;
+there is no implicit void-pointer conversion or integer-to-null coercion.
+Explicit implementations, lexical bindings, and protocol evidence retain their
+precedence. Pointer ordering remains unsupported by this fallback.
+
+Native lowering emits LLVM pointer comparisons. The evaluator compares address
+identities and offsets rather than managed handle IDs, retaining data-literal
+origins across pointer arithmetic. Comparison does not dereference memory or
+require aligned, live storage; reads and writes keep their existing checks.
+Native callback adapters are shared per function, and external declarations
+that name one C symbol retain one identity in the evaluator as well.
+
+Validation:
+- =make test-compiler-core test-compiler-support= passed: 33 driver checks,
+  105 regressions, 58 shared fixtures, and the support suite.
+- Focused tests cover managed addresses and offsets, data-literal origins,
+  function pointers and native symbol aliases, dispatch precedence, incompatible
+  types, native null results, and argument evaluation order. Support checks
+  cover null and opaque evaluator inputs and comparison without dereferencing
+  expired storage.
+- The verified stage C compiler rebuilt the updated compiler, which passed all
+  five focused test groups and all 58 shared fixtures.
+- That self-hosted binary built =foundation-tests= and =bootstrap=. Foundation
+  passed all 277 named tests. Bootstrap correctly handled both environment
+  variables absent, either one absent, both present, and both present but empty.
+  Its expected status is 1 when a variable is absent and 0 when both are present.
+
+The observed successful normal executable builds now total 14 of 17. The three
+remaining blocked executables are =wc=, =dynamic-library-client=, and =workflow=.
+Seven library artifacts and the two negative fixtures retain their earlier status.
+
+Follow-up evidence: [[file:../build/self-hosted-tools/pointer-vk3hvqh_/results.json][Pointer validation and affected-project results]] and
+[[file:../build/self-hosted-tools/pointer-vk3hvqh_/verification.json][validation summary]]. The complete A/B/C gate was not repeated in this step.
+
 * Suggested order
-Pointer equality is next: it blocks both =bootstrap= and =foundation-tests=.
-Then address =wc= and the older declaration fixtures.
+Reconcile character arguments in =wc= next, then address the older declaration
+fixtures.
 Add library artifacts and manifest-driven builds, then rerun the complete audit.
 Adjust this order when newly exposed failures or dependencies require it.
 
