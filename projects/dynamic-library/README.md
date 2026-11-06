@@ -14,4 +14,6 @@ cd projects/dynamic-library
 ```
 
 The artifact is written to `build/dynamic-library/` as a `.dylib` on macOS or
-a `.so` on Linux.
+a `.so` on Linux. Surface declarations explicitly import Base; the manifest
+includes its source directory. Library builds also generate a C header beside
+the artifact for the explicit `native-export` contract.

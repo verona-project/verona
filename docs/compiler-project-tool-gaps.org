@@ -129,7 +129,7 @@ Completion check: =workflow= runs and returns 7; both negative fixtures fail
 at their intended phase with the intended diagnostic. The dynamic library
 client additionally needs the artifact support below.
 
-** TODO Add native library artifact output
+** DONE Add native library artifact output
 The self-hosted CLI currently emits executables. It needs the reference
 driver's artifact policies for the library targets in the project manifests:
 
@@ -373,9 +373,58 @@ Formatting and whitespace checks passed.
 Follow-up evidence: [[file:../build/self-hosted-tools/declarations-0kfv2l91/results.json][Self-hosted declaration-fixture checks]].
 The complete A/B/C gate was not repeated.
 
+** Native library artifact output completed
+=compile= now accepts =--emit object|executable|static-library|shared-library=,
+with executable output as the default and an explicit =-o= output path.
+Object and library roots do not require =main= or receive an entry wrapper.
+Executable entry checks and =compile-report= behavior remain in place.
+
+Explicit =native-export= declarations resolve local functions and validate
+recursive C-compatible parameter/result types and unique C names across the
+loaded graph. C ABI adapters expose those functions; ordinary module exports
+and private functions remain hidden. Exported entry points reuse the existing
+scalar, aggregate, and callback conversion machinery. Native function addresses
+share the first exported adapter for that function.
+
+Objects are emitted through LLVM, static libraries use =ar rcs=, and shared
+libraries use PIC output and the reference platform linker flags. Library
+headers describe scalar types, products, tagged sums, arrays, opaque handles,
+pointer chains, callbacks, and explicit native export prototypes. Headers sit
+beside their libraries with the final extension replaced by =.h=.
+Native tool argument storage and temporary object cleanup cover success,
+failed tools, and injected allocation failures. The dynamic-library example
+now imports Base and its manifest includes Base's source path.
+
+Validation:
+- =make test-compiler-core test-compiler-support= passed: 33 driver checks,
+  111 regressions, 60 shared fixtures, and the support suite.
+- Focused C clients cover all three non-executable artifact kinds, both
+  optimization levels, native symbol visibility, scalar and aggregate values,
+  large aggregate returns, floating-point aggregates, callbacks, functions
+  returning callbacks, recursive pointer headers, and opaque pointer chains.
+  Invalid exports and entry/artifact options are rejected. Native tool failure
+  checks verify temporary cleanup and absence of a generated header.
+- The verified stage C compiler rebuilt the updated compiler. That independently
+  self-hosted binary passed all six focused artifact test groups and all 60
+  shared fixtures.
+- That binary built all seven library targets: =base=, =foundation=,
+  =workflow-library=, =libc=, =verona-llvm=, =testing=, and =dynamic-library=.
+  It then built and ran =dynamic-library-client= against the fresh shared
+  library in an isolated output directory. A separate C client included the
+  generated header, linked that shared library, and ran successfully.
+
+The cumulative observed results now cover all 17 normal executable targets and
+all seven library targets. Both intentional negative fixtures retain their
+validated failure phases. This is incremental evidence across the checklist;
+the complete maintained project audit remains a later item. Manifest settings
+were translated by an external validation adapter, not a self-hosted =build=
+command. The complete A/B/C gate was not repeated.
+
+Follow-up evidence: [[file:../build/self-hosted-tools/artifacts-fdjpwgje/results.json][Self-hosted compiler, library builds, and client results]] and
+[[file:../build/self-hosted-tools/artifacts-fdjpwgje/verification.json][validation summary]].
+
 * Suggested order
-Add native library artifact output next, followed by manifest-driven builds
-and the maintained project-wide audit.
+Implement manifest-driven builds next, then the maintained project-wide audit.
 Adjust this order when newly exposed failures or dependencies require it.
 
 * Audit evidence
