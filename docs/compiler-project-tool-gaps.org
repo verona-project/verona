@@ -33,7 +33,7 @@ These are observed first blockers, not a complete language-parity inventory.
 Rebuild affected targets after each item; later failures may reveal more work.
 
 * Implementation checklist
-** TODO Port compile-time reductions
+** DONE Port compile-time reductions
 Implement =compiler:reduce= and =compiler:reduce-right= using the behavior in
 [[file:../src/compiler.lisp][the reference compiler's compile-time helpers]]. These helpers construct syntax;
 they do not execute the named runtime operation while expanding the macro.
@@ -175,10 +175,40 @@ and both negative fixtures fail as intended using only the self-hosted compiler
 for Verona compilation. Native linkers and other pinned host tools remain valid
 dependencies.
 
+* Implementation progress
+** Compile-time reductions completed
+=compiler:reduce= and =compiler:reduce-right= now construct calls in the
+self-hosted macro evaluator, following the reference association rules. They
+validate argument count, callable names, and list inputs; preserve immutable
+inputs and source locations; and consume the shared evaluation budget.
+
+Validation:
+- =make test-compiler-core=: 33 driver checks, 90 core regressions, and 47
+  shared fixtures passed.
+- The verified stage C compiler built the updated compiler. That self-hosted
+  binary passed the three focused reduction tests and attempted all six affected
+  target builds without using the Common Lisp compiler for those builds.
+- =verona-fmt=, =verona-project=, =bounded-tests=, and =foundation-example= now
+  build. The latter two run successfully; formatter standard-input formatting
+  and project help, project creation, and library listing also pass.
+- The existing formatter integration suite passed all 1,315 checks with the
+  self-hosted formatter, including reader equivalence and formatting idempotence
+  across the project source corpus.
+- =formatter-tests= and =testing-smoke= now get past reductions and remain
+  blocked by mutable global variables.
+
+This raises the observed successful normal executable builds from four to
+eight of 17. Nine normal executable targets remain blocked. The original audit
+above remains a record of the starting point; library artifacts and negative
+fixtures have not been revalidated in this step.
+
+Follow-up evidence: [[file:../build/self-hosted-tools/reductions-6hiydzrg/results.json][Affected-target builds]] and
+[[file:../build/self-hosted-tools/reductions-6hiydzrg/runtime-checks.json][runtime checks]]. This step rebuilt the compiler with stage C;
+it did not repeat the complete A/B/C reproducibility gate.
+
 * Suggested order
-Start with reductions, then mutable globals: these unblock the formatter,
-project manager, and much of the test infrastructure. Address compile-time
-state helpers, pointer equality, =wc=, and older declaration fixtures next.
+Mutable globals are next, to unblock more of the test infrastructure. Address
+compile-time state helpers, pointer equality, =wc=, and older declaration fixtures next.
 Add library artifacts and manifest-driven builds, then rerun the complete audit.
 Adjust this order when newly exposed failures or dependencies require it.
 
