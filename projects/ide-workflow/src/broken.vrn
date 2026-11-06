@@ -1,2 +1,4 @@
-(function main () exit-code
+(import base)
+
+(base:function main () exit-code
   missing-workflow-value)

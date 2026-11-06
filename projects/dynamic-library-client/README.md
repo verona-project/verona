@@ -3,7 +3,8 @@
 This independent Verona project links against the shared library built by
 [`../dynamic-library/`](../dynamic-library/). Its executable declares the
 library's C-ABI export with `external-function`, calls it with `20` and `22`,
-and succeeds only when the result is `42`.
+and succeeds only when the result is `42`. Surface declarations explicitly
+import Base; the manifest includes `../base/src` in its module search paths.
 
 Build and run both projects from the repository root:
 

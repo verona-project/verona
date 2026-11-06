@@ -1,3 +1,4 @@
+(import base)
 (import model :as calc)
 
-(calc:identity (function main () exit-code (calc:answer)))
+(calc:identity (base:function main () exit-code (calc:answer)))

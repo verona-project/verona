@@ -13,7 +13,7 @@
 
 (base:type count-result (product (value counts) (complete bool)))
 
-(base:function whitespace ((character libc:c-int)) bool
+(base:function whitespace ((character u8)) bool
   (match character
     (#\tab true)
     (#\newline true)
@@ -23,20 +23,17 @@
     (#\space true)
     (_ false)))
 
-(base:function write-character ((character libc:c-int)) unit
-  (do (stdio:putchar character) unit))
+(base:function write-character ((character u8)) unit
+  (do (stdio:putchar (%zext-primitive-u8-i32 character)) unit))
 
 (base:function write-string ((value (pointer u8))) unit
   (let ((character u8 (deref value)))
     (match character
       (0 unit)
-      (_
-        (do
-          (write-character (%zext-primitive-u8-i32 character))
-          (write-string (pointer-offset value 1)))))))
+      (_ (do (write-character character) (write-string (pointer-offset value 1)))))))
 
 (base:function write-digit ((digit u64)) unit
-  (write-character (%trunc-primitive-u64-i32 (%+-primitive-u64 digit 48))))
+  (write-character (%trunc-primitive-u64-u8 (%+-primitive-u64 digit 48))))
 
 (base:function write-number ((value u64)) unit
   (match (%<-primitive-u64 value 10)
@@ -134,9 +131,7 @@
     (match (descriptor:read file-descriptor (cast (pointer void) (& byte)) 1)
       (0 (count-result (counts lines words bytes) true))
       (1
-        (let
-          ((character libc:c-int (%zext-primitive-u8-i32 byte))
-           (next-bytes u64 (%+-primitive-u64 bytes 1)))
+        (let ((character u8 byte) (next-bytes u64 (%+-primitive-u64 bytes 1)))
           (match (whitespace character)
             (true
               (count-stream

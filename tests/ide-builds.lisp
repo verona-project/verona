@@ -37,21 +37,34 @@
   ;; Work on a disposable copy: acceptance fixtures must remain repeatable.
   (with-ide-build-project (store id root)
     (let* ((fixture (asdf:system-relative-pathname :verona "projects/ide-workflow/"))
+           (base (asdf:system-relative-pathname :verona "projects/base/src/"))
            (main (namestring (merge-pathnames "src/main.vrn" root)))
            (leaf (merge-pathnames "src/leaf.vrn" root)))
       (dolist (relative '("verona.build" "src/main.vrn" "src/model.vrn" "src/leaf.vrn"
                           "src/unrelated.vrn" "src/broken.vrn"))
         (ide-build-write (merge-pathnames relative root)
                          (uiop:read-file-string (merge-pathnames relative fixture))))
+      ;; Relocate Base without replacing the manifest under test with a duplicate.
+      (let* ((build-file (merge-pathnames "verona.build" root))
+             (text (uiop:read-file-string build-file))
+             (relative "\"../base/src\""))
+        (ide-build-write build-file
+          (with-output-to-string (out)
+            (loop with start = 0
+                  for position = (search relative text :start2 start)
+                  do (write-string text out :start start :end position)
+                  while position
+                  do (prin1 (namestring base) out)
+                     (setf start (+ position (length relative)))))))
       (verona.ide:close-session store id)
       (setf id (verona.ide:create-session store
                  (verona.ide:make-configuration :root root
                    :build-file (merge-pathnames "verona.build" root) :build-target "workflow"
-                   :search-paths (list (merge-pathnames "src/" root)))))
+                   :search-paths (list (merge-pathnames "src/" root) base))))
       (verona.ide:open-buffer store id "main" (uiop:read-file-string main) :path main)
       (verona.ide:open-buffer store id "leaf" (uiop:read-file-string leaf) :path leaf)
       (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main))))
-      (verona.ide:edit-buffer store id "leaf" "(function answer () exit-code 9) (export answer)")
+      (verona.ide:edit-buffer store id "leaf" "(import base) (base:function answer () exit-code 9) (export answer)")
       (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main))))
       (let ((evaluated (verona.ide:module-state store id main)))
         (signals verona.ide:request-error (verona.ide:start-build store id))
@@ -62,7 +75,7 @@
           (verona.ide:start-program store id token)
           (is (= 7 (getf (wait-ide-build store id token :run t) :run-exit-status))))
         ;; Saving does not replace analysis. IDE and CLI now both run 9.
-        (ide-build-write leaf "(function answer () exit-code 9) (export answer)")
+        (ide-build-write leaf "(import base) (base:function answer () exit-code 9) (export answer)")
         (verona.ide:save-buffer store id "leaf")
         (is (equalp evaluated (verona.ide:module-state store id main)))
         (let* ((token (getf (verona.ide:start-build store id) :build))
@@ -87,7 +100,7 @@
                   (verona.ide:create-session store
                     (verona.ide:make-configuration :root root
                       :build-file (merge-pathnames "verona.build" root) :build-target target
-                      :search-paths (list (merge-pathnames "src/" root))))))
+                      :search-paths (list (merge-pathnames "src/" root) base)))))
             (unwind-protect
                  (let* ((source (merge-pathnames
                                  (if (string= target "analysis-failure") "src/broken.vrn" "src/main.vrn") root))

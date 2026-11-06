@@ -3,6 +3,7 @@
   dynamic-library-client
   (root dynamic-library-client)
   (module-path "src")
+  (module-path "../base/src")
   (library-path "../../build/dynamic-library")
   (library "dynamic-library")
   (target native)

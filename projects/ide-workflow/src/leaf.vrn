@@ -1,4 +1,6 @@
-(function answer () exit-code
+(import base)
+
+(base:function answer () exit-code
   7)
 
 (export answer)

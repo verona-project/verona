@@ -96,7 +96,7 @@ Completion check: exercise pointer identity and inequality, reject incompatible
 operands according to the reference rules, and build and run =bootstrap= with
 the relevant environment variables both present and absent.
 
-** TODO Reconcile character arguments in wc
+** DONE Reconcile character arguments in wc
 =wc= passes =#\space= and =#\newline=, which have type =u8=, to its
 =write-character= helper, whose argument is =i32=. The compiler reports the
 type mismatch at those calls.
@@ -110,7 +110,7 @@ Completion check: build =wc= and exercise standard input, files, and selected
 counts. Input =one two\nthree\n= should report two lines, three words, and
 14 bytes with the default selection.
 
-** TODO Align older examples with declaration expansion
+** DONE Align older examples with declaration expansion
 =workflow= and =dynamic-library-client= use surface declarations without
 importing Base. The compiler expects declarations such as =%function= after
 macro expansion; surface declarations belong to Base.
@@ -317,10 +317,65 @@ Seven library artifacts and the two negative fixtures retain their earlier statu
 Follow-up evidence: [[file:../build/self-hosted-tools/pointer-vk3hvqh_/results.json][Pointer validation and affected-project results]] and
 [[file:../build/self-hosted-tools/pointer-vk3hvqh_/verification.json][validation summary]]. The complete A/B/C gate was not repeated in this step.
 
+** wc character arguments completed
+=wc= now uses =u8= for its character output helper and whitespace checking.
+The output helper explicitly zero-extends to C's =i32= argument at =putchar=;
+digit generation explicitly narrows to =u8=. Reading bytes and writing data no
+longer introduce intermediate character widening. No implicit integer
+conversions were added to the compiler.
+
+The independently self-hosted compiler from the pointer-equality step built
+=wc=. Thirteen runtime checks passed: default standard input, empty input,
+individual line/word/byte selections, combined selections, a file, multiple-file
+totals, named standard input using =-- -=, all six whitespace separators,
+high-bit input bytes, invalid options, and a missing file. The sample
+=one two\nthree\n= reports =2 3 14=.
+
+This raises the observed successful executable builds to 15 of 17; the remaining
+two are =workflow= and =dynamic-library-client=. Library artifacts and intentional
+negative fixtures retain their earlier status. An existing option-parser bug
+rejects bare =-= before it reaches the named standard-input path; =-- -= works.
+That separate source issue was not changed in this item.
+
+Follow-up evidence: [[file:../build/self-hosted-tools/wc-pnv6p8_e/results.json][Self-hosted wc build and runtime checks]].
+The complete A/B/C gate was not repeated.
+
+** Older declaration fixtures aligned
+=ide-workflow= and =dynamic-library-client= now explicitly import Base for
+surface declarations, use its qualified declaration macros, and include its
+source directory in their manifests. The independent IDE module deliberately
+uses expanded =%function= input without imports so it remains independent for
+selective-invalidation checks.
+
+IDE analysis tests retain Base when editing source buffers. Disposable build
+tests relocate the copied manifest's Base path to the checkout rather than
+assuming a sibling package exists in the temporary directory. The acceptance
+walkthrough documents the same dependency and source-edit requirements.
+
+The independently self-hosted compiler from the pointer-equality step builds
+=workflow=, which exits with status 7 and no output. =analysis-failure= now
+reports an unknown local name at =missing-workflow-value= rather than stopping
+at declaration handling. =link-failure= passes semantic checking and reaches
+the native linker, which rejects =verona_missing_library_for_workflow_test=.
+Neither negative fixture leaves an executable. =dynamic-library-client= passes
+semantic checking; linking and running against a freshly self-hosted shared
+library remains part of the artifact-output item.
+
+The observed successful executable builds now total 16 of 17. The sole
+remaining executable is =dynamic-library-client=, pending shared-library
+artifact output. Seven library targets remain pending. Both intentional
+negative fixtures now fail at their intended phase.
+
+=make test-frontend= passed all 1,369 checks. =make test-compiler= also
+passed, including the updated representative IDE build and failure-phase tests.
+Formatting and whitespace checks passed.
+
+Follow-up evidence: [[file:../build/self-hosted-tools/declarations-0kfv2l91/results.json][Self-hosted declaration-fixture checks]].
+The complete A/B/C gate was not repeated.
+
 * Suggested order
-Reconcile character arguments in =wc= next, then address the older declaration
-fixtures.
-Add library artifacts and manifest-driven builds, then rerun the complete audit.
+Add native library artifact output next, followed by manifest-driven builds
+and the maintained project-wide audit.
 Adjust this order when newly exposed failures or dependencies require it.
 
 * Audit evidence

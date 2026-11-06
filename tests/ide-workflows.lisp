@@ -9,7 +9,8 @@
          (store (verona.ide:make-session-store))
          (id (verona.ide:create-session store
                (verona.ide:make-configuration :root root
-                 :search-paths (list (merge-pathnames "src/" root)))))
+                 :search-paths (list (merge-pathnames "src/" root)
+                                     (merge-pathnames "../base/src/" root)))))
          (main (namestring (truename (merge-pathnames "src/main.vrn" root))))
          (leaf (namestring (truename (merge-pathnames "src/leaf.vrn" root))))
          (model (namestring (truename (merge-pathnames "src/model.vrn" root))))
@@ -31,7 +32,7 @@
              (is (not (eq cached (verona.ide:query-result store id leaf))))
              ;; Edits and read-only queries preserve all evaluated products.
              (verona.ide:edit-buffer store id "leaf"
-               "(function answer () exit-code 9) (export answer)")
+               "(import base) (base:function answer () exit-code 9) (export answer)")
              (verona.ide:list-definitions store id)
              (verona.ide:project-diagnostics store id)
              (is (not (eq cached (verona.ide:query-result store id leaf))))
@@ -43,7 +44,7 @@
              (is (eq :complete (verona.ide:request-status (verona.ide:evaluate-module store id main)))))
            ;; A failed dependency replaces success, then recovery clears diagnostics.
            (verona.ide:edit-buffer store id "leaf"
-             "(function broken () exit-code missing-workflow-value)")
+             "(import base) (base:function broken () exit-code missing-workflow-value)")
            (is (eq :failed (verona.ide:request-status (verona.ide:evaluate-module store id main))))
            (let ((key (getf (verona.ide:module-state store id leaf) :identity)))
              (is (eq :partial (getf (verona.ide:module-diagnostics store id key) :availability)))

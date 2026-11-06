@@ -1,2 +1,3 @@
-(function independent () i32
+;; Expanded input keeps this selective-invalidation fixture dependency-free.
+(%function independent () i32
   99)
