@@ -1,5 +1,4 @@
 (import base)
-
 (import libc.types :as libc)
 (import libc.constants :as constants)
 (import libc.memory :as memory)
@@ -8,67 +7,51 @@
 (import libc.descriptor :as descriptor)
 
 (base:function write-standard-output ((buffer (pointer void)) (size libc:size-t)) unit
-  (do
-    (descriptor:write constants:STDOUT-FILENO buffer size)
-    unit))
+  (do (descriptor:write constants:STDOUT-FILENO buffer size) unit))
 
 (base:function write-string ((value (pointer u8))) unit
-  (write-standard-output
-   (cast (pointer void) value)
-   (string:strlen value)))
+  (write-standard-output (cast (pointer void) value) (string:strlen value)))
 
 (base:function clear-memory ((buffer (pointer void)) (size libc:size-t)) unit
-  (do
-    (memory:memset buffer 0 size)
-    unit))
+  (do (memory:memset buffer 0 size) unit))
 
 (base:function read-character () libc:c-int
   (stdio:getchar))
 
 (base:function announce () unit
   (write-string
-   "Verona calculator\nEnter a single-digit expression, for example: 6*7\nSupported operators: + - * /\nSubmit an empty line or EOF to exit.\n\n"))
+    "Verona calculator\nEnter a single-digit expression, for example: 6*7\nSupported operators: + - * /\nSubmit an empty line or EOF to exit.\n\n"))
 
 (base:function write-prompt () unit
   (write-string "calc> "))
 
 (base:function write-result ((value i32) (buffer (array u8 3))) unit
-  (let ((tens i32 (%/-primitive-i32 value 10))
-        (ones i32 (%--primitive-i32 value
-                                    (%*-primitive-i32
-                                     (%/-primitive-i32 value 10) 10))))
+  (let
+    ((tens i32 (%/-primitive-i32 value 10))
+     (ones i32 (%--primitive-i32 value (%*-primitive-i32 (%/-primitive-i32 value 10) 10))))
     (do
       (clear-memory (cast (pointer void) (& buffer)) 3)
-      (assign (index buffer 0) (%trunc-primitive-i32-u8
-                                (%+-primitive-i32 tens 48)))
-      (assign (index buffer 1) (%trunc-primitive-i32-u8
-                                (%+-primitive-i32 ones 48)))
+      (assign (index buffer 0) (%trunc-primitive-i32-u8 (%+-primitive-i32 tens 48)))
+      (assign (index buffer 1) (%trunc-primitive-i32-u8 (%+-primitive-i32 ones 48)))
       (assign (index buffer 2) 10)
       (write-standard-output (cast (pointer void) (& buffer)) 3)
       unit)))
 
-(base:function apply-operator
-  (for (a)
-    ((base:numeric a)
-     (base:equality a)))
-  ((left a) (operator i32) (right a))
-  a
+(base:function apply-operator (for (a) ((base:numeric a) (base:equality a)))
+  ((left a) (operator i32) (right a)) a
   (match operator
     (#\+ (+ left right))
     (#\- (- left right))
     (#\* (* left right))
-    (#\/ (match (= right (- right right))
-           (true (- left left))
-           (false (/ left right))))
+    (#\/ (match (= right (- right right)) (true (- left left)) (false (/ left right))))
     (_ (- left left))))
 
-(base:function evaluate ((left-character i32) (operator i32)
-                    (right-character i32) (buffer (array u8 3))) unit
-  (let ((left i32 (%--primitive-i32 left-character 48))
-        (right i32 (%--primitive-i32 right-character 48)))
-    (write-result
-     (apply-operator left operator right)
-     buffer)))
+(base:function evaluate
+  ((left-character i32) (operator i32) (right-character i32) (buffer (array u8 3))) unit
+  (let
+    ((left i32 (%--primitive-i32 left-character 48))
+     (right i32 (%--primitive-i32 right-character 48)))
+    (write-result (apply-operator left operator right) buffer)))
 
 (base:function repl ((buffer (array u8 3))) exit-code
   (do
@@ -77,14 +60,12 @@
       (match left
         (-1 0)
         (#\Newline 0)
-        (_ (let ((operator i32 (read-character))
-                 (right i32 (read-character))
-                 (newline i32 (read-character)))
-             (do
-               (evaluate left operator right buffer)
-               (repl buffer))))))))
+        (_
+          (let
+            ((operator i32 (read-character))
+             (right i32 (read-character))
+             (newline i32 (read-character)))
+            (do (evaluate left operator right buffer) (repl buffer))))))))
 
 (base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
-  (do
-    (announce)
-    (repl (array-of 0 0 0))))
+  (do (announce) (repl (array-of 0 0 0))))

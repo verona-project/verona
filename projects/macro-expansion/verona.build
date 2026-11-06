@@ -1,4 +1,5 @@
-(executable macro-expansion
+(executable
+  macro-expansion
   (root macro-expansion)
   (module-path "src")
   (module-path "../base/src")

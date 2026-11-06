@@ -1,4 +1,5 @@
-(shared-library dynamic-library
+(shared-library
+  dynamic-library
   (root dynamic-library)
   (module-path "src")
   (target native)

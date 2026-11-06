@@ -1,5 +1,4 @@
 (import base)
-
 (import libc.types :as libc)
 (import libc.constants :as constants)
 (import libc.memory :as memory)
@@ -9,77 +8,76 @@
 
 (base:function write-string ((value (pointer u8))) unit
   (do
-    (descriptor:write constants:STDOUT-FILENO
-                      (cast (pointer void) value)
-                      (string:strlen value))
+    (descriptor:write constants:STDOUT-FILENO (cast (pointer void) value) (string:strlen value))
     unit))
 
-#+darwin
-(base:function make-ipv4-socket-address ((port u16) (address u32)) libc:ipv4-socket-address
-  (libc:ipv4-socket-address 16 2 (network:htons port) address
-                             (array-of 0 0 0 0 0 0 0 0)))
+#+darwin (base:function make-ipv4-socket-address ((port u16) (address u32)) libc:ipv4-socket-address
+           (libc:ipv4-socket-address 16 2 (network:htons port) address (array-of 0 0 0 0 0 0 0 0)))
 
-#+linux
-(base:function make-ipv4-socket-address ((port u16) (address u32)) libc:ipv4-socket-address
-  (libc:ipv4-socket-address 2 (network:htons port) address
-                             (array-of 0 0 0 0 0 0 0 0)))
+#+linux (base:function make-ipv4-socket-address ((port u16) (address u32)) libc:ipv4-socket-address
+          (libc:ipv4-socket-address 2 (network:htons port) address (array-of 0 0 0 0 0 0 0 0)))
 
-(base:function bind-ipv4 ((descriptor libc:file-descriptor) (port u16) (address (pointer u8))) libc:c-int
+(base:function bind-ipv4 ((descriptor libc:file-descriptor) (port u16) (address (pointer u8)))
+  libc:c-int
   (let ((ipv4-address u32 (network:inet-addr address)))
     (match ipv4-address
       (4294967295 -1)
-      (_ (let ((address-storage libc:ipv4-socket-address
-                                (make-ipv4-socket-address port ipv4-address)))
-           (network:bind descriptor
-                         (cast (pointer libc:socket-address)
-                               (cast (pointer void) (& address-storage)))
-                         16))))))
+      (_
+        (let
+          ((address-storage libc:ipv4-socket-address (make-ipv4-socket-address port ipv4-address)))
+          (network:bind
+            descriptor
+            (cast (pointer libc:socket-address) (cast (pointer void) (& address-storage)))
+            16))))))
 
 (base:function announce () unit
   (write-string
-   "Verona echo server\nListening on 127.0.0.1:35000\nOne client is served at a time; every byte received is echoed back.\nConnect with: nc 127.0.0.1 35000\nStop with Ctrl-C.\n"))
+    "Verona echo server\nListening on 127.0.0.1:35000\nOne client is served at a time; every byte received is echoed back.\nConnect with: nc 127.0.0.1 35000\nStop with Ctrl-C.\n"))
 
 (base:function echo-client ((client libc:file-descriptor) (buffer (pointer void))) unit
   (match (descriptor:read client buffer 1)
     (-1 unit)
     (0 unit)
-    (count (do
-             (descriptor:write client buffer 1)
-             (echo-client client buffer)))))
+    (count (do (descriptor:write client buffer 1) (echo-client client buffer)))))
 
 (base:function serve ((server libc:file-descriptor) (buffer (pointer void))) exit-code
-  (let ((peer-address libc:ipv4-socket-address
-                      (make-ipv4-socket-address 0 0))
-        (peer-address-length libc:socket-length-t 16))
-    (let ((client libc:file-descriptor
-                  (network:accept server
-                               (cast (pointer libc:socket-address)
-                                     (cast (pointer void) (& peer-address)))
-                               (& peer-address-length))))
+  (let
+    ((peer-address libc:ipv4-socket-address (make-ipv4-socket-address 0 0))
+     (peer-address-length libc:socket-length-t 16))
+    (let
+      ((client
+         libc:file-descriptor
+         (network:accept
+           server
+           (cast (pointer libc:socket-address) (cast (pointer void) (& peer-address)))
+           (& peer-address-length))))
       (match client
         (-1 (serve server buffer))
-        (_ (do
-             (echo-client client buffer)
-             (descriptor:close client)
-             (serve server buffer)))))))
+        (_ (do (echo-client client buffer) (descriptor:close client) (serve server buffer)))))))
 
 (base:function run () exit-code
-  (let ((server libc:file-descriptor
-                (network:socket constants:AF-INET constants:SOCK-STREAM constants:IPPROTO-IP))
-        (buffer (pointer void) (memory:malloc 1))
-        (reuse-address libc:c-int 1))
+  (let
+    ((server
+       libc:file-descriptor
+       (network:socket constants:AF-INET constants:SOCK-STREAM constants:IPPROTO-IP))
+     (buffer (pointer void) (memory:malloc 1))
+     (reuse-address libc:c-int 1))
     (match server
       (-1 1)
-      (_ (match (network:setsockopt server constants:SOL-SOCKET constants:SO-REUSEADDR
-                                 (cast (pointer void) (& reuse-address)) 4)
-           (-1 2)
-                (_ (match (bind-ipv4 server 35000 "127.0.0.1")
-                (-1 3)
-                (_ (match (network:listen server 16)
-                     (-1 4)
-                     (_ (do
-                          (announce)
-                          (serve server buffer))))))))))))
+      (_
+        (match
+          (network:setsockopt
+            server
+            constants:SOL-SOCKET
+            constants:SO-REUSEADDR
+            (cast (pointer void) (& reuse-address))
+            4)
+          (-1 2)
+          (_
+            (match (bind-ipv4 server 35000 "127.0.0.1")
+              (-1 3)
+              (_
+                (match (network:listen server 16) (-1 4) (_ (do (announce) (serve server buffer))))))))))))
 
 (base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (run))

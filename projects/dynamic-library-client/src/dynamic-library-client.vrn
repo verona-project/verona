@@ -3,6 +3,4 @@
 (external-function add-from-library "dynamic_library_add" (i32 i32) i32)
 
 (function main () exit-code
-  (match (%=-primitive-i32 (add-from-library 20 22) 42)
-    (true 0)
-    (false 1)))
+  (match (%=-primitive-i32 (add-from-library 20 22) 42) (true 0) (false 1)))

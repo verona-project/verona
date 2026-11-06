@@ -1,4 +1,5 @@
-(executable echo-server
+(executable
+  echo-server
   (root echo-server)
   (module-path "src")
   (module-path "../libc/src")

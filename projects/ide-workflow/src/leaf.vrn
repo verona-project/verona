@@ -1,2 +1,4 @@
-(function answer () exit-code 7)
+(function answer () exit-code
+  7)
+
 (export answer)

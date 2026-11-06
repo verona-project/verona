@@ -1,4 +1,3 @@
 (import model :as calc)
 
-(calc:identity
-  (function main () exit-code (calc:answer)))
+(calc:identity (function main () exit-code (calc:answer)))

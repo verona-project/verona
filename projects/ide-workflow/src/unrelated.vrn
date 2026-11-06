@@ -1,1 +1,2 @@
-(function independent () i32 99)
+(function independent () i32
+  99)

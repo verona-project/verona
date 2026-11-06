@@ -1,1 +1,2 @@
-(function main () exit-code missing-workflow-value)
+(function main () exit-code
+  missing-workflow-value)

@@ -28,11 +28,18 @@
 (base:constant object-file i32 1)
 
 (base:constant int-ugt i32 34)
+
 (base:constant int-uge i32 35)
+
 (base:constant int-ult i32 36)
+
 (base:constant int-ule i32 37)
 
-(export int-ugt int-uge int-ult int-ule
+(export
+  int-ugt
+  int-uge
+  int-ult
+  int-ule
   int-eq
   int-ne
   int-sgt

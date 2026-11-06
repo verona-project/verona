@@ -49,27 +49,68 @@
   t:value-ref)
 
 (base:external-function function-type-of "LLVMGlobalGetValueType" (t:value-ref) t:type-ref)
+
 (base:external-function value-type "LLVMTypeOf" (t:value-ref) t:type-ref)
+
 (base:external-function struct-element "LLVMStructGetTypeAtIndex" (t:type-ref u32) t:type-ref)
+
 (base:external-function build-ret-void "LLVMBuildRetVoid" (t:builder-ref) t:value-ref)
+
 (base:external-function function-get "LLVMGetNamedFunction" (t:module-ref (pointer u8)) t:value-ref)
+
 (base:external-function linkage-get "LLVMGetLinkage" (t:value-ref) i32)
-(base:external-function struct-gep "LLVMBuildStructGEP2" (t:builder-ref t:type-ref t:value-ref u32 (pointer u8)) t:value-ref)
+
+(base:external-function
+  struct-gep
+  "LLVMBuildStructGEP2"
+  (t:builder-ref t:type-ref t:value-ref u32 (pointer u8))
+  t:value-ref)
+
 (base:external-function attribute-kind "LLVMGetEnumAttributeKindForName" ((pointer u8) u64) u32)
-(base:external-function enum-attribute "LLVMCreateEnumAttribute" (t:context-ref u32 u64) t:attribute-ref)
-(base:external-function type-attribute "LLVMCreateTypeAttribute" (t:context-ref u32 t:type-ref) t:attribute-ref)
-(base:external-function function-attribute "LLVMAddAttributeAtIndex" (t:value-ref u32 t:attribute-ref) void)
-(base:external-function call-attribute "LLVMAddCallSiteAttribute" (t:value-ref u32 t:attribute-ref) void)
+
+(base:external-function
+  enum-attribute
+  "LLVMCreateEnumAttribute"
+  (t:context-ref u32 u64)
+  t:attribute-ref)
+
+(base:external-function
+  type-attribute
+  "LLVMCreateTypeAttribute"
+  (t:context-ref u32 t:type-ref)
+  t:attribute-ref)
+
+(base:external-function
+  function-attribute
+  "LLVMAddAttributeAtIndex"
+  (t:value-ref u32 t:attribute-ref)
+  void)
+
+(base:external-function
+  call-attribute
+  "LLVMAddCallSiteAttribute"
+  (t:value-ref u32 t:attribute-ref)
+  void)
 
 (base:external-function function-param "LLVMGetParam" (t:value-ref u32) t:value-ref)
 
 (base:external-function linkage-set "LLVMSetLinkage" (t:value-ref i32) void)
 
-(base:external-function global-add "LLVMAddGlobal" (t:module-ref t:type-ref (pointer u8)) t:value-ref)
+(base:external-function
+  global-add
+  "LLVMAddGlobal"
+  (t:module-ref t:type-ref (pointer u8))
+  t:value-ref)
+
 (base:external-function initializer-set "LLVMSetInitializer" (t:value-ref t:value-ref) void)
+
 (base:external-function global-constant-set "LLVMSetGlobalConstant" (t:value-ref t:boolean) void)
-(base:external-function const-string "LLVMConstStringInContext2"
-  (t:context-ref (pointer u8) u64 t:boolean) t:value-ref)
+
+(base:external-function
+  const-string
+  "LLVMConstStringInContext2"
+  (t:context-ref (pointer u8) u64 t:boolean)
+  t:value-ref)
 
 (base:external-function
   block-append
@@ -181,51 +222,226 @@
   (t:module-ref i32 (pointer (pointer u8)))
   t:boolean)
 
-(base:external-function struct-type "LLVMStructTypeInContext" (t:context-ref (pointer t:type-ref) u32 t:boolean) t:type-ref)
-(base:external-function build-insert "LLVMBuildInsertValue" (t:builder-ref t:value-ref t:value-ref u32 (pointer u8)) t:value-ref)
-(base:external-function build-extract "LLVMBuildExtractValue" (t:builder-ref t:value-ref u32 (pointer u8)) t:value-ref)
+(base:external-function
+  struct-type
+  "LLVMStructTypeInContext"
+  (t:context-ref (pointer t:type-ref) u32 t:boolean)
+  t:type-ref)
+
+(base:external-function
+  build-insert
+  "LLVMBuildInsertValue"
+  (t:builder-ref t:value-ref t:value-ref u32 (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-extract
+  "LLVMBuildExtractValue"
+  (t:builder-ref t:value-ref u32 (pointer u8))
+  t:value-ref)
 
 (base:external-function const-null "LLVMConstNull" (t:type-ref) t:value-ref)
 
-(base:external-function build-sext "LLVMBuildSExt" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
-(base:external-function build-udiv "LLVMBuildUDiv" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-or "LLVMBuildOr" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-xor "LLVMBuildXor" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-shl "LLVMBuildShl" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-ashr "LLVMBuildAShr" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-lshr "LLVMBuildLShr" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-urem "LLVMBuildURem" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
+(base:external-function
+  build-sext
+  "LLVMBuildSExt"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-udiv
+  "LLVMBuildUDiv"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-or
+  "LLVMBuildOr"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-xor
+  "LLVMBuildXor"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-shl
+  "LLVMBuildShl"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-ashr
+  "LLVMBuildAShr"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-lshr
+  "LLVMBuildLShr"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-urem
+  "LLVMBuildURem"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
 
 (base:external-function float-type "LLVMFloatTypeInContext" (t:context-ref) t:type-ref)
+
 (base:external-function double-type "LLVMDoubleTypeInContext" (t:context-ref) t:type-ref)
+
 (base:external-function const-real "LLVMConstReal" (t:type-ref f64) t:value-ref)
-(base:external-function build-fcmp "LLVMBuildFCmp" (t:builder-ref i32 t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-fadd "LLVMBuildFAdd" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-fsub "LLVMBuildFSub" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-fmul "LLVMBuildFMul" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-fdiv "LLVMBuildFDiv" (t:builder-ref t:value-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-fpext "LLVMBuildFPExt" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
-(base:external-function build-fptrunc "LLVMBuildFPTrunc" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
-(base:external-function build-sitofp "LLVMBuildSIToFP" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
-(base:external-function build-uitofp "LLVMBuildUIToFP" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
-(base:external-function build-fptosi "LLVMBuildFPToSI" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
-(base:external-function build-fptoui "LLVMBuildFPToUI" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
-(base:external-function build-bitcast "LLVMBuildBitCast" (t:builder-ref t:value-ref t:type-ref (pointer u8)) t:value-ref)
+
+(base:external-function
+  build-fcmp
+  "LLVMBuildFCmp"
+  (t:builder-ref i32 t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-fadd
+  "LLVMBuildFAdd"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-fsub
+  "LLVMBuildFSub"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-fmul
+  "LLVMBuildFMul"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-fdiv
+  "LLVMBuildFDiv"
+  (t:builder-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-fpext
+  "LLVMBuildFPExt"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-fptrunc
+  "LLVMBuildFPTrunc"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-sitofp
+  "LLVMBuildSIToFP"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-uitofp
+  "LLVMBuildUIToFP"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-fptosi
+  "LLVMBuildFPToSI"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-fptoui
+  "LLVMBuildFPToUI"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-bitcast
+  "LLVMBuildBitCast"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
 
 (base:external-function array-type "LLVMArrayType2" (t:type-ref u64) t:type-ref)
-(base:external-function build-alloca "LLVMBuildAlloca" (t:builder-ref t:type-ref (pointer u8)) t:value-ref)
-(base:external-function build-load "LLVMBuildLoad2" (t:builder-ref t:type-ref t:value-ref (pointer u8)) t:value-ref)
-(base:external-function build-store "LLVMBuildStore" (t:builder-ref t:value-ref t:value-ref) t:value-ref)
-(base:external-function build-gep "LLVMBuildGEP2"
-  (t:builder-ref t:type-ref t:value-ref (pointer t:value-ref) u32 (pointer u8)) t:value-ref)
+
+(base:external-function
+  build-alloca
+  "LLVMBuildAlloca"
+  (t:builder-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-load
+  "LLVMBuildLoad2"
+  (t:builder-ref t:type-ref t:value-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-store
+  "LLVMBuildStore"
+  (t:builder-ref t:value-ref t:value-ref)
+  t:value-ref)
+
+(base:external-function
+  build-gep
+  "LLVMBuildGEP2"
+  (t:builder-ref t:type-ref t:value-ref (pointer t:value-ref) u32 (pointer u8))
+  t:value-ref)
 
 (export
-  value-type struct-element build-ret-void function-get linkage-get struct-gep attribute-kind enum-attribute type-attribute function-attribute call-attribute
-  global-add initializer-set global-constant-set const-string
-  array-type build-alloca build-load build-store build-gep
-  float-type double-type const-real build-fcmp build-fadd build-fsub build-fmul build-fdiv
-  build-fpext build-fptrunc build-sitofp build-uitofp build-fptosi build-fptoui build-bitcast
-  build-sext build-udiv build-or build-xor build-shl build-ashr build-lshr build-urem const-null struct-type build-insert build-extract
+  value-type
+  struct-element
+  build-ret-void
+  function-get
+  linkage-get
+  struct-gep
+  attribute-kind
+  enum-attribute
+  type-attribute
+  function-attribute
+  call-attribute
+  global-add
+  initializer-set
+  global-constant-set
+  const-string
+  array-type
+  build-alloca
+  build-load
+  build-store
+  build-gep
+  float-type
+  double-type
+  const-real
+  build-fcmp
+  build-fadd
+  build-fsub
+  build-fmul
+  build-fdiv
+  build-fpext
+  build-fptrunc
+  build-sitofp
+  build-uitofp
+  build-fptosi
+  build-fptoui
+  build-bitcast
+  build-sext
+  build-udiv
+  build-or
+  build-xor
+  build-shl
+  build-ashr
+  build-lshr
+  build-urem
+  const-null
+  struct-type
+  build-insert
+  build-extract
   context-create
   context-dispose
   module-create

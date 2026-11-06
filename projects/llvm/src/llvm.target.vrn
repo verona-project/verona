@@ -28,8 +28,11 @@
   void)
 
 (base:external-function layout-dispose "LLVMDisposeTargetData" (t:layout-ref) void)
+
 (base:external-function abi-size "LLVMABISizeOfType" (t:layout-ref t:type-ref) u64)
+
 (base:external-function abi-align "LLVMABIAlignmentOfType" (t:layout-ref t:type-ref) u32)
+
 (base:external-function element-offset "LLVMOffsetOfElement" (t:layout-ref t:type-ref u32) u64)
 
 (base:external-function
@@ -61,8 +64,7 @@
 ; On success the caller owns the machine. On failure OUT-MESSAGE owns an LLVM
 ; message. Both outputs start null; strings assigned here use LLVMCreateMessage.
 (base:function native-machine-with-optimization
-  ((module t:module-ref) (optimization i32) (out-message (pointer (pointer u8))))
-  t:machine-ref
+  ((module t:module-ref) (optimization i32) (out-message (pointer (pointer u8)))) t:machine-ref
   (let
     ((triple (pointer u8) (default-triple))
      (target t:target-ref (cast t:target-ref (null-pointer))))
@@ -120,7 +122,9 @@
     (match bits (0 true) (_ false))))
 
 (export
-  abi-size abi-align element-offset
+  abi-size
+  abi-align
+  element-offset
   default-triple
   from-triple
   machine-create

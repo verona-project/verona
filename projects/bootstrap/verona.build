@@ -1,4 +1,5 @@
-(executable bootstrap
+(executable
+  bootstrap
   (root bootstrap)
   (module-path "src")
   (module-path "../libc/src")

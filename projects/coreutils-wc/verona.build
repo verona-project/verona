@@ -1,4 +1,5 @@
-(executable wc
+(executable
+  wc
   (root wc)
   (module-path "src")
   (module-path "../libc/src")
