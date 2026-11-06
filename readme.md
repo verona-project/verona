@@ -257,6 +257,20 @@ declarative-build reference, see [the API documentation](docs/API.md).
 The planned language and tooling work is described in the
 [roadmap](docs/ROADMAP.md).
 
+## Auditing projects with the self-hosted compiler
+
+Inside `nix develop`, run the project manifests and their runtime checks with an
+existing self-hosted compiler:
+
+```sh
+make test-self-hosted-projects SELF_HOSTED_COMPILER=/absolute/path/to/verona-core
+```
+
+The audit retains reports under `build/self-hosted-projects/`, builds in an
+isolated source copy, and never falls back to the host compiler. See the
+[audit guide](docs/self-hosted-project-audit.md) for evidence, target policies,
+and runner tests.
+
 ## Editor support
 
 The included `verona-mode` provides syntax highlighting and Lisp-style

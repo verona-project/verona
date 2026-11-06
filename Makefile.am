@@ -44,7 +44,8 @@ help:
 	@printf '%s\n' '  make test-compiler-support Run compiler support unit tests'
 	@printf '%s\n' '  make compiler-core  Build the compiler and evaluator written in Verona'
 	@printf '%s\n' '  make test-compiler-core Compare core evaluation with native LLVM execution'
-	@printf '%s\n' '  make bootstrap-compiler Attempt recorded A/B/C self-hosting (language expansion pending)'
+	@printf '%s\n' '  make bootstrap-compiler Run recorded A/B/C self-hosting validation'
+	@printf '%s\n' '  make test-self-hosted-projects SELF_HOSTED_COMPILER=/path/to/verona-core'
 	@printf '%s\n' '  make test-swank     Run optional Swank adapter integration tests'
 	@printf '%s\n' '  make test-editor    Run optional Emacs integration tests'
 	@printf '%s\n' '  make test-workflows Run all compiler, Swank and editor acceptance tests'
@@ -85,7 +86,7 @@ install-exec-local: $(VERONA_EXECUTABLE) $(VERONA_PROJECT) $(VERONA_FORMATTER)
 uninstall-local:
 	$(RM) '$(DESTDIR)$(bindir)/verona' '$(DESTDIR)$(bindir)/verona-project' '$(DESTDIR)$(bindir)/verona-fmt'
 
-test: test-frontend test-llvm test-compiler test-verona test-bounded test-foundation test-formatter test-compiler-core test-llvm-bindings test-compiler-support
+test: test-frontend test-llvm test-compiler test-verona test-bounded test-foundation test-formatter test-compiler-core test-llvm-bindings test-compiler-support test-self-hosted-projects-runner
 
 test-frontend:
 	cd $(verona_srcdir) && $(SBCL) --script tests/run.lisp
@@ -196,6 +197,19 @@ test-compiler-support: $(VERONA_EXECUTABLE)
 	cd $(verona_srcdir)/projects/compiler && $(VERONA_EXECUTABLE) build compiler-tests $(abs_top_builddir)/build/compiler
 	$(abs_top_builddir)/build/compiler/compiler-tests
 
-# Self-hosting is a readiness gate until the implementation language is supported.
+# Recorded A/B/C self-hosting and exact artifact verification.
 bootstrap-compiler: $(VERONA_EXECUTABLE)
 	$(PYTHON) $(verona_srcdir)/projects/compiler/bootstrap.py --bootstrap $(VERONA_EXECUTABLE) --output $(abs_top_builddir)/build/self-hosting
+
+# No bootstrap prerequisite: the audit never builds or substitutes the Lisp compiler.
+SELF_HOSTED_COMPILER =
+SELF_HOSTED_PROJECTS_JOBS = 2
+SELF_HOSTED_PROJECTS_OUTPUT = $(abs_top_builddir)/build/self-hosted-projects
+.PHONY: test-self-hosted-projects test-self-hosted-projects-runner
+
+test-self-hosted-projects-runner:
+	$(PYTHON) $(verona_srcdir)/tests/test-self-hosted-projects.py
+
+test-self-hosted-projects: test-self-hosted-projects-runner
+	@test -n "$(SELF_HOSTED_COMPILER)" || { echo 'Set SELF_HOSTED_COMPILER to an existing self-hosted verona-core executable.' >&2; exit 1; }
+	$(PYTHON) $(verona_srcdir)/scripts/self-hosted-projects.py --compiler "$(SELF_HOSTED_COMPILER)" --output "$(SELF_HOSTED_PROJECTS_OUTPUT)" --jobs "$(SELF_HOSTED_PROJECTS_JOBS)"

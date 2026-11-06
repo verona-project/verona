@@ -167,7 +167,7 @@ toolchain discovery and linking.
 Completion check: build the projects from their manifests without manually
 translating options, preserving isolation from existing output artifacts.
 
-** TODO Make the project-wide audit a maintained validation step
+** DONE Make the project-wide audit a maintained validation step
 Promote the one-off audit into repository tooling once the invocation contract
 is settled. Inventory every manifest target, retain full commands and
 diagnostics, distinguish unsupported artifacts from failed builds, and validate
@@ -486,9 +486,49 @@ Follow-up evidence: [[file:../build/self-hosted-tools/manifests-1duny4qr/results
 [[file:../build/self-hosted-tools/manifests-1duny4qr/manifest-compiler-verification.json][Manifest-built compiler validation]], and
 [[file:../build/self-hosted-tools/manifests-1duny4qr/verification.json][validation summary]].
 
+** Maintained project-wide audit completed
+The root =make test-self-hosted-projects= target requires an explicit
+=SELF_HOSTED_COMPILER=/absolute/path/to/verona-core=. It has no host-compiler
+build prerequisite or fallback. The Python runner copies project sources into
+an isolated tree, discovers every target through that compiler's indexed reader,
+and delegates manifest settings to its =build= command. A checked-in target
+policy controls dependencies, runtime checks, build-only services, and expected
+negative phases. New, removed, changed, and unsupported targets require review.
+
+Reports retain compiler and source hashes, Git/submodule state, tool paths,
+commands, inputs, diagnostics, timings, and native tool invocations. Fresh native
+artifacts and library headers are checked; the shared-library client is checked
+against its fresh dependency. Timeouts terminate the owned process group and
+retain diagnostics. Failed dependencies block consumers while independent builds
+continue. The full audit is opt-in; its inexpensive runner tests run under
+=make test= as well as =make test-self-hosted-projects-runner=.
+
+Validation:
+- All 26 targets were inventoried. All 17 normal executables and seven libraries
+  built directly from their manifests with the selected self-hosted compiler.
+- All applicable checks passed, including generated C headers, a native C
+  client, the dynamic-library client, tool behavior, and test executables.
+  The persistent echo server remains explicitly build-only.
+- The freshly manifest-built compiler passed six focused manifest/target test
+  methods and all 60 shared fixtures. Verona compilation never required the
+  Common Lisp compiler.
+- Both negative fixtures reached their intended analysis/link phase, with the
+  expected source diagnostic or native missing-library error.
+- All 16 runner tests passed, covering inventory, policy coverage, isolation,
+  failure phases, timeouts, stale outputs, dependencies, and missing compiler
+  behavior. Omitting =SELF_HOSTED_COMPILER= fails with a selection instruction.
+
+See [[file:self-hosted-project-audit.md][the audit guide]] for invocation, policy maintenance, and evidence details.
+The audit used current working sources, including existing submodule edits;
+it does not certify a clean release checkout or repeat the A/B/C byte comparison.
+
+Follow-up evidence: [[file:../build/self-hosted-projects/run-9o40vzhb/REPORT.md][Maintained audit report]] and
+[[file:../build/self-hosted-projects/run-9o40vzhb/results.json][Full inventory, commands, provenance, and results]].
+
 * Suggested order
-Promote the project-wide audit into a maintained validation step next.
-Adjust this order when newly exposed failures or dependencies require it.
+All items in this project-tool checklist are complete. Run the maintained audit
+when changing project manifests or compiler behavior, and extend the target
+policies alongside new tools.
 
 * Audit evidence
 The audit used compiler SHA256

@@ -1,0 +1,443 @@
+{
+  "version": 1,
+  "targets": {
+    "projects/base/tests/verona.build::bounded-tests": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/base-tests",
+      "checks": [
+        {
+          "type": "command",
+          "exit": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    "projects/base/verona.build::base": {
+      "kind": "static-library",
+      "mode": "library",
+      "output": "build/base"
+    },
+    "projects/bootstrap/verona.build::bootstrap": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/bootstrap",
+      "checks": [
+        {
+          "type": "command",
+          "env": {
+            "VERONA_SOURCE_DIR": null,
+            "VERONA_LIBRARY_DIR": null
+          },
+          "exit": 1,
+          "stdout_contains": [
+            "VERONA_SOURCE_DIR is not defined.",
+            "VERONA_LIBRARY_DIR is not defined."
+          ],
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "env": {
+            "VERONA_SOURCE_DIR": "source",
+            "VERONA_LIBRARY_DIR": null
+          },
+          "exit": 1,
+          "stdout_contains": [
+            "VERONA_SOURCE_DIR is defined.",
+            "VERONA_LIBRARY_DIR is not defined."
+          ],
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "env": {
+            "VERONA_SOURCE_DIR": null,
+            "VERONA_LIBRARY_DIR": "library"
+          },
+          "exit": 1,
+          "stdout_contains": [
+            "VERONA_SOURCE_DIR is not defined.",
+            "VERONA_LIBRARY_DIR is defined."
+          ],
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "env": {
+            "VERONA_SOURCE_DIR": "source",
+            "VERONA_LIBRARY_DIR": "library"
+          },
+          "exit": 0,
+          "stdout_contains": [
+            "VERONA_SOURCE_DIR is defined.",
+            "VERONA_LIBRARY_DIR is defined."
+          ],
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "env": {
+            "VERONA_SOURCE_DIR": "",
+            "VERONA_LIBRARY_DIR": ""
+          },
+          "exit": 0,
+          "stdout_contains": [
+            "VERONA_SOURCE_DIR is defined.",
+            "VERONA_LIBRARY_DIR is defined."
+          ],
+          "stderr": ""
+        }
+      ]
+    },
+    "projects/calculator-repl/verona.build::calculator": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/calculator-repl",
+      "checks": [
+        {
+          "type": "command",
+          "stdin": "3+4\n9*9\n8/2\n",
+          "exit": 0,
+          "stdout_regex": "(?s)Verona calculator.*calc> 07\\ncalc> 81\\ncalc> 04\\ncalc> ",
+          "stderr": ""
+        }
+      ]
+    },
+    "projects/compiler/verona.build::compiler-tests": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/compiler",
+      "checks": [
+        {
+          "type": "command",
+          "exit": 0,
+          "stdout_contains": [
+            "reader allocation cleanup: passed",
+            "compile-time state isolation: passed"
+          ]
+        }
+      ]
+    },
+    "projects/compiler/verona.build::verona-core": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/compiler",
+      "checks": [
+        {
+          "type": "compiler",
+          "methods": [
+            "CoreTests.test_manifest_executable_and_defaults",
+            "CoreTests.test_manifest_paths_features_and_imports",
+            "CoreTests.test_manifest_library_kinds_and_relative_link_paths",
+            "CoreTests.test_manifest_validation_and_no_evaluation",
+            "CoreTests.test_reader_features_and_cross_target_objects",
+            "CoreTests.test_manifest_target_features_and_link_policy"
+          ]
+        }
+      ]
+    },
+    "projects/coreutils-wc/verona.build::wc": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/coreutils-wc",
+      "checks": [
+        {
+          "type": "command",
+          "stdin": "one two\nthree\n",
+          "exit": 0,
+          "stdout": "2 3 14\n",
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "stdin": "",
+          "exit": 0,
+          "stdout": "0 0 0\n",
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "args": [
+            "-l"
+          ],
+          "stdin": "one two\nthree\n",
+          "exit": 0,
+          "stdout": "2\n",
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "args": [
+            "--words"
+          ],
+          "stdin": "one two\nthree\n",
+          "exit": 0,
+          "stdout": "3\n",
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "args": [
+            "-c"
+          ],
+          "stdin": "one two\nthree\n",
+          "exit": 0,
+          "stdout": "14\n",
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "args": [
+            "-l",
+            "-c"
+          ],
+          "stdin": "one two\nthree\n",
+          "exit": 0,
+          "stdout": "2 14\n",
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "args": [
+            "--",
+            "-"
+          ],
+          "stdin": "one two\nthree\n",
+          "exit": 0,
+          "stdout": "2 3 14 -\n",
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "files": {
+            "first.txt": "one two\nthree\n",
+            "second.txt": "four\n"
+          },
+          "args": [
+            "first.txt",
+            "second.txt"
+          ],
+          "exit": 0,
+          "stdout": "2 3 14 first.txt\n1 1 5 second.txt\n3 4 19 total\n",
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "stdin_hex": "80ff20fe0a",
+          "exit": 0,
+          "stdout": "1 2 5\n",
+          "stderr": ""
+        },
+        {
+          "type": "command",
+          "args": [
+            "missing-file.txt"
+          ],
+          "exit": 1,
+          "stdout": "",
+          "stderr_contains": [
+            "missing-file.txt"
+          ]
+        },
+        {
+          "type": "command",
+          "args": [
+            "--bad"
+          ],
+          "exit": 2,
+          "stdout_contains": [
+            "usage: wc"
+          ],
+          "stderr": ""
+        }
+      ]
+    },
+    "projects/dynamic-library-client/verona.build::dynamic-library-client": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/dynamic-library-client",
+      "depends_on": [
+        "projects/dynamic-library/verona.build::dynamic-library"
+      ],
+      "checks": [
+        {
+          "type": "command",
+          "exit": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    "projects/dynamic-library/verona.build::dynamic-library": {
+      "kind": "shared-library",
+      "mode": "library",
+      "output": "build/dynamic-library",
+      "checks": [
+        {
+          "type": "c-client",
+          "source": "int main(void) { return dynamic_library_add(20,22)==42 ? 0 : 1; }"
+        }
+      ]
+    },
+    "projects/echo-server/verona.build::echo-server": {
+      "kind": "executable",
+      "mode": "build-only",
+      "output": "build/echo-server",
+      "reason": "Persistent network service; starting a listener is outside this audit."
+    },
+    "projects/formatter/verona.build::formatter-tests": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/formatter",
+      "checks": [
+        {
+          "type": "command",
+          "exit": 0,
+          "stdout_regex": "formatter: [1-9][0-9]* unit tests passed",
+          "stderr": ""
+        }
+      ]
+    },
+    "projects/formatter/verona.build::verona-fmt": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/formatter",
+      "checks": [
+        {
+          "type": "formatter"
+        }
+      ]
+    },
+    "projects/foundation/verona.build::foundation": {
+      "kind": "static-library",
+      "mode": "library",
+      "output": "build/foundation"
+    },
+    "projects/foundation/verona.build::foundation-example": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/foundation",
+      "checks": [
+        {
+          "type": "command",
+          "exit": 0
+        }
+      ]
+    },
+    "projects/foundation/verona.build::foundation-tests": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/foundation",
+      "checks": [
+        {
+          "type": "command",
+          "exit": 0,
+          "stdout_regex": "Foundation: [1-9][0-9]* named tests passed",
+          "stderr": ""
+        }
+      ]
+    },
+    "projects/ide-workflow/verona.build::analysis-failure": {
+      "kind": "executable",
+      "mode": "negative",
+      "output": "build/ide-workflow",
+      "failure": {
+        "phase": "analysis",
+        "diagnostic": "unknown local name",
+        "source": "src/broken.vrn",
+        "token": "missing-workflow-value"
+      }
+    },
+    "projects/ide-workflow/verona.build::link-failure": {
+      "kind": "executable",
+      "mode": "negative",
+      "output": "build/ide-workflow",
+      "failure": {
+        "phase": "link",
+        "diagnostic": "(?:library not found for -l|cannot find -l|unable to find library -l)verona_missing_library_for_workflow_test",
+        "library": "verona_missing_library_for_workflow_test"
+      }
+    },
+    "projects/ide-workflow/verona.build::workflow": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/ide-workflow",
+      "checks": [
+        {
+          "type": "command",
+          "exit": 7,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    },
+    "projects/ide-workflow/verona.build::workflow-library": {
+      "kind": "static-library",
+      "mode": "library",
+      "output": "build/ide-workflow"
+    },
+    "projects/libc/verona.build::libc": {
+      "kind": "static-library",
+      "mode": "library",
+      "output": "build/libc"
+    },
+    "projects/llvm/verona.build::llvm-tests": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/llvm",
+      "checks": [
+        {
+          "type": "llvm-object"
+        }
+      ]
+    },
+    "projects/llvm/verona.build::verona-llvm": {
+      "kind": "static-library",
+      "mode": "library",
+      "output": "build/llvm"
+    },
+    "projects/macro-expansion/verona.build::macro-expansion": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/macro-expansion",
+      "checks": [
+        {
+          "type": "command",
+          "exit": 0,
+          "stdout": "42\n",
+          "stderr": ""
+        }
+      ]
+    },
+    "projects/project/verona.build::verona-project": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/project",
+      "checks": [
+        {
+          "type": "project"
+        }
+      ]
+    },
+    "projects/testing/verona.build::testing": {
+      "kind": "static-library",
+      "mode": "library",
+      "output": "build/testing"
+    },
+    "projects/testing/verona.build::testing-smoke": {
+      "kind": "executable",
+      "mode": "run",
+      "output": "build/testing",
+      "checks": [
+        {
+          "type": "command",
+          "exit": 0,
+          "stdout": "",
+          "stderr": ""
+        }
+      ]
+    }
+  }
+}
