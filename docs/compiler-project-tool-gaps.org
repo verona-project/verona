@@ -55,7 +55,7 @@ Affected targets:
 Completion check: focused expansion checks for order, empty input, and invalid
 arguments, followed by rebuilding the affected tools and running their checks.
 
-** TODO Support mutable global variables
+** DONE Support mutable global variables
 Accept and lower the =%variable= declarations produced by =base:variable=.
 Follow the reference compiler's rules for initialization, storage, reads,
 assignment, address-taking, and module visibility.
@@ -85,8 +85,10 @@ Completion check: build and run =macro-expansion=, expecting output =42=,
 and verify that independent compilations do not share mutable compiler state.
 
 ** TODO Support pointer equality through the default generics
-The =bootstrap= tool compares =getenv= results using ====. The self-hosted
-compiler currently reports no matching generic implementation for that call.
+The =bootstrap= tool compares =getenv= results using ====. After mutable global
+support, =foundation-tests= also reaches pointer comparisons in its allocation
+tracker and arena tests. The self-hosted compiler currently reports no matching
+generic implementation for these calls.
 Follow the reference compiler's pointer equality and inequality rules, including
 compatible pointer types and null-pointer behavior; retain numeric dispatch.
 
@@ -206,9 +208,45 @@ Follow-up evidence: [[file:../build/self-hosted-tools/reductions-6hiydzrg/result
 [[file:../build/self-hosted-tools/reductions-6hiydzrg/runtime-checks.json][runtime checks]]. This step rebuilt the compiler with stage C;
 it did not repeat the complete A/B/C reproducibility gate.
 
+** Mutable global variables completed
+=%variable= declarations and Base's =variable= macro now define shared writable
+storage with module visibility, forward references, local shadowing, and
+address-taking. The supported scalar and data literal initializers follow the
+reference compiler; aggregate globals and runtime initializers remain unsupported.
+
+Native globals use C storage, including one byte for booleans. The evaluator
+initializes independent global storage for each run, retains it across calls,
+and releases its owning storage with the outcome. Reusing a checked program
+starts from the declared values after both successful and failed runs.
+
+Validation:
+- =make test-compiler-core=: 33 driver checks, 94 regressions, and 50 shared
+  fixtures passed. New shared fixtures cover global pointer writes, module
+  aliases, and invalid initializers.
+- =make test-compiler-support= passed, including evaluation isolation and
+  injected allocation failures with global storage.
+- The verified stage C compiler rebuilt the updated compiler, which passed the
+  four focused global tests. These cover generic specializations sharing one
+  global, scalar and data initialization, data-pointer reassignment, module
+  visibility and shadowing, invalid declarations, and native C pointer writes.
+- That self-hosted binary built and ran =compiler-tests=, =formatter-tests=
+  (63 unit tests), and =testing-smoke= successfully.
+- =foundation-tests= gets past global declarations and now stops at pointer
+  equality in its allocation tracker and arena tests. Pointer equality remains
+  a separate checklist item; the tests were not rewritten to bypass it.
+
+The observed successful normal executable builds now total 11 of 17. Six remain
+blocked: =bootstrap=, =wc=, =dynamic-library-client=, =workflow=,
+=macro-expansion=, and =foundation-tests=. Seven library targets and the two
+negative fixtures retain their previously recorded status.
+
+Follow-up evidence: [[file:../build/self-hosted-tools/globals-bp4gag0c/results.json][Self-hosted compiler and affected-suite results]] and
+[[file:../build/self-hosted-tools/globals-bp4gag0c/verification.json][validation summary]]. This step did not repeat the complete A/B/C gate.
+
 * Suggested order
-Mutable globals are next, to unblock more of the test infrastructure. Address
-compile-time state helpers, pointer equality, =wc=, and older declaration fixtures next.
+Compile-time state and data helpers are next. Then address pointer equality,
+which now blocks both =bootstrap= and =foundation-tests=, followed by =wc= and
+the older declaration fixtures.
 Add library artifacts and manifest-driven builds, then rerun the complete audit.
 Adjust this order when newly exposed failures or dependencies require it.
 
