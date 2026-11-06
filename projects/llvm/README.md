@@ -34,8 +34,9 @@ and `projects/base/src` to the consumer's module paths and `(library "LLVM")`
 to its build target. LLVM's shared library must be on the linker's search path
 and available at runtime. The pinned Nix shell provides both. This library
 currently supports the repository's 64-bit AArch64/x86-64 Darwin/Linux targets;
-`llvm.target` selects the real architecture-specific C initializers at build time.
-Cross-compilation and additional architectures are future additions.
+`llvm.target` registers both architecture backends. `machine-for-triple` selects
+an explicit LLVM triple, allowing cross-target object emission within those
+architectures. Additional architecture initializers remain future work.
 
 ## Modules
 
@@ -44,7 +45,7 @@ Cross-compilation and additional architectures are future additions.
 | `llvm.types` | Distinct opaque `context-ref`, `module-ref`, `type-ref`, `value-ref`, `block-ref`, `builder-ref`, `target-ref`, `machine-ref`, `layout-ref`; 32-bit `boolean` for LLVMBool |
 | `llvm.core` | Raw context/module/message management; integer, pointer and function types; functions and parameters; constants; blocks/builders; arithmetic, comparisons, calls, branches, phi nodes, casts and global strings; verification and LLVM's text printer |
 | `llvm.enums` | Named LLVM 23 C enum constants for predicates, linkage, verification and object generation |
-| `llvm.target` | Raw target/target-machine/layout operations plus `native-machine`, `native-machine-with-optimization`, `null-pointer`, and `is-null` helpers |
+| `llvm.target` | Raw target/target-machine/layout operations plus `native-machine`, `native-machine-with-optimization`, `machine-for-triple`, `pointer-size`, `layout-string`, `null-pointer`, and `is-null` helpers |
 | `llvm` | Owning `session`, `create`, `destroy`, `verify`, fixed-arity direct `call-0` through `call-3`, and single-edge phi `incoming` helper |
 
 Raw binding names use Verona spelling, for example `llvm.core:build-add` binds
@@ -99,6 +100,16 @@ The original `native-machine` keeps its default behavior. These levels control
 native code generation, not an IR optimization pass pipeline. The compiler core
 demonstrates the full flow.
 
+`machine-for-triple(module, triple, level, out-message)` creates a caller-owned
+machine for an explicit AArch64 or x86 target, setting the module triple and
+layout. It registers both supported backends, uses generic CPU/PIC relocation,
+and follows the native helpers' null-machine/diagnostic ownership rules.
+`pointer-size(layout)` returns pointer size in bytes. `layout-string(layout)`
+returns a transferred LLVM data-layout string; release it with
+`llvm.core:message-dispose`. The compiler resolves and validates target facts
+before reading source, then uses that same selection for C ABI classification
+and object emission.
+
 ## Ownership and errors
 
 - A `session` owns one context, module, and builder. Call `destroy` exactly once
@@ -140,13 +151,11 @@ recursion and runtime guards through the binding. A linker spy verifies that
 Clang receives a binary object and only performs native linking; `emit-llvm`
 works even when no Clang executable is available.
 
-Verification on the current AArch64 Darwin host: library archive built;
-`make test-llvm-bindings` passed all eight FiveAM checks; the compiler passed
-21 FiveAM checks and twelve differential/driver test groups. LLVM backend (85),
-compiler driver (189), Verona/Base/Foundation, and formatter suites also pass.
-`make -k test` still reports the same two existing
-`IDE-INSPECTION-SELECTS-EXPANSION-SUBTREES` failures in the frontend suite.
-Linux and x86-64 execution have not been independently verified here.
+Current validation on AArch64 Darwin includes all eight LLVM binding checks,
+117 compiler regressions, and 60 shared evaluator/native fixtures. Compiler
+checks also emit and inspect AArch64/x86-64 objects for Darwin and Linux,
+including selected reader facts and aggregate ABI differences. These checks
+do not execute the foreign objects.
 
 The core bindings also expose context-owned literal `struct-type`, `const-null`,
 and the `build-insert`/`build-extract` aggregate SSA builders. Struct

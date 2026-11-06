@@ -12,11 +12,16 @@ workspace's project manifests with the verified stage C compiler. Follow the
 Common Lisp compiler's existing behavior when porting compiler features; the
 Verona evaluator does not require implementing Common Lisp.
 
-The audit translated manifest settings into explicit =compile= arguments.
-It did not exercise a self-hosted manifest reader or fall back to the Common
-Lisp compiler. Existing host-built repository libraries were excluded.
+The original audit translated manifest settings into explicit =compile=
+arguments. It did not exercise a self-hosted manifest reader or fall back to
+the Common Lisp compiler. Existing host-built repository libraries were excluded.
 
-Results:
+The latest validation builds all 17 normal executables and seven libraries
+directly from their manifests with =verona-core build=. Both intentional
+negative fixtures fail at their intended phase. The compiler also rebuilds
+itself through its own manifest; see the progress section for evidence.
+
+Original audit results:
 - Four of 17 normal executable targets built: =verona-core=, =calculator=,
   =echo-server=, and =llvm-tests=.
 - Thirteen normal executables failed compilation.
@@ -147,7 +152,7 @@ Completion check: build all seven library targets, then link and run
 =dynamic-library-client= against the freshly self-hosted shared library.
 Do not satisfy that dependency using an existing host-built artifact.
 
-** TODO Support manifest-driven builds in the self-hosted driver
+** DONE Support manifest-driven builds in the self-hosted driver
 The audit's external adapter is not an implementation of =verona.build=.
 Port the reference driver's manifest handling so project builds can be invoked
 directly through the self-hosted toolchain.
@@ -423,8 +428,66 @@ command. The complete A/B/C gate was not repeated.
 Follow-up evidence: [[file:../build/self-hosted-tools/artifacts-fdjpwgje/results.json][Self-hosted compiler, library builds, and client results]] and
 [[file:../build/self-hosted-tools/artifacts-fdjpwgje/verification.json][validation summary]].
 
+** Manifest-driven builds completed
+The self-hosted CLI now implements
+=build TARGET OUTPUT-DIRECTORY [--feature NAME ...]=. It reads the current
+=verona.build= as source-located configuration data, without expansion or
+evaluation. All declarations are validated before target selection, including
+unselected targets. The parser checks required roots, unique target names,
+option arities and value types, repeated singleton options, and unknown forms.
+
+Module and library directories resolve relative to the manifest, preserving
+order. Defaults, native libraries/frameworks, optimization levels 0 through 3,
+version metadata, reader features, artifact filenames, and output directory
+creation follow the reference driver. The existing compiler pipeline handles
+the selected root and artifact. Successful builds print the artifact path.
+The native tool selection honors the pinned =VERONA_LINKER= and =VERONA_AR=
+settings, with the core-specific overrides retaining precedence.
+
+Selected target facts reach every source reader and the C ABI classifier.
+LLVM supplies data layout and pointer width before source analysis. AArch64
+and x86-64 Darwin/Linux targets with 64-bit little-endian pointers are supported;
+other architectures/layouts are explicitly rejected rather than compiled for
+the host. Compiler-provided facts precede CLI and package reader features.
+The configuration is per invocation and survives compile-time state/cache
+updates. Target facts and feature handling live in a frontend-only module;
+LLVM machine ownership stays in the backend, so reusable readers and the
+compiler support suite acquire no LLVM dependency.
+
+Validation:
+- =make test-compiler-core test-compiler-support= passed: 33 driver checks,
+  117 regressions, 60 shared fixtures, and the support suite.
+- =make test-llvm-bindings= passed all eight checks. Cross-target checks emit
+  AArch64/x86-64 objects for Darwin and Linux, verify reader facts, exercise
+  aggregate ABI differences, and reject unsupported layouts. Foreign objects
+  are inspected rather than executed.
+- The verified stage C compiler rebuilt the updated compiler. That binary
+  passed all six focused manifest/target test groups and all 60 shared fixtures.
+- In an isolated source-tree copy, that binary built every target using only
+  =build TARGET OUTPUT-DIRECTORY= from the relevant project directory. All 17
+  normal executables and seven libraries built. The two negative fixtures
+  failed at the expected semantic/link phases. No external adapter translated
+  manifest options, and no existing host-built Verona artifact was used.
+- The compiler built itself through its own manifest, including the native LLVM
+  dependency. That manifest-built binary also passed all six focused groups
+  and all 60 shared fixtures.
+- The freshly built compiler support suite, bounded suite, formatter suite
+  (63 unit tests), Foundation suite (277 named tests), Foundation example,
+  testing smoke program, and macro-expansion example ran successfully.
+  Workflow returned 7, the =wc= sample reported =2 3 14=, and the dynamic-library
+  client ran against the fresh library at its manifest's declared location.
+
+This completes manifest execution for the project inventory. Promoting the
+validation scripts into maintained repository tooling remains the next item;
+additional target architectures remain compiler portability work. The complete
+A/B/C reproducibility gate was not repeated in this step.
+
+Follow-up evidence: [[file:../build/self-hosted-tools/manifests-1duny4qr/results.json][Direct manifest builds and runtime results]],
+[[file:../build/self-hosted-tools/manifests-1duny4qr/manifest-compiler-verification.json][Manifest-built compiler validation]], and
+[[file:../build/self-hosted-tools/manifests-1duny4qr/verification.json][validation summary]].
+
 * Suggested order
-Implement manifest-driven builds next, then the maintained project-wide audit.
+Promote the project-wide audit into a maintained validation step next.
 Adjust this order when newly exposed failures or dependencies require it.
 
 * Audit evidence

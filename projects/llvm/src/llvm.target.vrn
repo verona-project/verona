@@ -41,25 +41,84 @@
   (t:machine-ref t:module-ref (pointer u8) i32 (pointer (pointer u8)))
   t:boolean)
 
-#+aarch64 (base:external-function init-targetinfo "LLVMInitializeAArch64TargetInfo" () void)
+; Explicit target selection initializes the two architectures supported by
+; the Verona compiler's current 64-bit C ABI classifier.
+(base:external-function init-aarch64-info "LLVMInitializeAArch64TargetInfo" () void)
 
-#+aarch64 (base:external-function init-target "LLVMInitializeAArch64Target" () void)
+(base:external-function init-aarch64 "LLVMInitializeAArch64Target" () void)
 
-#+aarch64 (base:external-function init-targetmc "LLVMInitializeAArch64TargetMC" () void)
+(base:external-function init-aarch64-mc "LLVMInitializeAArch64TargetMC" () void)
 
-#+aarch64 (base:external-function init-asmprinter "LLVMInitializeAArch64AsmPrinter" () void)
+(base:external-function init-aarch64-printer "LLVMInitializeAArch64AsmPrinter" () void)
 
-#+x86_64 (base:external-function init-targetinfo "LLVMInitializeX86TargetInfo" () void)
+(base:external-function init-x86-info "LLVMInitializeX86TargetInfo" () void)
 
-#+x86_64 (base:external-function init-target "LLVMInitializeX86Target" () void)
+(base:external-function init-x86 "LLVMInitializeX86Target" () void)
 
-#+x86_64 (base:external-function init-targetmc "LLVMInitializeX86TargetMC" () void)
+(base:external-function init-x86-mc "LLVMInitializeX86TargetMC" () void)
 
-#+x86_64 (base:external-function init-asmprinter "LLVMInitializeX86AsmPrinter" () void)
+(base:external-function init-x86-printer "LLVMInitializeX86AsmPrinter" () void)
+
+(base:external-function pointer-size "LLVMPointerSize" (t:layout-ref) u32)
+
+(base:external-function layout-string "LLVMCopyStringRepOfTargetData" (t:layout-ref) (pointer u8))
+
+(base:function machine-for-triple
+  ((module t:module-ref)
+   (triple (pointer u8))
+   (optimization i32)
+   (out-message (pointer (pointer u8)))) t:machine-ref
+  (let ((target t:target-ref (cast t:target-ref (null-pointer))))
+    (do
+      (init-aarch64-info)
+      (init-aarch64)
+      (init-aarch64-mc)
+      (init-aarch64-printer)
+      (init-x86-info)
+      (init-x86)
+      (init-x86-mc)
+      (init-x86-printer)
+      (match (from-triple triple (& target) out-message)
+        (0
+          (let
+            ((machine
+               t:machine-ref
+               (machine-create
+                 target
+                 triple
+                 "generic"
+                 ""
+                 optimization
+                 enum:reloc-pic
+                 enum:code-model-default)))
+            (do
+              (match (is-null (cast (pointer void) machine))
+                (true
+                  (store
+                    (deref out-message)
+                    (core:message-create "LLVM could not create a target machine")))
+                (false
+                  (let ((layout t:layout-ref (machine-layout machine)))
+                    (do
+                      (core:module-target module triple)
+                      (module-layout-set module layout)
+                      (layout-dispose layout)
+                      unit))))
+              machine)))
+        (_ (cast t:machine-ref (null-pointer)))))))
 
 ; LLVMInitializeNativeTarget is a header inline function, not a library symbol.
 (base:function initialize-native () unit
-  (do (init-targetinfo) (init-target) (init-targetmc) (init-asmprinter) unit))
+  (do
+    (init-aarch64-info)
+    (init-aarch64)
+    (init-aarch64-mc)
+    (init-aarch64-printer)
+    (init-x86-info)
+    (init-x86)
+    (init-x86-mc)
+    (init-x86-printer)
+    unit))
 
 ; On success the caller owns the machine. On failure OUT-MESSAGE owns an LLVM
 ; message. Both outputs start null; strings assigned here use LLVMCreateMessage.
@@ -122,6 +181,9 @@
     (match bits (0 true) (_ false))))
 
 (export
+  machine-for-triple
+  pointer-size
+  layout-string
   abi-size
   abi-align
   element-offset
