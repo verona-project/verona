@@ -1,0 +1,200 @@
+#+TITLE: Remaining Gaps for Building Project Tools with the Self-Hosted Compiler
+#+DATE: 2026-11-06
+#+STARTUP: overview
+
+* Scope and current status
+The Verona compiler has passed the self-hosting gate: stages B and C are
+byte-for-byte identical, and stages A, B, and C passed 87 core regressions and
+47 shared fixtures each. Building every project tool is a separate milestone.
+
+This checklist records the first blockers found while building the current
+workspace's project manifests with the verified stage C compiler. Follow the
+Common Lisp compiler's existing behavior when porting compiler features; the
+Verona evaluator does not require implementing Common Lisp.
+
+The audit translated manifest settings into explicit =compile= arguments.
+It did not exercise a self-hosted manifest reader or fall back to the Common
+Lisp compiler. Existing host-built repository libraries were excluded.
+
+Results:
+- Four of 17 normal executable targets built: =verona-core=, =calculator=,
+  =echo-server=, and =llvm-tests=.
+- Thirteen normal executables failed compilation.
+- Two deliberate failure fixtures failed before their intended diagnostic.
+- Seven library targets require artifact output support absent from the
+  self-hosted executable-only CLI.
+
+The rebuilt =-O2= compiler passed all 87 core regressions. The calculator
+passed a =3+4= smoke check. LLVM bindings passed verification, diagnostic,
+call, phi, and object-emission checks; the emitted object linked and returned
+42. The echo server was built without starting its persistent network service.
+
+These are observed first blockers, not a complete language-parity inventory.
+Rebuild affected targets after each item; later failures may reveal more work.
+
+* Implementation checklist
+** TODO Port compile-time reductions
+Implement =compiler:reduce= and =compiler:reduce-right= using the behavior in
+[[file:../src/compiler.lisp][the reference compiler's compile-time helpers]]. These helpers construct syntax;
+they do not execute the named runtime operation while expanding the macro.
+
+For head =f=, initial form =z=, and forms =(a b)=:
+- =reduce= produces =(f (f z a) b)=.
+- =reduce-right= produces =(f a (f b z))=.
+- An empty input returns the initial form.
+
+Preserve the reference validation of the call head, proper list input, and
+S-expression arguments. Keep symbol resolution and source locations intact.
+
+Affected targets:
+- =verona-fmt= and =verona-project=: =compiler:reduce-right=.
+- =bounded-tests= and =foundation-example=: =compiler:reduce= in =testing:checks=.
+- =formatter-tests= and =testing-smoke= also encounter these helpers after
+  declaration support is addressed.
+
+Completion check: focused expansion checks for order, empty input, and invalid
+arguments, followed by rebuilding the affected tools and running their checks.
+
+** TODO Support mutable global variables
+Accept and lower the =%variable= declarations produced by =base:variable=.
+Follow the reference compiler's rules for initialization, storage, reads,
+assignment, address-taking, and module visibility.
+
+Affected targets: =compiler-tests=, =formatter-tests=, =foundation-tests=,
+and =testing-smoke=. Their first declaration failures include mutable test
+state such as temporary paths, allocation counters, and evaluation budgets.
+The current generic declaration diagnostic does not identify this gap clearly.
+
+Completion check: validate initialization, mutation, address-taking, and
+cross-module access as applicable to the reference behavior; then rebuild
+and run the affected suites. Reduction support is also needed by their macros.
+
+** TODO Port the compile-time state and data helpers used by generated declarations
+The =macro-expansion= example initializes =models:types= using
+=compiler:state-set!=, then reads it with =compiler:state-ref= and processes
+the result using =nth= and =plist-ref=. Compilation currently stops at the
+=state-ref= call.
+
+Compare the full example against the reference compiler's compile-time
+environment and state implementation. Establish which operations already work
+and port those still missing, including state initialization and isolation
+between compilations. Do not treat reaching one unsupported call as proof
+that all earlier state operations behaved correctly.
+
+Completion check: build and run =macro-expansion=, expecting output =42=,
+and verify that independent compilations do not share mutable compiler state.
+
+** TODO Support pointer equality through the default generics
+The =bootstrap= tool compares =getenv= results using ====. The self-hosted
+compiler currently reports no matching generic implementation for that call.
+Follow the reference compiler's pointer equality and inequality rules, including
+compatible pointer types and null-pointer behavior; retain numeric dispatch.
+
+Completion check: exercise pointer identity and inequality, reject incompatible
+operands according to the reference rules, and build and run =bootstrap= with
+the relevant environment variables both present and absent.
+
+** TODO Reconcile character arguments in wc
+=wc= passes =#\space= and =#\newline=, which have type =u8=, to its
+=write-character= helper, whose argument is =i32=. The compiler reports the
+type mismatch at those calls.
+
+Characters remain =u8= in Verona. Check the helper's intended interface and
+the reference conversion rules; adjust the helper or use explicit casts at
+the C boundary as appropriate. This is an observed source compatibility issue,
+not evidence that arbitrary implicit integer conversion should be introduced.
+
+Completion check: build =wc= and exercise standard input, files, and selected
+counts. Input =one two\nthree\n= should report two lines, three words, and
+14 bytes with the default selection.
+
+** TODO Align older examples with declaration expansion
+=workflow= and =dynamic-library-client= use surface declarations without
+importing Base. The compiler expects declarations such as =%function= after
+macro expansion; surface declarations belong to Base.
+
+Review these examples against the reference setup and repository input
+conventions. Provide the appropriate Base imports and module paths, or use
+expanded forms where the fixture is intentionally testing compiler input.
+Do not add concrete surface aliases to the semantic checker to bypass expansion.
+
+The IDE's two negative fixtures also stop at declaration handling:
+- =analysis-failure= must reach the unresolved =missing-workflow-value= diagnostic.
+- =link-failure= must pass analysis and reach the native linker, which must
+  reject =verona_missing_library_for_workflow_test=.
+
+Completion check: =workflow= runs and returns 7; both negative fixtures fail
+at their intended phase with the intended diagnostic. The dynamic library
+client additionally needs the artifact support below.
+
+** TODO Add native library artifact output
+The self-hosted CLI currently emits executables. It needs the reference
+driver's artifact policies for the library targets in the project manifests:
+
+| Kind           | Targets                                                    |
+|----------------+------------------------------------------------------------|
+| Static library | base, foundation, workflow-library, libc, verona-llvm, testing |
+| Shared library | dynamic-library                                            |
+
+Keep artifact selection and native tool invocation in the driver layer.
+Library roots must not require =main=. Preserve exports, target-specific
+filenames, and linking behavior; establish any object-output and header
+requirements from the reference driver rather than guessing them.
+
+Completion check: build all seven library targets, then link and run
+=dynamic-library-client= against the freshly self-hosted shared library.
+Do not satisfy that dependency using an existing host-built artifact.
+
+** TODO Support manifest-driven builds in the self-hosted driver
+The audit's external adapter is not an implementation of =verona.build=.
+Port the reference driver's manifest handling so project builds can be invoked
+directly through the self-hosted toolchain.
+
+Cover the settings exercised by the current manifests: multiple named targets,
+artifact kind, root module, manifest-relative module paths, native target,
+optimization, version metadata, library paths, and libraries. Preserve the
+reference behavior for other supported settings and invalid manifests as the
+driver is ported. Native dependencies such as LLVM still require explicit
+toolchain discovery and linking.
+
+Completion check: build the projects from their manifests without manually
+translating options, preserving isolation from existing output artifacts.
+
+** TODO Make the project-wide audit a maintained validation step
+Promote the one-off audit into repository tooling once the invocation contract
+is settled. Inventory every manifest target, retain full commands and
+diagnostics, distinguish unsupported artifacts from failed builds, and validate
+negative fixtures by their intended failure phase.
+
+Run safe checks for successful tools and test executables. Keep persistent
+services such as =echo-server= build-only unless a controlled runtime check is
+provided. Record compiler provenance and prevent silent host-compiler fallback.
+
+Completion check: every normal target builds, applicable runtime checks pass,
+and both negative fixtures fail as intended using only the self-hosted compiler
+for Verona compilation. Native linkers and other pinned host tools remain valid
+dependencies.
+
+* Suggested order
+Start with reductions, then mutable globals: these unblock the formatter,
+project manager, and much of the test infrastructure. Address compile-time
+state helpers, pointer equality, =wc=, and older declaration fixtures next.
+Add library artifacts and manifest-driven builds, then rerun the complete audit.
+Adjust this order when newly exposed failures or dependencies require it.
+
+* Audit evidence
+The audit used compiler SHA256
+=ce00eb412f4169dce68da8420c1933cb0fc08e316993f6370ab86892f92da5e4=.
+It ran against the dirty workspace as it existed during the audit, not a clean
+release checkout. No project sources were changed for the audit.
+
+Local generated evidence, excluded from version control:
+- [[file:../build/self-hosted-tools/run-mztrc5hi/REPORT.md][Build report]].
+- [[file:../build/self-hosted-tools/run-mztrc5hi/results.json][Manifest inventory, commands, and full build diagnostics]].
+- [[file:../build/self-hosted-tools/run-mztrc5hi/runtime-checks.json][Runtime checks and rebuilt compiler regression result]].
+- [[file:../build/self-hosted-tools/run-mztrc5hi/workspace.json][Workspace state and source hashes at audit completion]].
+- [[file:../build/self-hosting/run-dxxqndnh/result.json][Successful self-hosting gate result]].
+
+This document preserves the actionable gaps when those local build directories
+are unavailable. Consult [[file:compiler-self-hosting.org][the original self-hosting plan]] for the gate design;
+its earlier readiness statements describe work before the successful gate run.
