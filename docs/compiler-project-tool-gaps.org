@@ -69,7 +69,7 @@ Completion check: validate initialization, mutation, address-taking, and
 cross-module access as applicable to the reference behavior; then rebuild
 and run the affected suites. Reduction support is also needed by their macros.
 
-** TODO Port the compile-time state and data helpers used by generated declarations
+** DONE Port the compile-time state and data helpers used by generated declarations
 The =macro-expansion= example initializes =models:types= using
 =compiler:state-set!=, then reads it with =compiler:state-ref= and processes
 the result using =nth= and =plist-ref=. Compilation currently stops at the
@@ -243,10 +243,47 @@ negative fixtures retain their previously recorded status.
 Follow-up evidence: [[file:../build/self-hosted-tools/globals-bp4gag0c/results.json][Self-hosted compiler and affected-suite results]] and
 [[file:../build/self-hosted-tools/globals-bp4gag0c/verification.json][validation summary]]. This step did not repeat the complete A/B/C gate.
 
+** Compile-time state and data helpers completed
+The self-hosted macro evaluator now supports =compiler:state-ref=,
+=compiler:state-has?=, =compiler:state-set!=, =compiler:state-remove!=,
+=nth=, and =plist-ref=. State belongs to a compilation session, with snapshots
+of stored and returned data. Qualified keys normalize module identities through
+the invoking module's aliases, including qualified names nested inside lists.
+Stored =nil= remains distinct from an absent key; list bounds, property-list
+shape, duplicate keys, defaults, and invalid arities follow the reference rules.
+
+Top-level state statements and their supported control forms now execute in
+source order, including statements emitted by macros. Statement results are
+discarded as data. State and collection traversal consume the existing shared
+evaluation budget.
+
+State side effects also required expression expansion caching. Copies made for
+generic specialization retain source identities and reuse cached expansions;
+generated forms remain distinct even when their source spans match or one
+argument is unquoted twice. This matches the reference compiler's once-per-source
+expansion behavior without identifying forms by source offsets.
+
+Validation:
+- =make test-compiler-core test-compiler-support= passed: 33 driver checks,
+  100 regressions, 54 shared fixtures, and the compiler support suite.
+- In-process support checks cover fresh sessions after successful and failed
+  compilations and preservation of stored syntax during later checking.
+- The verified stage C compiler rebuilt the updated compiler. That binary
+  passed the six focused test groups and all 54 shared fixtures, then built
+  =macro-expansion=, which exited successfully and printed =42=.
+
+The observed successful normal executable builds now total 12 of 17. Five remain
+blocked: =bootstrap=, =wc=, =dynamic-library-client=, =workflow=, and
+=foundation-tests=. Library artifacts and the two negative fixtures retain their
+previous status. Other compile-time collection and arithmetic helpers remain
+outside this completed item.
+
+Follow-up evidence: [[file:../build/self-hosted-tools/state-g53s6tc3/results.json][Self-hosted compiler and macro-expansion results]] and
+[[file:../build/self-hosted-tools/state-g53s6tc3/verification.json][validation summary]]. The complete A/B/C gate was not repeated in this step.
+
 * Suggested order
-Compile-time state and data helpers are next. Then address pointer equality,
-which now blocks both =bootstrap= and =foundation-tests=, followed by =wc= and
-the older declaration fixtures.
+Pointer equality is next: it blocks both =bootstrap= and =foundation-tests=.
+Then address =wc= and the older declaration fixtures.
 Add library artifacts and manifest-driven builds, then rerun the complete audit.
 Adjust this order when newly exposed failures or dependencies require it.
 
