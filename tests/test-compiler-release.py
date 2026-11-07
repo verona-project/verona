@@ -60,6 +60,14 @@ class ReleaseTests(unittest.TestCase):
         entries = release.local_submodules(directory)
         self.assertEqual(entries[0][0], "submodule.dependency.url")
         self.assertTrue(Path(entries[0][1]).is_dir())
+        clone = self.root / "clone"
+        self.git(self.root, "clone", "--local", "--no-hardlinks", str(directory), str(clone))
+        for key, path in entries:
+            self.git(clone, "config", "--local", key, path)
+        self.git(clone, "-c", "protocol.allow=never", "-c", "protocol.file.allow=always",
+                 "submodule", "update", "--init", "--recursive")
+        self.assertEqual(release.clean_revision(clone)["revision"],
+                         release.clean_revision(directory)["revision"])
         (directory / "dependency/source.txt").write_text("changed dependency")
         with self.assertRaisesRegex(release.VerificationFailure, "clean committed"):
             release.clean_revision(directory)

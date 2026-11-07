@@ -154,9 +154,11 @@ def main():
         command("clone", [*offline, "clone", "--local", "--no-hardlinks", "--no-checkout",
                           ROOT, checkout], ROOT)
         command("revision", ["git", "checkout", "--detach", original["revision"]], checkout)
-        overrides = [argument for key, path in local_submodules(ROOT)
-                     for argument in ("-c", key + "=" + path)]
-        command("submodules", [*offline, *overrides, "submodule", "update", "--init", "--recursive"],
+        # Persist URLs in the isolated repository: Git uses their presence to
+        # distinguish initialized submodules in later status checks.
+        for key, path in local_submodules(ROOT):
+            capture(["git", "config", "--local", key, path], checkout)
+        command("submodules", [*offline, "submodule", "update", "--init", "--recursive"],
                 checkout)
         if clean_revision(checkout) != original:
             # Submodule branch labels may differ after a detached clone; the
