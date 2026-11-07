@@ -1,0 +1,180 @@
+(import base)
+(import core.model :as m)
+(import core.sexpr :as syntax)
+(import data)
+(import foundation.compat.arithmetic :as n)
+
+; Syntax and module lookup shared by expansion and checking, without a dependency
+; on semantic analysis. This keeps expression expansion callable by the checker.
+(base:function arity ((c m:context) (id u64) (count u64)) bool
+  (match count (0 (n:eq id 0)) (_ (match id (0 false) (_ (arity c (m:next c id) (n:sub count 1)))))))
+
+(base:function atom ((c m:context) (id u64)) bool
+  (match id
+    (0 false)
+    (_ (base:or (n:eq (field (m:at c id) kind) 0) (n:eq (field (m:at c id) kind) 69)))))
+
+(base:function digit ((b u64)) bool
+  (match (n:ge b 48) (true (n:le b 57)) (false false)))
+
+(base:function colon ((c m:context) (i u64) (end u64)) u64
+  (match (n:sub end i)
+    (0 end)
+    (1 (match (m:byte c i) (58 i) (_ end)))
+    (_
+      (let ((middle u64 (n:add i (n:div (n:sub end i) 2))) (left u64 (colon c i middle)))
+        (match (n:lt left middle) (true left) (false (colon c middle end)))))))
+
+(base:function name-colon ((c m:context) (id u64)) u64
+  (let ((v m:node (m:at c id)) (end u64 (n:add (field v start) (field v length))))
+    (match (field v generated) (0 (colon c (field v start) end)) (_ end))))
+
+(base:function import-target ((c m:context) (owner u64) (alias data:view) (i u64)) u64
+  (let
+    ((session m:module-session (deref (cast (pointer m:module-session) (field c session))))
+     (edges m:imports-array (deref (field session edges))))
+    (match (n:ge i (m:imports-length edges))
+      (true 0)
+      (false
+        (let ((v m:import-info (deref (pointer-offset (tuple-get edges 0) i))))
+          (match
+            (match (n:eq owner (field v owner))
+              (true (data:equal alias (m:spelling c (field v alias))))
+              (false false))
+            (true (n:add (field v target) 1))
+            (false (import-target c owner alias (n:add i 1)))))))))
+
+(base:function exported ((c m:context) (names u64) (name data:view)) bool
+  (match names
+    (0 false)
+    (_
+      (match (data:equal (m:spelling c names) name)
+        (true true)
+        (false (exported c (m:next c names) name))))))
+
+(base:function macro-range ((c m:context) (owner u64) (name data:view) (start u64) (count u64)) u64
+  (match count
+    (0 0)
+    (1
+      (base:cond
+        ((n:eq (field (m:at c start) kind) 27)
+         (match (n:eq (m:owner c start) owner)
+           (true
+             (match (data:equal name (m:spelling c (m:next c (m:child c start))))
+               (true start)
+               (false 0)))
+           (false 0)))
+        (true 0)))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (match (macro-range c owner name (n:add start half) (n:sub count half))
+          (0 (macro-range c owner name start half))
+          (found found))))))
+
+(base:function macro-in ((c m:context) (owner u64) (name data:view)) u64
+  (match (m:is-empty (field c session))
+    (true (macro-range c owner name 1 (n:sub (m:nodes-length (deref (field c items))) 1)))
+    (false
+      (macro-entry
+        c
+        owner
+        name
+        (field (deref (cast (pointer m:module-session) (field c session))) macros)))))
+
+(base:function macro-entry ((c m:context) (owner u64) (name data:view) (entry u64)) u64
+  (match entry
+    (0 0)
+    (_
+      (let ((v m:node (m:at c entry)) (id u64 (field v child)))
+        (match
+          (base:and-then
+            (n:eq (field v target) owner)
+            (data:equal name (m:spelling c (m:next c (m:child c id)))))
+          (true id)
+          (false (macro-entry c owner name (field v next))))))))
+
+(base:function integer-start ((c m:context) (offset u64)) bool
+  (let ((first u64 (m:byte c offset)))
+    (base:cond
+      ((digit first) true)
+      ((n:eq first 45) (digit (m:byte c (n:add offset 1))))
+      ((n:eq first 43) (digit (m:byte c (n:add offset 1))))
+      (true false))))
+
+(base:function integer-node ((c m:context) (id u64)) bool
+  (let ((v m:node (m:at c id)))
+    (match (n:eq (field v kind) 69)
+      (true true)
+      (false
+        (match (atom c id)
+          (true (match (field v generated) (0 (integer-start c (field v start))) (_ false)))
+          (false false))))))
+
+(base:function decode-data
+  ((c m:context)
+   (out (pointer u8))
+   (cursor (pointer u64))
+   (escaped (pointer bool))
+   (start u64)
+   (count u64)) unit
+  (match count
+    (0 unit)
+    (1
+      (let ((b u64 (m:byte c start)))
+        (match (deref escaped)
+          (true (do (store (deref escaped) false) (append-byte out cursor (syntax:escape-byte b))))
+          (false
+            (match b (92 (do (store (deref escaped) true) unit)) (_ (append-byte out cursor b)))))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do
+          (decode-data c out cursor escaped start half)
+          (decode-data c out cursor escaped (n:add start half) (n:sub count half)))))))
+
+(base:function append-byte ((out (pointer u8)) (cursor (pointer u64)) (b u64)) unit
+  (do
+    (store (deref (pointer-offset out (deref cursor))) (base:convert b))
+    (store (deref cursor) (n:add (deref cursor) 1))
+    unit))
+
+(base:function decode-node
+  ((c m:context)
+   (id u64)
+   (out (pointer u8))
+   (cursor (pointer u64))
+   (escaped (pointer bool))
+   (start u64)
+   (count u64)) unit
+  (match count
+    (0 unit)
+    (1
+      (let ((b u64 (m:spelling-byte c id start)))
+        (match (deref escaped)
+          (true (do (store (deref escaped) false) (append-byte out cursor (syntax:escape-byte b))))
+          (false
+            (match b (92 (do (store (deref escaped) true) unit)) (_ (append-byte out cursor b)))))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do
+          (decode-node c id out cursor escaped start half)
+          (decode-node c id out cursor escaped (n:add start half) (n:sub count half)))))))
+
+(base:function floating-node ((c m:context) (id u64)) bool
+  (let ((kind u64 (field (m:at c id) kind))) (base:or (n:eq kind 35) (n:eq kind 71))))
+
+(export
+  arity
+  atom
+  digit
+  colon
+  name-colon
+  import-target
+  exported
+  macro-range
+  macro-in
+  integer-start
+  integer-node
+  floating-node
+  decode-data
+  decode-node
+  append-byte)

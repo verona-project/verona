@@ -1,0 +1,106 @@
+(import base)
+(import core.model :as m)
+(import core.configuration :as info)
+(import core.sexpr :as syntax)
+(import arena)
+(import data)
+(import llvm)
+(import llvm.core :as ir)
+(import llvm.types :as t)
+(import llvm.target :as target)
+(import libc.string :as cstring)
+(import foundation.compat.arithmetic :as n)
+
+(base:function machine
+  ((config info:configuration) (module t:module-ref) (level i32) (message (pointer (pointer u8))))
+  t:machine-ref
+  (target:machine-for-triple-with-options
+    module
+    (field config triple)
+    (field config cpu)
+    (field config machine-features)
+    level
+    message))
+
+(base:function resolve
+  ((memory (pointer arena:arena))
+   (requested (pointer u8))
+   (cpu-requested (pointer u8))
+   (features-requested (pointer u8))
+   (level i32)
+   (extra (pointer void))) info:configuration
+  (let
+    ((native bool (info:equal requested "native"))
+     (borrowed (pointer u8) (match native (true (target:default-triple)) (false requested)))
+     (triple (pointer u8) (info:copy memory (data:view borrowed (cstring:strlen borrowed))))
+     (cpu (pointer u8) (info:copy memory (data:view cpu-requested (cstring:strlen cpu-requested))))
+     (machine-features
+       (pointer u8)
+       (info:copy memory (data:view features-requested (cstring:strlen features-requested))))
+     (owner llvm:session (llvm:create "verona.target"))
+     (message (pointer u8) (cast (pointer u8) (target:null-pointer))))
+    (do
+      (match native (true (ir:message-dispose borrowed)) (_ unit))
+      (info:lower triple (cstring:strlen triple))
+      (let
+        ((arch (pointer u8) (info:architecture triple))
+         (os (pointer u8) (info:platform triple))
+         (provisional
+           info:configuration
+           (info:configuration
+             triple
+             os
+             arch
+             cpu
+             machine-features
+             level
+             (syntax:features os arch extra)
+             ""))
+         (handle t:machine-ref (machine provisional (field owner module) level (& message))))
+        (do
+          (match (target:is-null (cast (pointer void) handle))
+            (true
+              (do
+                (match (m:is-empty (cast (pointer void) message))
+                  (true unit)
+                  (false (do (m:text 2 message) (ir:message-dispose message))))
+                (llvm:destroy owner)
+                (m:fatal "cannot resolve compilation target")))
+            (false unit))
+          (match (m:is-empty (cast (pointer void) message))
+            (true unit)
+            (false (ir:message-dispose message)))
+          (let
+            ((layout t:layout-ref (target:machine-layout handle))
+             (width u32 (target:pointer-size layout))
+             (description (pointer u8) (target:layout-string layout))
+             (text
+               (pointer u8)
+               (info:copy memory (data:view description (cstring:strlen description)))))
+            (do
+              (ir:message-dispose description)
+              (target:layout-dispose layout)
+              (target:machine-dispose handle)
+              (llvm:destroy owner)
+              (match (base:and (n:eq (base:convert width) 8) (n:eq (base:convert (deref text)) 101))
+                (true unit)
+                (false
+                  (m:fatal "unsupported target layout: requires 64-bit little-endian pointers")))
+              (info:configuration
+                triple
+                os
+                arch
+                cpu
+                machine-features
+                level
+                (syntax:features os arch extra)
+                text))))))))
+
+(base:function configured-machine
+  ((p m:context) (module t:module-ref) (level i32) (message (pointer (pointer u8)))) t:machine-ref
+  (let ((config (pointer void) (info:from-context p)))
+    (match (m:is-empty config)
+      (true (target:native-machine-with-optimization module level message))
+      (false (machine (deref (cast (pointer info:configuration) config)) module level message)))))
+
+(export resolve configured-machine)

@@ -1,3 +1,0 @@
-(function main ((value bool)) i32
-  (match value
-    (true 1)))

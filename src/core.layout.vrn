@@ -1,0 +1,91 @@
+(import base)
+(import core.constants :as constants)
+(import core.numeric :as num)
+(import core.model :as m)
+(import core.check :as check)
+(import arena)
+(import llvm)
+(import llvm.types :as t)
+(import llvm.core :as ir)
+(import llvm.target :as target)
+(import foundation.compat.arithmetic :as n)
+
+; Allocate arena-owned storage for count LLVM value handles; terminate on allocation failure.
+(base:function values ((c m:context) (count u64)) (pointer t:value-ref)
+  (match
+    (arena:allocate
+      (field c memory)
+      (n:mul count constants:llvm-handle-byte-size)
+      constants:llvm-handle-alignment)
+    ((allocated p) (cast (pointer t:value-ref) (cast (pointer void) p)))
+    (_
+      (do
+        (m:fatal "LLVM handle storage allocation failed")
+        (cast (pointer t:value-ref) (target:null-pointer))))))
+
+(base:function scalar-type ((owner llvm:session) (ty u64)) t:type-ref
+  (match ty
+    (11 (ir:pointer-type (field owner context) 0))
+    (12 (ir:float-type (field owner context)))
+    (13 (ir:double-type (field owner context)))
+    (_ (ir:int-type (field owner context) (base:convert (num:width ty))))))
+
+(base:function integer-type ((owner llvm:session)) t:type-ref
+  (ir:int-type (field owner context) constants:core-integer-width))
+
+; Products and structural tuples are immutable LLVM struct SSA values.
+(base:function component-types
+  ((c m:context) (owner llvm:session) (id u64) (out (pointer t:type-ref)) (count u64)) u32
+  (match id
+    (0 (base:convert count))
+    (_
+      (do
+        (store (deref (pointer-offset out count)) (value-type c owner (field (m:at c id) ty)))
+        (component-types c owner (m:next c id) out (n:add count 1))))))
+
+(base:function sum-types
+  ((c m:context) (owner llvm:session) (id u64) (out (pointer t:type-ref)) (index u64)) u32
+  (match id
+    (0 (base:convert index))
+    (_
+      (let
+        ((buffer
+           (pointer t:type-ref)
+           (cast
+             (pointer t:type-ref)
+             (cast
+               (pointer void)
+               (values c (n:add 1 (check:chain-length c (m:next c (m:child c id))))))))
+         (count u32 (component-types c owner (m:next c (m:child c id)) buffer 0)))
+        (do
+          (store
+            (deref (pointer-offset out index))
+            (ir:struct-type (field owner context) buffer count 0))
+          (sum-types c owner (m:next c id) out (n:add index 1)))))))
+
+(base:function value-type ((c m:context) (owner llvm:session) (ty u64)) t:type-ref
+  (base:cond
+    ((n:le ty num:descriptor-base) (scalar-type owner ty))
+    ((n:eq (check:type-kind c ty) 34) (ir:pointer-type (field owner context) 0))
+    ((n:eq (check:type-kind c ty) 49)
+     (ir:array-type (value-type c owner (check:array-element c ty)) (check:array-length c ty)))
+    (true
+      (let
+        ((buffer
+           (pointer t:type-ref)
+           (cast
+             (pointer t:type-ref)
+             (cast
+               (pointer void)
+               (values c (n:add 1 (check:chain-length c (check:type-components c ty)))))))
+         (count
+           u32
+           (match (check:type-kind c ty)
+             (21
+               (do
+                 (store (deref buffer) (integer-type owner))
+                 (sum-types c owner (check:type-components c ty) buffer 1)))
+             (_ (component-types c owner (check:type-components c ty) buffer 0)))))
+        (ir:struct-type (field owner context) buffer count 0)))))
+
+(export values value-type component-types scalar-type integer-type)

@@ -1,0 +1,47 @@
+(import base)
+(import allocator)
+(import array)
+(import dictionary)
+(import error)
+(import data)
+(import arena)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+
+; Polynomial byte hash, wrapping at u64. Split traversal bounds host stack depth.
+(base:function hash-range ((key data:view) (start u64) (count u64) (hash u64)) u64
+  (match count
+    (0 hash)
+    (1 (n:add (n:mul hash 31) (base:convert (deref (pointer-offset (field key bytes) start)))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (hash-range key (n:add start half) (n:sub count half) (hash-range key start half hash))))))
+
+(base:function hash ((key data:view)) u64
+  (hash-range key 0 (field key length) 0))
+
+; vacant/deleted/occupied(view, ID, hash): tag + four 8-byte payload fields.
+; Generated names-slot is vacant/deleted/occupied(key view, interned ID, hash).
+; Occupied keys borrow bytes copied into the caller-supplied name arena; IDs
+; start at one and remain stable when the dictionary storage grows.
+; Generated names-table owns its slot array and tracks occupied-entry count.
+; Destroy with names-destroy; keep the separate key arena alive for lookups.
+(dictionary:define names data:view u64 hash data:equal 40 8)
+
+; Keys are copied to the stable session arena, never borrowed from source/scratch.
+(base:function intern ((table (pointer names-table)) (memory (pointer arena:arena)) (key data:view))
+  (tuple error:status u64)
+  (let ((id u64 0))
+    (match (names-get (deref table) key (& id))
+      (true (tuple (error:success) id))
+      (false
+        (let
+          ((copy data:data (data:empty (arena:allocator memory)))
+           (result error:status (data:assign-bytes (& copy) key)))
+          (match result
+            ((ok)
+             (let ((fresh u64 (n:add (names-count (deref table)) 1)))
+               (tuple (names-insert table (data:borrow copy) fresh) fresh)))
+            (reason (tuple reason 0))))))))
+
+(export names-table names-slot names-empty names-count names-get names-destroy intern)

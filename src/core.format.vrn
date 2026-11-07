@@ -1,0 +1,65 @@
+(import base)
+(import core.numeric :as num)
+(import core.model :as m)
+(import core.check :as check)
+(import arena)
+(import data)
+(import error)
+(import libc.string :as cstring)
+(import foundation.compat.arithmetic :as n)
+
+(base:function append-view ((out (pointer data:data)) (value data:view) (start u64) (count u64))
+  error:status
+  (match count
+    (0 (error:success))
+    (1 (data:append out (deref (pointer-offset (field value bytes) start))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (match (append-view out value start half)
+          ((ok) (append-view out value (n:add start half) (n:sub count half)))
+          (reason reason))))))
+
+(base:function append ((out (pointer data:data)) (text (pointer u8))) unit
+  (m:storage (append-view out (data:view text (cstring:strlen text)) 0 (cstring:strlen text))))
+
+(base:function digits ((out (pointer data:data)) (value u64)) unit
+  (do
+    (match (n:ge value 10) (true (digits out (n:div value 10))) (false unit))
+    (m:storage
+      (data:append out (base:convert (n:add 48 (n:sub value (n:mul (n:div value 10) 10))))))))
+
+; Stable recursive wire syntax. Nominal names include their session module ID.
+(base:function prefix ((c m:context) (ty u64) (case u64)) data:data
+  (let ((out data:data (data:empty (arena:allocator (field c memory)))))
+    (do
+      (match (check:type-kind c ty)
+        (22 (append (& out) "tuple("))
+        (49 (append (& out) "array("))
+        (_
+          (let ((id u64 (n:sub ty num:descriptor-base)))
+            (do
+              (append (& out) (match (check:type-kind c ty) (20 "product:") (_ "sum:")))
+              (digits (& out) (m:owner c id))
+              (append (& out) ":")
+              (m:storage
+                (append-view
+                  (& out)
+                  (m:spelling c (m:next c (m:child c id)))
+                  0
+                  (field (m:spelling c (m:next c (m:child c id))) length)))
+              (match case
+                (0 unit)
+                (_
+                  (do
+                    (append (& out) ":")
+                    (m:storage
+                      (append-view
+                        (& out)
+                        (m:spelling c (m:child c case))
+                        0
+                        (field (m:spelling c (m:child c case)) length))))))
+              (append (& out) "(")))))
+      (m:storage (data:append (& out) 0))
+      out)))
+
+(export prefix append digits append-view)

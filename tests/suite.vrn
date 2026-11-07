@@ -1,0 +1,92 @@
+(import base)
+(import testing)
+(import test_support :as support)
+(import test_reader :as reader)
+(import test_eval :as eval)
+(import test_link :as link)
+(import data)
+(import system_allocator :as system)
+(import libc.filesystem :as fs)
+(import libc.descriptor :as fd)
+(import core.model :as m)
+(import libc.string :as cstring)
+(import foundation.compat.arithmetic :as n)
+
+(base:function run-case ((name (pointer u8)) (test testing:test-function)) testing:result
+  (let ((result testing:result (testing:execute test)))
+    (do
+      (m:text 1 name)
+      (m:text 1 (match (field result failed) (0 ": passed\n") (_ ": FAILED\n")))
+      result)))
+
+(base:function main () exit-code
+  (let ((path data:data (data:empty (system:create))))
+    (match
+      (data:assign-bytes
+        (& path)
+        (data:view "/tmp/verona tests-XXXXXX" (n:add (cstring:strlen "/tmp/verona tests-XXXXXX") 1)))
+      ((ok)
+       (let ((descriptor i32 (fs:mkstemp (data:bytes path))))
+         (match descriptor
+           (-1 (do (data:destroy (& path)) 1))
+           (_
+             (do
+               (fd:close descriptor)
+               (support:set-path (data:bytes path))
+               (let
+                 ((result
+                    testing:result
+                    (testing:checks
+                      (run-case
+                        "link argv storage and allocation cleanup"
+                        link:argument-storage-and-allocation-cleanup)
+                      (run-case "default numeric generic execution" eval:default-generic-execution)
+                      (run-case
+                        "macro-generated checked program reuse"
+                        eval:macro-generated-program-is-reusable)
+                      (run-case
+                        "tuple and sum component pattern execution"
+                        eval:component-pattern-execution)
+                      (run-case "managed memory allocation cleanup" eval:managed-memory-storage)
+                      (run-case "global storage and evaluation isolation" eval:global-storage)
+                      (run-case "pointer identity" eval:pointer-identity)
+                      (run-case "compile-time state isolation" eval:compile-time-state-isolation)
+                      (run-case "aggregate argument validation" eval:structured-invalid-inputs)
+                      (run-case
+                        "aggregate ownership and allocation cleanup"
+                        eval:structured-ownership)
+                      (run-case
+                        "structured execution order and scrutinee count"
+                        eval:structured-execution)
+                      (run-case
+                        "evaluator execution limits and deep recursion"
+                        eval:execution-limits)
+                      (run-case "evaluator reuse and allocation cleanup" eval:reusable-and-storage)
+                      (run-case "evaluator deep checked expressions" eval:deep-expressions)
+                      (run-case
+                        "evaluator typed results and invariants"
+                        eval:typed-results-and-invariants)
+                      (run-case "reader structure and spans" reader:structure-and-spans)
+                      (run-case "reader platform conditionals" reader:platform-conditionals)
+                      (run-case "reader errors" reader:errors)
+                      (run-case "reader positions and boundaries" reader:lines-and-boundaries)
+                      (run-case "reader allocation cleanup" reader:allocation-failures)
+                      (run-case "collection layouts" support:collection-layouts)
+                      (run-case "span growth" support:spans-survive-growth)
+                      (run-case
+                        "interning IDs and owned keys"
+                        support:interned-ids-survive-growth-and-key-storage-is-copied)
+                      (run-case "empty source" support:empty-source)
+                      (run-case "source byte preservation" support:source-bytes-are-preserved)
+                      (run-case "exact read window" support:exact-read-window)
+                      (run-case "large source" support:large-source)
+                      (run-case "directory read failure" support:directory-read-fails)
+                      (run-case
+                        "allocation failures and cleanup"
+                        support:allocation-failures-release-owned-storage)
+                      (run-case "missing source" support:missing-source-fails))))
+                 (do
+                   (fs:unlink (data:bytes path))
+                   (data:destroy (& path))
+                   (match (field result failed) (0 0) (_ 1)))))))))
+      (_ (do (data:destroy (& path)) 1)))))

@@ -1,74 +1,60 @@
 {
-  description = "Verona compiler development environment";
+  description = "Verona self-hosted compiler development environment";
 
-  inputs = {
-    self.submodules = true;
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-  };
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
   outputs =
     { nixpkgs, ... }:
     let
       systems = [
         "aarch64-darwin"
-        "x86_64-darwin"
         "aarch64-linux"
         "x86_64-linux"
       ];
 
-      forAllSystems =
-        f:
-        nixpkgs.lib.genAttrs systems (
-          system:
-          f (import nixpkgs {
-            inherit system;
-          })
-        );
+      forAllSystems = nixpkgs.lib.genAttrs systems;
     in
     {
       devShells = forAllSystems (
-        pkgs:
+        system:
+        let
+          pkgs = import nixpkgs { inherit system; };
+          llvm = pkgs.llvmPackages_23.llvm;
+          clang = pkgs.llvmPackages_23.clang;
+        in
         {
-          default =
-            let
-              # Git's submodule pin keeps these bindings in step with LLVM 23.
-              clLLVM = ./vendor/CL-LLVM;
-              lisp = pkgs.sbcl.withPackages (ps: [
-                ps.fiveam
-                ps.cffi
-                ps.cffi-grovel
-                ps.trivial-features
-                ps.cl-ppcre
-                ps.split-sequence
-                ps.trivial-shell
-              ]);
-            in
-            pkgs.mkShell {
-              packages = [
-                pkgs.autoconf
-                pkgs.automake
-                pkgs.python3
-                pkgs.cmake
-                lisp
-                pkgs.llvmPackages_23.llvm
-                pkgs.llvmPackages_23.clang
-              ];
+          default = pkgs.mkShell {
+            packages = [
+              pkgs.autoconf
+              pkgs.automake
+              pkgs.python3
+              llvm
+              clang
+            ];
 
-              shellHook = ''
-                export VERONA_CL_LLVM="${clLLVM}"
-                # Keep all LLVM tools on the pinned major version even when an
-                # inherited PATH already contains a different LLVM installation.
-                export PATH="${pkgs.llvmPackages_23.llvm}/bin:${pkgs.llvmPackages_23.clang}/bin:$PATH"
-                # The compiler driver supplies the platform startup objects
-                # and defaults needed to turn a Verona object into a process.
-                export VERONA_LINKER="${pkgs.llvmPackages_23.clang}/bin/clang"
-                export VERONA_AR="${pkgs.llvmPackages_23.llvm}/bin/llvm-ar"
-                export LD_LIBRARY_PATH="${pkgs.llvmPackages_23.llvm.lib}/lib:''${LD_LIBRARY_PATH:-}"
-                export DYLD_LIBRARY_PATH="${pkgs.llvmPackages_23.llvm.lib}/lib:''${DYLD_LIBRARY_PATH:-}"
-                echo "Verona development shell: SBCL $(sbcl --version)"
-                echo "LLVM $(llvm-config --version), CL-LLVM from vendor/CL-LLVM"
-              '';
-            };
+            shellHook = ''
+              # Keep every native compiler tool on the pinned LLVM major.
+              export PATH="${llvm}/bin:${clang}/bin:$PATH"
+              export LLVM_CONFIG="${llvm}/bin/llvm-config"
+              export CC="${clang}/bin/clang"
+              export AR="${llvm}/bin/llvm-ar"
+
+              # Verona's driver recognizes both the public toolchain variables
+              # and the self-hosted compiler-specific overrides.
+              export VERONA_LINKER="$CC"
+              export VERONA_AR="$AR"
+              export VERONA_CORE_CLANG="$CC"
+              export VERONA_CORE_AR="$AR"
+
+              # The compiler links against LLVM's shared C API library.
+              export LIBRARY_PATH="${llvm.lib}/lib:''${LIBRARY_PATH:-}"
+              export LD_LIBRARY_PATH="${llvm.lib}/lib:''${LD_LIBRARY_PATH:-}"
+              export DYLD_LIBRARY_PATH="${llvm.lib}/lib:''${DYLD_LIBRARY_PATH:-}" 
+
+              echo "Verona compiler development shell"
+              echo "LLVM $(llvm-config --version), Clang $(clang --version | head -n 1)"
+            '';
+          };
         }
       );
     };

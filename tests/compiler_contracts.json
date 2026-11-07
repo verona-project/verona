@@ -1,0 +1,628 @@
+{
+  "version": 1,
+  "scope": "Public source-language, compile-time, native ABI and CLI contracts. Historical Common Lisp embedding and IDE APIs are not a promise to embed Common Lisp in verona.",
+  "validation": "Per-contract tests and supported helper cases identify coverage. Completion of one historical bootstrap does not certify every contract or newer source revision.",
+  "contracts": [
+    {
+      "name": "reader",
+      "forms": [
+        "ASCII identifiers/comments",
+        "integer/float spellings",
+        "data/character literals",
+        "quote/quasiquote/unquote/splice",
+        "reader conditionals",
+        "source spans"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/reader.lisp",
+        "src/core.sexpr.vrn"
+      ],
+      "tests": [
+        "test_data_and_character_literals",
+        "test_default_operator_literal_inference",
+        "test_locations_and_comments",
+        "test_reader",
+        "test_reader_features_and_cross_target_objects",
+        "test_runtime_source_locations_and_frames"
+      ]
+    },
+    {
+      "name": "named modules",
+      "forms": [
+        "import/%import",
+        "export/%export",
+        "aliases",
+        "ordered module paths",
+        "dependency order",
+        "visibility",
+        "cycle diagnostics"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/compiler.lisp",
+        "archived SBCL compiler: src/resolver.lisp",
+        "src/core.modules.vrn"
+      ],
+      "tests": [
+        "test_default_qualifiers_and_module_identity",
+        "test_expression_macro_modules_and_base",
+        "test_generated_macro_names_resolve_in_invocation_module",
+        "test_global_modules",
+        "test_invalid_native_exports",
+        "test_macro_reduction_modules",
+        "test_macro_state_module_keys",
+        "test_manifest_paths_features_and_imports",
+        "test_module_diagnostics",
+        "test_module_reference_parity",
+        "test_module_resource_limits",
+        "test_modules",
+        "test_named_module_search_paths",
+        "test_native_export_aggregate_headers",
+        "test_native_export_modules_and_identity"
+      ]
+    },
+    {
+      "name": "declarations",
+      "forms": [
+        "%function",
+        "%type product/sum/tuple/array/alias/opaque/pointer",
+        "%constant",
+        "%variable",
+        "%external-function",
+        "native-export"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/compiler.lisp",
+        "archived SBCL compiler: src/resolver.lisp",
+        "src/core.check.vrn"
+      ],
+      "tests": [
+        "test_addressable_storage_and_aliases",
+        "test_cli_version_and_output_alias",
+        "test_fixed_size_arrays",
+        "test_global_modules",
+        "test_global_storage_at_c_boundary",
+        "test_invalid_constant_declarations",
+        "test_invalid_global_declarations",
+        "test_invalid_native_exports",
+        "test_mutable_globals",
+        "test_native_export_aggregate_headers",
+        "test_native_export_modules_and_identity",
+        "test_opaque_types",
+        "test_product_field_labels",
+        "test_structured_analysis_errors",
+        "test_structured_pattern_errors",
+        "test_structured_visibility",
+        "test_sum_component_patterns",
+        "test_top_level_constants",
+        "test_transparent_type_aliases",
+        "test_tuple_patterns"
+      ]
+    },
+    {
+      "name": "numeric and Boolean execution",
+      "forms": [
+        "i8/i16/i32/i64/u8/u16/u32/u64",
+        "f32/f64",
+        "integer/float/conversion/bit primitives",
+        "default numeric generics",
+        "Boolean primitives",
+        "Base Boolean macros"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/resolver.lisp",
+        "src/core.numeric.vrn",
+        "src/core.float.vrn"
+      ],
+      "tests": [
+        "test_base_boolean_operations",
+        "test_boolean_primitives",
+        "test_compile_time_float_roundtrip_and_arithmetic_limits",
+        "test_default_division_failures",
+        "test_default_numeric_generics",
+        "test_floating_point_primitives",
+        "test_generated_native_symbol_and_numeric_boundaries",
+        "test_integer_type_boundaries"
+      ]
+    },
+    {
+      "name": "bindings and control",
+      "forms": [
+        "let",
+        "do",
+        "if",
+        "match",
+        "direct calls",
+        "indirect calls",
+        "recursion",
+        "evaluation order"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/resolver.lisp",
+        "src/core.check.vrn",
+        "src/core.eval.vrn"
+      ],
+      "tests": [
+        "test_calls_and_mutual_recursion",
+        "test_dependency_first_declaration_order",
+        "test_function_pointer_calls",
+        "test_inferred_bindings",
+        "test_invalid_local_binding_names_and_duplicates",
+        "test_invalid_scalar_matches",
+        "test_link_options_order_and_growth",
+        "test_local_binding_names_follow_reference_compiler",
+        "test_macro_compile_time_control_and_lists",
+        "test_match_catch_all_bindings",
+        "test_runtime_failures_and_argument_order",
+        "test_scalar_match_patterns",
+        "test_sequence_runtime_failure_order",
+        "test_signed_values_through_calls_and_bindings",
+        "test_unit_and_nested_control_flow"
+      ]
+    },
+    {
+      "name": "early return",
+      "forms": [
+        "return",
+        "never-type compatibility",
+        "unreachable expressions",
+        "terminating branch joins"
+      ],
+      "status": "retained_limit",
+      "reference": [
+        "archived SBCL compiler: src/resolver.lisp",
+        "archived SBCL compiler: src/backend/llvm/functions.lisp"
+      ],
+      "tests": [],
+      "decision": "Retain expression-valued function bodies without early return for now, by user decision on 2026-11-07. The planned cases below define the required contract if this limitation is revisited.",
+      "planned_check": {
+        "source": "(%function f ((flag bool)) i64 (if flag (return 42) 7))\n(%function main () i64 (f true))",
+        "expected": "i64:42",
+        "cases": [
+          "aggregate return",
+          "generic specialization",
+          "wrong return type/arity",
+          "unreachable sequence diagnostics",
+          "return outside function",
+          "both branches terminate",
+          "evaluator frame/storage cleanup"
+        ]
+      }
+    },
+    {
+      "name": "character contract",
+      "forms": [
+        "#\\ literals",
+        "u8 character values",
+        "explicit integer conversions"
+      ],
+      "status": "intentional_difference",
+      "reference": [
+        "archived SBCL compiler: src/resolver.lisp",
+        "README.md"
+      ],
+      "tests": [
+        "test_data_and_character_literals",
+        "test_default_operator_literal_inference",
+        "test_integer_type_boundaries"
+      ],
+      "decision": "User selected u8 characters with explicit integer conversions on 2026-11-06; retain this intentional difference from the reference char type and widening."
+    },
+    {
+      "name": "memory and native ABI",
+      "forms": [
+        "address-of/&",
+        "deref/dereference",
+        "pointer-offset",
+        "store/assign",
+        "C layouts",
+        "native calls",
+        "callback adapters",
+        "native exports/headers"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/resolver.lisp",
+        "archived SBCL compiler: src/backend/llvm/functions.lisp",
+        "src/core.cabi.vrn"
+      ],
+      "tests": [
+        "test_addressable_storage_and_aliases",
+        "test_external_functions_and_native_aggregate_layouts",
+        "test_function_pointer_calls",
+        "test_function_pointer_identity",
+        "test_general_pointer_types_and_casts",
+        "test_generated_native_symbol_and_numeric_boundaries",
+        "test_global_storage_at_c_boundary",
+        "test_invalid_native_exports",
+        "test_invalid_pointer_equality",
+        "test_managed_pointer_failures",
+        "test_native_artifact_outputs",
+        "test_native_export_aggregate_headers",
+        "test_native_export_modules_and_identity",
+        "test_native_library_linking",
+        "test_native_null_pointer_equality",
+        "test_native_platform_conditionals",
+        "test_pointer_equality",
+        "test_pointer_equality_dispatch",
+        "test_pointer_memory_layout_and_data"
+      ]
+    },
+    {
+      "name": "runtime evaluator native calls",
+      "forms": [
+        "external declaration checking",
+        "explicit unavailable outcome"
+      ],
+      "status": "retained_limit",
+      "reference": [
+        "src/core.eval.vrn"
+      ],
+      "tests": [
+        "test_external_functions_and_native_aggregate_layouts",
+        "test_function_pointer_calls",
+        "test_function_pointer_identity",
+        "test_general_pointer_types_and_casts",
+        "test_generated_native_symbol_and_numeric_boundaries",
+        "test_invalid_native_exports",
+        "test_invalid_pointer_equality",
+        "test_managed_pointer_failures",
+        "test_native_artifact_outputs",
+        "test_native_export_aggregate_headers",
+        "test_native_export_modules_and_identity",
+        "test_native_library_linking",
+        "test_native_null_pointer_equality",
+        "test_native_platform_conditionals",
+        "test_pointer_equality",
+        "test_pointer_equality_dispatch",
+        "test_pointer_memory_layout_and_data"
+      ],
+      "decision": "Retain explicit native-call failure. No native allocation/I/O bridge is introduced; managed pointer tokens are not native addresses."
+    },
+    {
+      "name": "generic and protocol dispatch",
+      "forms": [
+        "%generic",
+        "%implementation",
+        "%protocol",
+        "constrained functions",
+        "result-directed overloads",
+        "specialization reuse/recursion"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/resolver.lisp",
+        "src/core.check.vrn"
+      ],
+      "tests": [
+        "test_concrete_generic_dispatch",
+        "test_concrete_protocols",
+        "test_constrained_function_specialization",
+        "test_default_numeric_generics"
+      ]
+    },
+    {
+      "name": "macro execution",
+      "forms": [
+        "macro/%macro",
+        "declaration batches",
+        "expression expansion",
+        "definition/invocation environments",
+        "expansion identity/cache",
+        "state isolation",
+        "execution limits"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/compiler.lisp",
+        "archived SBCL compiler: src/evaluator.lisp",
+        "archived SBCL compiler: src/compile-time.lisp",
+        "src/core.expand.vrn"
+      ],
+      "tests": [
+        "test_compile_time_arithmetic_independent_values",
+        "test_compile_time_context_foreign_targets",
+        "test_compile_time_float_roundtrip_and_arithmetic_limits",
+        "test_compile_time_generated_values_and_empty_access",
+        "test_compile_time_helper_parity",
+        "test_compile_time_helpers_reference_comparison",
+        "test_expression_macro_errors_and_limits",
+        "test_expression_macro_modules_and_base",
+        "test_generated_macro_names_resolve_in_invocation_module",
+        "test_macro_compile_time_control_and_lists",
+        "test_macro_compile_time_state",
+        "test_macro_definition_batches",
+        "test_macro_nth_and_plist_ref",
+        "test_macro_reduction_errors_and_budget",
+        "test_macro_reduction_modules",
+        "test_macro_reductions",
+        "test_macro_reference_capture_contract",
+        "test_macro_result_context_is_per_invocation",
+        "test_macro_state_and_collection_budget",
+        "test_macro_state_and_data_errors",
+        "test_macro_state_module_keys",
+        "test_macro_state_once_per_source_form",
+        "test_macro_symbol_concat",
+        "test_quasiquoted_declarations",
+        "test_repeated_macro_templates_fit_syntax_budget",
+        "test_runtime_expression_macros",
+        "test_source_defined_declaration_macros"
+      ]
+    },
+    {
+      "name": "macro capture",
+      "forms": [
+        "invocation-module rehydration",
+        "generated symbols",
+        "qualified names"
+      ],
+      "status": "reference_compatible",
+      "reference": [
+        "archived SBCL compiler: src/compiler.lisp",
+        "src/core.expand.vrn"
+      ],
+      "tests": [
+        "test_expression_macro_errors_and_limits",
+        "test_expression_macro_modules_and_base",
+        "test_macro_reference_capture_contract",
+        "test_quasiquoted_declarations",
+        "test_runtime_expression_macros"
+      ],
+      "decision": "Retain reference capture behavior; generated names are not automatically hygienic. Strong lexical hygiene remains a separate language extension."
+    },
+    {
+      "name": "compile-time helper API",
+      "forms": [
+        "expression helpers in compile_time_parity.json",
+        "definitions declaration compatibility builder",
+        "list/cons/car/cdr/equal?/not/empty?",
+        "quote/quasiquote",
+        "compiler state helpers"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/compiler.lisp",
+        "archived SBCL compiler: src/compile-time.lisp",
+        "archived SBCL compiler: tests/evaluator.lisp",
+        "tests/compile_time_parity.json"
+      ],
+      "tests": [
+        "test_compile_time_arithmetic_independent_values",
+        "test_compile_time_context_foreign_targets",
+        "test_compile_time_float_roundtrip_and_arithmetic_limits",
+        "test_compile_time_generated_values_and_empty_access",
+        "test_compile_time_helper_parity",
+        "test_compile_time_helpers_reference_comparison",
+        "test_generated_native_symbol_and_numeric_boundaries",
+        "test_macro_compile_time_control_and_lists",
+        "test_macro_compile_time_state",
+        "test_macro_reduction_errors_and_budget",
+        "test_macro_reduction_modules",
+        "test_macro_reductions",
+        "test_macro_state_and_collection_budget",
+        "test_macro_state_and_data_errors",
+        "test_macro_state_module_keys",
+        "test_macro_state_once_per_source_form"
+      ]
+    },
+    {
+      "name": "diagnostics and outcomes",
+      "forms": [
+        "source locations",
+        "expected/actual types and origins",
+        "independent recovery",
+        "unused-body checking",
+        "language/resource/tool/internal distinctions"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/resolver.lisp",
+        "src/core.check.vrn",
+        "src/core.eval.vrn"
+      ],
+      "tests": [
+        "test_artifact_tool_failure_cleanup",
+        "test_cli_and_limits",
+        "test_compile_time_float_roundtrip_and_arithmetic_limits",
+        "test_default_division_failures",
+        "test_expression_macro_errors_and_limits",
+        "test_link_failure_cleans_up",
+        "test_locations_and_comments",
+        "test_managed_pointer_failures",
+        "test_module_diagnostics",
+        "test_module_resource_limits",
+        "test_runtime_failures_and_argument_order",
+        "test_runtime_source_locations_and_frames",
+        "test_semantic_recovery",
+        "test_sequence_runtime_failure_order",
+        "test_type_diagnostic_origins"
+      ]
+    },
+    {
+      "name": "core CLI diagnostic status",
+      "forms": [
+        "compiler errors exit 2",
+        "runtime failures exit 70",
+        "full typed result reporting"
+      ],
+      "status": "intentional_difference",
+      "reference": [
+        "README.md",
+        "tests/shared_suite.py"
+      ],
+      "tests": [
+        "test_artifact_tool_failure_cleanup",
+        "test_cli_and_limits",
+        "test_cli_version_and_output_alias",
+        "test_default_division_failures",
+        "test_link_failure_cleans_up",
+        "test_managed_pointer_failures",
+        "test_runtime_expression_macros",
+        "test_runtime_failures_and_argument_order",
+        "test_runtime_source_locations_and_frames",
+        "test_sequence_runtime_failure_order"
+      ],
+      "decision": "Retain the core command/result protocol; it is distinct from the reference driver process status and artifact-path stdout."
+    },
+    {
+      "name": "artifacts and manifests",
+      "forms": [
+        "compile",
+        "compile-report",
+        "object/executable/static-library/shared-library",
+        "build TARGET OUTPUT-DIRECTORY",
+        "manifest validation/paths/dependencies/features/version/optimization"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/driver/cli.lisp",
+        "archived SBCL compiler: src/driver/build.lisp",
+        "src/core.build.vrn"
+      ],
+      "tests": [
+        "test_artifact_entry_and_options",
+        "test_artifact_tool_failure_cleanup",
+        "test_cli_version_and_output_alias",
+        "test_invalid_link_options",
+        "test_invalid_native_exports",
+        "test_link_failure_cleans_up",
+        "test_link_options_order_and_growth",
+        "test_manifest_executable_and_defaults",
+        "test_manifest_library_kinds_and_relative_link_paths",
+        "test_manifest_paths_features_and_imports",
+        "test_manifest_target_features_and_link_policy",
+        "test_manifest_validation_and_no_evaluation",
+        "test_native_artifact_outputs",
+        "test_native_export_aggregate_headers",
+        "test_native_export_modules_and_identity"
+      ]
+    },
+    {
+      "name": "CLI aliases/version",
+      "forms": [
+        "--output/-o",
+        "--version/-V"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/driver/cli.lisp",
+        "src/core.cli.vrn"
+      ],
+      "tests": [
+        "test_cli_version_and_output_alias"
+      ]
+    },
+    {
+      "name": "CPU and machine features",
+      "forms": [
+        "--cpu",
+        "--features",
+        "target machine CPU/features",
+        "compiler:target-info CPU"
+      ],
+      "status": "implemented",
+      "reference": [
+        "archived SBCL compiler: src/driver/cli.lisp",
+        "archived SBCL compiler: src/backend/llvm/target.lisp"
+      ],
+      "tests": [
+        "test_cli_cpu_features_and_default_outputs",
+        "test_compile_time_context_foreign_targets"
+      ]
+    },
+    {
+      "name": "direct output paths",
+      "forms": [
+        "explicit -o/--output",
+        "source-adjacent default artifact names",
+        "manifest-selected artifact names"
+      ],
+      "status": "implemented",
+      "reference": [
+        "README.md",
+        "archived SBCL compiler: src/driver/cli.lisp"
+      ],
+      "tests": [
+        "test_artifact_entry_and_options",
+        "test_artifact_tool_failure_cleanup",
+        "test_cli_and_limits",
+        "test_cli_cpu_features_and_default_outputs",
+        "test_cli_version_and_output_alias",
+        "test_manifest_executable_and_defaults",
+        "test_manifest_library_kinds_and_relative_link_paths",
+        "test_manifest_paths_features_and_imports",
+        "test_manifest_target_features_and_link_policy",
+        "test_manifest_validation_and_no_evaluation",
+        "test_native_artifact_outputs"
+      ]
+    },
+    {
+      "name": "pattern and initializer restrictions",
+      "forms": [
+        "no guards/nested structured patterns/product destructuring",
+        "literal global/constant initializers",
+        "no aggregate/runtime global initialization"
+      ],
+      "status": "retained_limit",
+      "reference": [
+        "archived SBCL compiler API",
+        "README.md"
+      ],
+      "tests": [
+        "test_global_modules",
+        "test_global_storage_at_c_boundary",
+        "test_invalid_constant_declarations",
+        "test_invalid_global_declarations",
+        "test_invalid_scalar_matches",
+        "test_match_catch_all_bindings",
+        "test_mutable_globals",
+        "test_scalar_match_patterns",
+        "test_structured_pattern_errors",
+        "test_sum_component_patterns",
+        "test_top_level_constants",
+        "test_tuple_patterns"
+      ],
+      "decision": "Retain documented restrictions. Expanding them requires a language contract and coordinated checker/evaluator/native support."
+    },
+    {
+      "name": "target portability",
+      "forms": [
+        "AArch64/x86-64 Darwin/Linux",
+        "64-bit little-endian layout checks",
+        "foreign object inspection"
+      ],
+      "status": "implemented",
+      "reference": [
+        "src/core.configuration.vrn",
+        "src/core.target.vrn"
+      ],
+      "tests": [
+        "test_compile_time_context_foreign_targets",
+        "test_manifest_target_features_and_link_policy",
+        "test_native_platform_conditionals",
+        "test_reader_features_and_cross_target_objects"
+      ],
+      "decision": "Native execution/bootstrap evidence is arm64 Darwin. Other supported targets have object-emission checks, not a full native bootstrap certificate."
+    },
+    {
+      "name": "developer/release extensions",
+      "forms": [
+        "debug information",
+        "native stacks",
+        "custom IR optimization pipelines",
+        "closures/JIT/TCO",
+        "persistent cache/separate compilation"
+      ],
+      "status": "deferred",
+      "reference": [
+        "docs/compiler-roadmap.org"
+      ],
+      "tests": [],
+      "decision": "Separate follow-up work; none is required to establish the self-hosting already demonstrated."
+    }
+  ]
+}

@@ -1,0 +1,914 @@
+(import base)
+(import allocator)
+(import array)
+(import arena)
+(import data)
+(import libc.string :as cstring)
+(import error)
+(import core.span :as span)
+(import core.names :as names)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+
+; IDs are zero-based; spans retain file identity and byte spelling.
+; Node kinds: identifier=0, integer=1, list=2, data=4, character=5, quote=6, quasiquote=7, unquote=8, splice=9, float=10.
+; Token kinds: identifier=0, integer=1, opening=2, closing=3, data=4, character=5, quote=6, quasiquote=7, unquote=8, splice=9, float=10, selected conditional=11, skipped conditional=12.
+; ABI layouts on supported 64-bit targets: node=56, token=40, frame=40,
+; ID=8 bytes; all have alignment 8.
+; Reader tree entry retaining original source location/spelling. For lists,
+; first/count select a contiguous child-ID range. Prefixes have one child.
+(base:type node (product (kind u64) (location span:span) (first u64) (count u64)))
+
+; Lexical occurrence with its original source span. Parentheses have token
+; entries; EOF is represented by source length rather than a token.
+(base:type token (product (kind u64) (location span:span)))
+
+; A list or reader prefix awaiting completion. Opening is its byte offset;
+; pending saves the child-stack length at the start of a list.
+(base:type frame (product (opening u64) (pending u64) (kind u64) (items u64) (children u64)))
+
+(array:define nodes node)
+
+; Owning reader-node array: pointer, length, capacity, allocation layout.
+; Node IDs are zero-based indices; growth invalidates element pointers.
+(base:type nodes-array (tuple (pointer node) u64 u64 array:layout))
+
+(base:function nodes-new ((backing allocator:backend)) nodes-array
+  (nodes-empty (cast (pointer node) (cast (pointer void) "")) (array:layout 56 8 backing)))
+
+(array:define tokens token)
+
+; Owning token array: pointer, length, capacity, allocation layout.
+; Entries retain source order and are released by the syntax owner.
+(base:type tokens-array (tuple (pointer token) u64 u64 array:layout))
+
+(base:function tokens-new ((backing allocator:backend)) tokens-array
+  (tokens-empty (cast (pointer token) (cast (pointer void) "")) (array:layout 40 8 backing)))
+
+(array:define ids u64)
+
+; Owning u64 array: pointer, length, capacity, allocation layout. Used for
+; child/root IDs, pending children, and line-start byte offsets.
+(base:type ids-array (tuple (pointer u64) u64 u64 array:layout))
+
+(base:function ids-new ((backing allocator:backend)) ids-array
+  (ids-empty (cast (pointer u64) (cast (pointer void) "")) (array:layout 8 8 backing)))
+
+(array:define frames frame)
+
+; Owning open-list stack: pointer, length, capacity, allocation layout.
+; Temporary parser storage released before read returns, including on failure.
+(base:type frames-array (tuple (pointer frame) u64 u64 array:layout))
+
+(base:function frames-new ((backing allocator:backend)) frames-array
+  (frames-empty (cast (pointer frame) (cast (pointer void) "")) (array:layout 40 8 backing)))
+
+; Owns node, child-ID, root-ID, token, and line-start arrays. Source bytes
+; and interned names are borrowed separately. Destroy on success or failure;
+; do not duplicate this owning descriptor.
+(base:type syntax
+  (product
+    (items nodes-array)
+    (children ids-array)
+    (roots ids-array)
+    (lexemes tokens-array)
+    (lines ids-array)))
+
+; Diagnostic codes: 0 success, 1 unexpected close, 2 unclosed list,
+; 3 invalid byte, 4 malformed integer, 5 storage failure,
+; 6 unterminated data, 7 invalid escape, 8 invalid data byte, 9 invalid character, 10 reader prefix without an operand, 11 prefix depth, 12 missing feature name, 13 prefix operand skipped.
+; First reader failure, or code zero for success. Location identifies its
+; source range; storage retains the Foundation status for allocation failures.
+(base:type diagnostic (product (code u64) (location span:span) (storage error:status)))
+
+; Mutable lexer state: token start, active/comment/numeric flags, and malformed
+; number flag. Code/offset/length retain the first failure; storage holds its
+; allocation status. The scanning context borrows this record.
+(base:type scan
+  (product
+    (start u64)
+    (active bool)
+    (comment bool)
+    (numeric bool)
+    (bad bool)
+    (code u64)
+    (offset u64)
+    (length u64)
+    (storage error:status)))
+
+; Borrowed working set for one read: source/file identity, output arrays,
+; pending-child/open-list stacks, name interner/arena, and scan state.
+; Pointers refer to caller-owned storage and do not escape the read.
+; Modes: normal=0, data=1, data escape=2, character prefix=3, first byte=4, name=5, splice marker=6.
+(base:type literal-scan (product (mode u64) (start u64)))
+
+(base:type feature (product (name (pointer u8)) (next (pointer void))))
+
+(base:type features
+  (product (platform (pointer u8)) (architecture (pointer u8)) (extra (pointer void))))
+
+#+darwin (base:function native-platform () (pointer u8)
+           "darwin")
+
+#+linux (base:function native-platform () (pointer u8)
+          "linux")
+
+#+aarch64 (base:function native-architecture () (pointer u8)
+            "aarch64")
+
+#+x86_64 (base:function native-architecture () (pointer u8)
+           "x86_64")
+
+(base:function null-features () (pointer void)
+  (let ((zero u64 0)) (deref (cast (pointer (pointer void)) (cast (pointer void) (& zero))))))
+
+(base:type context
+  (product
+    (source data:view)
+    (file u64)
+    (items (pointer nodes-array))
+    (children (pointer ids-array))
+    (pending (pointer ids-array))
+    (stack (pointer frames-array))
+    (lexemes (pointer tokens-array))
+    (lines (pointer ids-array))
+    (table (pointer names:names-table))
+    (memory (pointer arena:arena))
+    (state (pointer scan))
+    (literal (pointer literal-scan))
+    (target features)))
+
+(base:function set-start ((c context) (value u64)) unit
+  (let ((v scan (deref (field c state))))
+    (do
+      (store
+        (deref (field c state))
+        (scan
+          value
+          (field v active)
+          (field v comment)
+          (field v numeric)
+          (field v bad)
+          (field v code)
+          (field v offset)
+          (field v length)
+          (field v storage)))
+      unit)))
+
+(base:function set-active ((c context) (value bool)) unit
+  (let ((v scan (deref (field c state))))
+    (do
+      (store
+        (deref (field c state))
+        (scan
+          (field v start)
+          value
+          (field v comment)
+          (field v numeric)
+          (field v bad)
+          (field v code)
+          (field v offset)
+          (field v length)
+          (field v storage)))
+      unit)))
+
+(base:function set-comment ((c context) (value bool)) unit
+  (let ((v scan (deref (field c state))))
+    (do
+      (store
+        (deref (field c state))
+        (scan
+          (field v start)
+          (field v active)
+          value
+          (field v numeric)
+          (field v bad)
+          (field v code)
+          (field v offset)
+          (field v length)
+          (field v storage)))
+      unit)))
+
+(base:function set-numeric ((c context) (value bool)) unit
+  (let ((v scan (deref (field c state))))
+    (do
+      (store
+        (deref (field c state))
+        (scan
+          (field v start)
+          (field v active)
+          (field v comment)
+          value
+          (field v bad)
+          (field v code)
+          (field v offset)
+          (field v length)
+          (field v storage)))
+      unit)))
+
+(base:function set-bad ((c context) (value bool)) unit
+  (let ((v scan (deref (field c state))))
+    (do
+      (store
+        (deref (field c state))
+        (scan
+          (field v start)
+          (field v active)
+          (field v comment)
+          (field v numeric)
+          value
+          (field v code)
+          (field v offset)
+          (field v length)
+          (field v storage)))
+      unit)))
+
+(base:function set-code ((c context) (value u64)) unit
+  (let ((v scan (deref (field c state))))
+    (do
+      (store
+        (deref (field c state))
+        (scan
+          (field v start)
+          (field v active)
+          (field v comment)
+          (field v numeric)
+          (field v bad)
+          value
+          (field v offset)
+          (field v length)
+          (field v storage)))
+      unit)))
+
+(base:function set-offset ((c context) (value u64)) unit
+  (let ((v scan (deref (field c state))))
+    (do
+      (store
+        (deref (field c state))
+        (scan
+          (field v start)
+          (field v active)
+          (field v comment)
+          (field v numeric)
+          (field v bad)
+          (field v code)
+          value
+          (field v length)
+          (field v storage)))
+      unit)))
+
+(base:function set-length ((c context) (value u64)) unit
+  (let ((v scan (deref (field c state))))
+    (do
+      (store
+        (deref (field c state))
+        (scan
+          (field v start)
+          (field v active)
+          (field v comment)
+          (field v numeric)
+          (field v bad)
+          (field v code)
+          (field v offset)
+          value
+          (field v storage)))
+      unit)))
+
+(base:function set-storage ((c context) (value error:status)) unit
+  (let ((v scan (deref (field c state))))
+    (do
+      (store
+        (deref (field c state))
+        (scan
+          (field v start)
+          (field v active)
+          (field v comment)
+          (field v numeric)
+          (field v bad)
+          (field v code)
+          (field v offset)
+          (field v length)
+          value))
+      unit)))
+
+(base:function fail ((c context) (code u64) (start u64) (length u64)) unit
+  (match (field (deref (field c state)) code)
+    (0 (do (set-code c code) (set-offset c start) (set-length c length)))
+    (_ unit)))
+
+(base:function storage ((c context) (status error:status)) unit
+  (match status ((ok) unit) (_ (do (set-storage c status) (fail c 5 0 0)))))
+
+(base:function byte ((c context) (i u64)) u64
+  (base:convert (deref (pointer-offset (field (field c source) bytes) i))))
+
+(base:function digit ((b u64)) bool
+  (match (n:ge b 48) (true (n:le b 57)) (false false)))
+
+(base:function space ((b u64)) bool
+  (match b (9 true) (10 true) (13 true) (32 true) (_ false)))
+
+(base:function delimiter ((b u64)) bool
+  (match b (40 true) (41 true) (59 true) (_ (space b))))
+
+(base:function valid ((b u64)) bool
+  (base:cond
+    ((space b) true)
+    ((n:lt b 33) false)
+    ((n:gt b 126) false)
+    (true (match b (34 false) (39 false) (44 false) (92 false) (96 false) (_ true)))))
+
+; Balanced range traversal bounds native stack use independently of nesting/width.
+(base:function copy-children ((c context) (start u64) (count u64)) unit
+  (match (field (deref (field c state)) code)
+    (0
+      (match count
+        (0 unit)
+        (1
+          (storage
+            c
+            (ids-append
+              (field c children)
+              (deref (pointer-offset (tuple-get (deref (field c pending)) 0) start)))))
+        (_
+          (let ((half u64 (n:div count 2)))
+            (do
+              (copy-children c start half)
+              (copy-children c (n:add start half) (n:sub count half)))))))
+    (_ unit)))
+
+(base:function frame-at ((c context) (index u64)) frame
+  (deref (pointer-offset (tuple-get (deref (field c stack)) 0) index)))
+
+(base:function pop-frame ((c context) (index u64)) unit
+  (let ((stack frames-array (deref (field c stack))))
+    (do
+      (store
+        (deref (field c stack))
+        (tuple (tuple-get stack 0) index (tuple-get stack 2) (tuple-get stack 3)))
+      unit)))
+
+(base:function emit-node ((c context) (value node)) unit
+  (let ((id u64 (nodes-length (deref (field c items)))))
+    (do
+      (storage c (nodes-append (field c items) value))
+      (match (field (deref (field c state)) code)
+        (0 (emit-present c id (field value location)))
+        (_ unit)))))
+
+(base:function emit-present ((c context) (id u64) (loc span:span)) unit
+  (let ((depth u64 (frames-length (deref (field c stack)))))
+    (match depth
+      (0 (storage c (ids-append (field c pending) id)))
+      (_
+        (let ((index u64 (n:sub depth 1)) (f frame (frame-at c index)))
+          (match (field f kind)
+            (2 (storage c (ids-append (field c pending) id)))
+            (11 (do (pop-frame c index) (emit-present c id loc)))
+            (12 (emit-skipped c))
+            (_
+              (let ((first u64 (ids-length (deref (field c children)))))
+                (do
+                  (pop-frame c index)
+                  (storage c (ids-append (field c children) id))
+                  (emit-node
+                    c
+                    (node
+                      (field f kind)
+                      (span:span
+                        (field c file)
+                        (field f opening)
+                        (n:sub (n:add (field loc start) (field loc length)) (field f opening))
+                        0)
+                      first
+                      1)))))))))))
+
+; A conditional owns the just-read subtree until selection. Rewind discarded
+; nodes and child links without discarding lexical tokens or line information.
+(base:function emit-skipped ((c context)) unit
+  (let ((depth u64 (frames-length (deref (field c stack)))))
+    (match depth
+      (0 unit)
+      (_
+        (let ((index u64 (n:sub depth 1)) (f frame (frame-at c index)))
+          (base:cond
+            ((n:eq (field f kind) 2) unit)
+            ((n:ge (field f kind) 11) (do (rewind-form c f) (pop-frame c index) (emit-skipped c)))
+            (true (fail c 13 (field f opening) 1))))))))
+
+(base:function rewind-form ((c context) (f frame)) unit
+  (let ((items nodes-array (deref (field c items))) (children ids-array (deref (field c children))))
+    (do
+      (store
+        (deref (field c items))
+        (tuple (tuple-get items 0) (field f items) (tuple-get items 2) (tuple-get items 3)))
+      (store
+        (deref (field c children))
+        (tuple
+          (tuple-get children 0)
+          (field f children)
+          (tuple-get children 2)
+          (tuple-get children 3)))
+      unit)))
+
+(base:function prefix-depth ((c context) (depth u64) (remaining u64)) bool
+  (base:cond
+    ((n:eq remaining 0) false)
+    ((n:eq depth 0) true)
+    ((n:eq (field (frame-at c (n:sub depth 1)) kind) 2) true)
+    (true (prefix-depth c (n:sub depth 1) (n:sub remaining 1)))))
+
+(base:function push-frame ((c context) (kind u64) (start u64)) unit
+  (storage
+    c
+    (frames-append
+      (field c stack)
+      (frame
+        start
+        (ids-length (deref (field c pending)))
+        kind
+        (nodes-length (deref (field c items)))
+        (ids-length (deref (field c children)))))))
+
+(base:function close-list ((c context) (loc span:span)) unit
+  (let ((depth u64 (frames-length (deref (field c stack)))))
+    (match depth
+      (0 (fail c 1 (field loc start) 1))
+      (_
+        (let ((index u64 (n:sub depth 1)) (f frame (frame-at c index)))
+          (match (field f kind)
+            (2
+              (let
+                ((pending ids-array (deref (field c pending)))
+                 (first u64 (ids-length (deref (field c children))))
+                 (count u64 (n:sub (ids-length pending) (field f pending))))
+                (do
+                  (copy-children c (field f pending) count)
+                  (store
+                    (deref (field c pending))
+                    (tuple
+                      (tuple-get pending 0)
+                      (field f pending)
+                      (tuple-get pending 2)
+                      (tuple-get pending 3)))
+                  (pop-frame c index)
+                  (match (field (deref (field c state)) code)
+                    (0
+                      (emit-node
+                        c
+                        (node
+                          2
+                          (span:span
+                            (field c file)
+                            (field f opening)
+                            (n:sub (n:add (field loc start) 1) (field f opening))
+                            0)
+                          first
+                          count)))
+                    (_ unit)))))
+            (_ (fail c 10 (field f opening) 1))))))))
+
+(base:function consume ((c context) (value token)) unit
+  (match (field (deref (field c state)) code)
+    (0
+      (do
+        (storage c (tokens-append (field c lexemes) value))
+        (match (field (deref (field c state)) code)
+          (0
+            (let ((loc span:span (field value location)))
+              (match (field value kind)
+                (2 (push-frame c 2 (field loc start)))
+                (3 (close-list c loc))
+                (_
+                  (match
+                    (match (n:ge (field value kind) 6)
+                      (true (match (field value kind) (10 false) (_ true)))
+                      (false false))
+                    (true
+                      (match (prefix-depth c (frames-length (deref (field c stack))) 256)
+                        (true (push-frame c (field value kind) (field loc start)))
+                        (false (fail c 11 (field loc start) 1))))
+                    (false (emit-node c (node (field value kind) loc 0 0))))))))
+          (_ unit))))
+    (_ unit)))
+
+(base:function decimal-bytes ((c context) (start u64) (count u64) (dot (pointer bool))) bool
+  (match count
+    (0 true)
+    (1
+      (let ((b u64 (byte c start)))
+        (match b
+          (46 (match (deref dot) (true false) (false (do (store (deref dot) true) true))))
+          (_ (digit b)))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (match (decimal-bytes c start half dot)
+          (false false)
+          (true (decimal-bytes c (n:add start half) (n:sub count half) dot)))))))
+
+(base:function decimal ((c context) (start u64) (end u64)) bool
+  (let
+    ((first u64 (match (byte c start) (43 (n:add start 1)) (45 (n:add start 1)) (_ start)))
+     (dot bool false))
+    (base:cond
+      ((n:lt (n:sub end first) 3) false)
+      ((digit (byte c first))
+       (match (digit (byte c (n:sub end 1)))
+         (true (match (decimal-bytes c first (n:sub end first) (& dot)) (true dot) (false false)))
+         (false false)))
+      (true false))))
+
+(base:function feature-operator ((c context) (start u64) (end u64)) u64
+  (base:cond
+    ((n:lt (n:sub end start) 2) 0)
+    ((n:eq (byte c start) 35) (match (byte c (n:add start 1)) (43 43) (45 45) (_ 0)))
+    (true 0)))
+
+(base:function feature-enabled ((target features) (bytes (pointer u8)) (length u64)) bool
+  (base:cond
+    ((named-byte bytes length (field target platform)) true)
+    ((named-byte bytes length (field target architecture)) true)
+    ((named-byte bytes length "pointer_64") true)
+    ((named-byte bytes length "little_endian") true)
+    ((base:and
+       (match (cstring:strcmp (field target platform) "darwin") (0 true) (_ false))
+       (named-byte bytes length "macho"))
+     true)
+    ((base:and
+       (match (cstring:strcmp (field target platform) "linux") (0 true) (_ false))
+       (named-byte bytes length "elf"))
+     true)
+    (true (extra-enabled (field target extra) bytes length))))
+
+(base:function extra-enabled ((head (pointer void)) (bytes (pointer u8)) (length u64)) bool
+  (match (n:eq (address head) 0)
+    (true false)
+    (false
+      (let ((value feature (deref (cast (pointer feature) head))))
+        (base:or-else
+          (named-byte bytes length (field value name))
+          (extra-enabled (field value next) bytes length))))))
+
+(base:function address ((p (pointer void))) u64
+  (deref (cast (pointer u64) (cast (pointer void) (& p)))))
+
+(base:function finish-feature ((c context) (operator u64) (start u64) (end u64)) unit
+  (let
+    ((first u64 (n:add start 2))
+     (length u64 (n:sub end first))
+     (bytes (pointer u8) (pointer-offset (field (field c source) bytes) first))
+     (target features (field c target)))
+    (match length
+      (0 (fail c 12 first 0))
+      (_
+        (let
+          ((available bool (feature-enabled target bytes length))
+           (kind
+             u64
+             (match (match operator (43 available) (_ (match available (true false) (false true))))
+               (true 11)
+               (false 12))))
+          (consume c (token kind (span:span (field c file) start (n:sub end start) 0))))))))
+
+(base:function finish-atom ((c context) (end u64)) unit
+  (let ((v scan (deref (field c state))))
+    (match (field v active)
+      (false unit)
+      (true
+        (do
+          (set-active c false)
+          (match (feature-operator c (field v start) end)
+            (0 (finish-ordinary-atom c v end))
+            (operator (finish-feature c operator (field v start) end))))))))
+
+(base:function finish-ordinary-atom ((c context) (v scan) (end u64)) unit
+  (match (field v bad)
+    (true
+      (match (decimal c (field v start) end)
+        (true
+          (consume
+            c
+            (token 10 (span:span (field c file) (field v start) (n:sub end (field v start)) 0))))
+        (false (fail c 4 (field v start) (n:sub end (field v start))))))
+    (false
+      (let
+        ((loc span:span (span:span (field c file) (field v start) (n:sub end (field v start)) 0)))
+        (match (field v numeric)
+          (true (consume c (token 1 loc)))
+          (false
+            (match
+              (names:intern
+                (field c table)
+                (field c memory)
+                (data:view
+                  (pointer-offset (field (field c source) bytes) (field v start))
+                  (field loc length)))
+              ((tuple status id)
+               (do
+                 (storage c status)
+                 (match (field (deref (field c state)) code)
+                   (0
+                     (consume
+                       c
+                       (token 0 (span:span (field c file) (field loc start) (field loc length) id))))
+                   (_ unit)))))))))))
+
+(base:function escape-byte ((b u64)) u64
+  (match b (110 10) (116 9) (34 34) (92 92) (_ 0)))
+
+(base:function named-byte ((bytes (pointer u8)) (length u64) (name (pointer u8))) bool
+  (match (n:eq length (cstring:strlen name)) (false false) (true (equal-folded bytes name length))))
+
+(base:function equal-folded ((bytes (pointer u8)) (name (pointer u8)) (length u64)) bool
+  (match length
+    (0 true)
+    (_
+      (let ((b u64 (base:convert (deref bytes))))
+        (match
+          (n:eq
+            (match (n:le 65 b) (false b) (true (match (n:le b 90) (true (n:add b 32)) (false b))))
+            (base:convert (deref name)))
+          (true (equal-folded (pointer-offset bytes 1) (pointer-offset name 1) (n:sub length 1)))
+          (false false))))))
+
+; 128 is outside the supported byte range.
+(base:function character-byte ((bytes (pointer u8)) (length u64)) u64
+  (base:cond
+    ((n:eq length 1) (base:convert (deref bytes)))
+    ((named-byte bytes length "space") 32)
+    ((named-byte bytes length "newline") 10)
+    ((named-byte bytes length "tab") 9)
+    ((named-byte bytes length "vertical_tab") 11)
+    ((named-byte bytes length "form_feed") 12)
+    ((named-byte bytes length "return") 13)
+    (true 128)))
+
+(base:function literal-state ((c context) (mode u64) (start u64)) unit
+  (do (store (deref (field c literal)) (literal-scan mode start)) unit))
+
+(base:function finish-literal ((c context) (kind u64) (start u64) (end u64)) unit
+  (do
+    (literal-state c 0 0)
+    (consume c (token kind (span:span (field c file) start (n:sub end start) 0)))))
+
+(base:function finish-character ((c context) (start u64) (end u64)) unit
+  (let ((first u64 (n:add start 2)) (length u64 (n:sub end start)))
+    (base:cond
+      ((n:le end first) (fail c 9 start length))
+      ((n:ge
+         (character-byte (pointer-offset (field (field c source) bytes) first) (n:sub end first))
+         128)
+       (fail c 9 start length))
+      (true (finish-literal c 5 start end)))))
+
+(base:function character-delimiter ((b u64)) bool
+  (match b (34 true) (39 true) (44 true) (96 true) (_ (delimiter b))))
+
+(base:function step ((c context) (i u64)) unit
+  (let
+    ((b u64 (byte c i))
+     (v literal-scan (deref (field c literal)))
+     (start u64 (field v start))
+     (end u64 (n:add i 1)))
+    (do
+      (match b
+        (10 (storage c (ids-append (field c lines) end)))
+        (13
+          (base:cond
+            ((n:eq end (field (field c source) length))
+             (storage c (ids-append (field c lines) end)))
+            ((n:eq (byte c end) 10) unit)
+            (true (storage c (ids-append (field c lines) end)))))
+        (_ unit))
+      (match (field v mode)
+        (1
+          (base:cond
+            ((n:eq b 34) (finish-literal c 4 start end))
+            ((n:eq b 92) (literal-state c 2 start))
+            ((n:eq b 0) (fail c 8 i 1))
+            ((n:gt b 127) (fail c 8 i 1))
+            (true unit)))
+        (2 (match (escape-byte b) (0 (fail c 7 i 1)) (_ (literal-state c 1 start))))
+        (3 (literal-state c 4 start))
+        (4 (match b (0 (fail c 9 i 1)) (_ (literal-state c 5 start))))
+        (5
+          (match (character-delimiter b)
+            (true (do (finish-character c start i) (step-atom c i b)))
+            (false unit)))
+        (6 (literal-state c 0 0))
+        (_ (step-atom c i b))))))
+
+(base:function step-atom ((c context) (i u64) (b u64)) unit
+  (base:cond
+    ((n:gt (field (deref (field c state)) code) 0) unit)
+    ((field (deref (field c state)) comment)
+     (base:cond
+       ((n:gt b 126) (fail c 3 i 1))
+       ((space b) (match b (10 (set-comment c false)) (13 (set-comment c false)) (_ unit)))
+       ((n:lt b 32) (fail c 3 i 1))
+       (true unit)))
+    ((n:eq b 34) (finish-atom c i) (literal-state c 1 i))
+    ((n:eq b 39) (prefix c i 6 1))
+    ((n:eq b 96) (prefix c i 7 1))
+    ((n:eq b 44)
+     (match (n:lt (n:add i 1) (field (field c source) length))
+       (true
+         (match (byte c (n:add i 1))
+           (64 (do (prefix c i 9 2) (literal-state c 6 i)))
+           (_ (prefix c i 8 1))))
+       (false (prefix c i 8 1))))
+    ((character-start c i b) (literal-state c 3 i))
+    ((valid b) (step-valid-atom c i b))
+    (true (fail c 3 i 1))))
+
+(base:function prefix ((c context) (i u64) (kind u64) (length u64)) unit
+  (do (finish-atom c i) (consume c (token kind (span:span (field c file) i length 0)))))
+
+(base:function character-start ((c context) (i u64) (b u64)) bool
+  (base:cond
+    ((field (deref (field c state)) active) false)
+    ((n:eq b 35)
+     (match (n:lt (n:add i 1) (field (field c source) length))
+       (true (n:eq (byte c (n:add i 1)) 92))
+       (false false)))
+    (true false)))
+
+(base:function step-valid-atom ((c context) (i u64) (b u64)) unit
+  (base:cond
+    ((delimiter b)
+     (finish-atom c i)
+     (match b
+       (59 (set-comment c true))
+       (40 (consume c (token 2 (span:span (field c file) i 1 0))))
+       (41 (consume c (token 3 (span:span (field c file) i 1 0))))
+       (_ unit)))
+    ((field (deref (field c state)) active)
+     (match (field (deref (field c state)) numeric)
+       (true (match (digit b) (false (set-bad c true)) (true unit)))
+       (false unit)))
+    (true
+      (set-start c i)
+      (set-active c true)
+      (set-bad c false)
+      (set-numeric
+        c
+        (base:cond
+          ((digit b) true)
+          ((n:lt (n:add i 1) (field (field c source) length))
+           (match b (43 (digit (byte c (n:add i 1)))) (45 (digit (byte c (n:add i 1)))) (_ false)))
+          (true false))))))
+
+(base:function scan-range ((c context) (start u64) (count u64)) unit
+  (match (field (deref (field c state)) code)
+    (0
+      (match count
+        (0 unit)
+        (1 (step c start))
+        (_
+          (let ((half u64 (n:div count 2)))
+            (do (scan-range c start half) (scan-range c (n:add start half) (n:sub count half)))))))
+    (_ unit)))
+
+(base:function empty ((backing allocator:backend)) syntax
+  (syntax
+    (nodes-new backing)
+    (ids-new backing)
+    (ids-new backing)
+    (tokens-new backing)
+    (ids-new backing)))
+
+; Parse into a fresh owner. Source and session names must outlive all clients.
+; Partial syntax remains destroyable on every error, including allocation failure.
+(base:function read-target
+  ((source data:view)
+   (file u64)
+   (target features)
+   (backing allocator:backend)
+   (table (pointer names:names-table))
+   (memory (pointer arena:arena))
+   (out (pointer syntax))) diagnostic
+  (let
+    ((items nodes-array (nodes-new backing))
+     (children ids-array (ids-new backing))
+     (pending ids-array (ids-new backing))
+     (stack frames-array (frames-new backing))
+     (lexemes tokens-array (tokens-new backing))
+     (lines ids-array (ids-new backing))
+     (state scan (scan 0 false false false false 0 0 0 (error:success)))
+     (literal literal-scan (literal-scan 0 0))
+     (c
+       context
+       (context
+         source
+         file
+         (& items)
+         (& children)
+         (& pending)
+         (& stack)
+         (& lexemes)
+         (& lines)
+         table
+         memory
+         (& state)
+         (& literal)
+         target)))
+    (do
+      (storage c (ids-append (& lines) 0))
+      (scan-range c 0 (field source length))
+      (match (field state code)
+        (0
+          (do
+            (match (field literal mode)
+              (0 (finish-atom c (field source length)))
+              (5 (finish-character c (field literal start) (field source length)))
+              (4 (fail c 9 (field literal start) 2))
+              (_
+                (fail c 6 (field literal start) (n:sub (field source length) (field literal start)))))
+            (match (field state code)
+              (0
+                (match (frames-length stack)
+                  (0 unit)
+                  (_
+                    (let ((f frame (frame-at c (n:sub (frames-length stack) 1))))
+                      (fail c (match (field f kind) (2 2) (_ 10)) (field f opening) 1)))))
+              (_ unit))))
+        (_ unit))
+      (frames-destroy (& stack))
+      (store (deref out) (syntax items children pending lexemes lines))
+      (diagnostic
+        (field state code)
+        (span:span file (field state offset) (field state length) 0)
+        (field state storage)))))
+
+(base:function read
+  ((source data:view)
+   (file u64)
+   (backing allocator:backend)
+   (table (pointer names:names-table))
+   (memory (pointer arena:arena))
+   (out (pointer syntax))) diagnostic
+  (read-target
+    source
+    file
+    (features (native-platform) (native-architecture) (null-features))
+    backing
+    table
+    memory
+    out))
+
+; Locate the greatest line start <= offset by binary search.
+(base:function line-index ((lines ids-array) (offset u64) (low u64) (high u64)) u64
+  (match (n:le (n:sub high low) 1)
+    (true low)
+    (false
+      (let ((mid u64 (n:add low (n:div (n:sub high low) 2))))
+        (match (n:le (deref (pointer-offset (tuple-get lines 0) mid)) offset)
+          (true (line-index lines offset mid high))
+          (false (line-index lines offset low mid)))))))
+
+; One-based line and byte column. Offset must be within source, including EOF.
+(base:function position ((tree syntax) (offset u64)) (tuple u64 u64)
+  (let
+    ((lines ids-array (field tree lines))
+     (index u64 (line-index lines offset 0 (ids-length lines))))
+    (tuple
+      (n:add index 1)
+      (n:add (n:sub offset (deref (pointer-offset (tuple-get lines 0) index))) 1))))
+
+(base:function destroy ((owner (pointer syntax))) unit
+  (let
+    ((v syntax (deref owner))
+     (items nodes-array (field v items))
+     (children ids-array (field v children))
+     (roots ids-array (field v roots))
+     (lexemes tokens-array (field v lexemes))
+     (lines ids-array (field v lines)))
+    (do
+      (nodes-destroy (& items))
+      (ids-destroy (& children))
+      (ids-destroy (& roots))
+      (tokens-destroy (& lexemes))
+      (ids-destroy (& lines))
+      (store (deref owner) (syntax items children roots lexemes lines))
+      unit)))
+
+(export
+  feature
+  native-platform
+  native-architecture
+  null-features
+  node
+  token
+  syntax
+  diagnostic
+  features
+  empty
+  read
+  read-target
+  destroy
+  nodes-length
+  ids-length
+  tokens-length
+  position
+  escape-byte
+  character-byte)

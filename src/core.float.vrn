@@ -1,0 +1,115 @@
+(import base)
+(import allocator)
+(import arena)
+(import core.model :as m)
+(import core.numeric :as num)
+(import data)
+(import foundation.compat.arithmetic :as n)
+
+(base:external-function decimal-to-float "strtof" ((pointer u8) (pointer (pointer u8))) f32)
+
+(base:external-function decimal-to-double "strtod" ((pointer u8) (pointer (pointer u8))) f64)
+
+; Keep IEEE bits in the existing scalar payload. f32 uses the low 32 bits.
+(base:function pack32 ((value f32)) i64
+  (base:convert (deref (cast (pointer u32) (cast (pointer void) (& value))))))
+
+(base:function pack64 ((value f64)) i64
+  (deref (cast (pointer i64) (cast (pointer void) (& value)))))
+
+(base:function unpack32 ((value i64)) f32
+  (let ((bits u32 (base:convert value)))
+    (deref (cast (pointer f32) (cast (pointer void) (& bits))))))
+
+(base:function unpack64 ((value i64)) f64
+  (deref (cast (pointer f64) (cast (pointer void) (& value)))))
+
+(base:function parse-text ((c m:context) (id u64) (ty u64)) u64
+  (let ((text data:view (m:spelling c id)) (length u64 (field text length)))
+    (match (arena:allocate (field c memory) (n:add length 1) 1)
+      ((allocated bytes)
+       (do
+         (allocator:copy-bytes bytes (field text bytes) length)
+         (store (deref (pointer-offset bytes length)) 0)
+         (let
+           ((end (pointer u8) bytes)
+            (bits
+              i64
+              (match ty
+                (12 (pack32 (decimal-to-float bytes (& end))))
+                (_ (pack64 (decimal-to-double bytes (& end)))))))
+           (match (finite ty (base:convert bits))
+             (true (m:typed c id 36 ty 0 bits))
+             (false (do (m:report c id "floating-point literal out of range") 0))))))
+      (_ (do (m:report c id "floating-point literal storage allocation failed") 0)))))
+
+(base:function parse ((c m:context) (id u64) (ty u64)) u64
+  (match (field (m:at c id) kind)
+    (71
+      (let
+        ((value i64 (field (m:at c id) value))
+         (bits i64 (match ty (12 (pack32 (base:convert (unpack64 value)))) (_ value))))
+        (match (finite ty (base:convert bits))
+          (true (m:typed c id 36 ty 0 bits))
+          (false (do (m:report c id "floating-point literal out of range") 0)))))
+    (_ (parse-text c id ty))))
+
+(base:function finite ((ty u64) (bits u64)) bool
+  (match ty
+    (12 (n:lt (num:remainder bits 2147483648) 2139095040))
+    (_ (n:lt (num:remainder bits 9223372036854775808) 9218868437227405312))))
+
+(base:function widen ((ty u64) (bits i64)) f64
+  (match ty (12 (base:convert (unpack32 bits))) (_ (unpack64 bits))))
+
+(base:function arithmetic ((op u64) (ty u64) (left i64) (right i64)) i64
+  (match ty
+    (12
+      (let ((a f32 (unpack32 left)) (b f32 (unpack32 right)))
+        (pack32
+          (match op
+            (1 (%+-primitive-f32 a b))
+            (2 (%--primitive-f32 a b))
+            (3 (%*-primitive-f32 a b))
+            (_ (%/-primitive-f32 a b))))))
+    (_
+      (let ((a f64 (unpack64 left)) (b f64 (unpack64 right)))
+        (pack64
+          (match op
+            (1 (%+-primitive-f64 a b))
+            (2 (%--primitive-f64 a b))
+            (3 (%*-primitive-f64 a b))
+            (_ (%/-primitive-f64 a b))))))))
+
+(base:function compare ((op u64) (ty u64) (left i64) (right i64)) bool
+  (let ((a f64 (widen ty left)) (b f64 (widen ty right)))
+    (match op
+      (5 (%=-primitive-f64 a b))
+      (6 (%<-primitive-f64 a b))
+      (7 (%<=-primitive-f64 a b))
+      (8 (%>-primitive-f64 a b))
+      (9 (%>=-primitive-f64 a b))
+      (_ (%/=-primitive-f64 a b)))))
+
+(base:function convert ((from u64) (to u64) (bits i64)) i64
+  (base:cond
+    ((num:float-type from)
+     (let ((value f64 (widen from bits)))
+       (base:cond
+         ((n:eq to 12) (pack32 (base:convert value)))
+         ((n:eq to 13) (pack64 value))
+         ((num:signed-type to)
+          (let ((signed i64 (base:convert value))) (num:normalize to (base:convert signed))))
+         (true (let ((unsigned u64 (base:convert value))) (num:normalize to unsigned))))))
+    ((n:eq to 12)
+     (pack32
+       (match (num:signed-type from)
+         (true (base:convert bits))
+         (false (base:convert (%reinterpret-primitive-i64-u64 bits))))))
+    (true
+      (pack64
+        (match (num:signed-type from)
+          (true (base:convert bits))
+          (false (base:convert (%reinterpret-primitive-i64-u64 bits))))))))
+
+(export decimal-to-double finite parse pack32 pack64 unpack32 unpack64 arithmetic compare convert)

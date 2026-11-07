@@ -1,4 +1,0 @@
-(import geometry)
-
-(function main () i64
-  (geometry:distance-squared 4))

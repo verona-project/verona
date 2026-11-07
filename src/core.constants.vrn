@@ -1,0 +1,68 @@
+(import base)
+
+; Public compiler version; keep the compiler manifest in sync when releasing.
+(base:constant compiler-version (pointer u8) "0.1.0")
+
+; Application resource limits, independent of the bounded numeric protocol.
+(base:constant initial-arena-bytes u64 4096)
+
+(base:constant syntax-depth-limit u64 256)
+
+(base:constant sibling-form-limit u64 4096)
+
+(base:constant parameter-limit u64 64)
+
+(base:constant evaluator-call-depth-limit u64 512)
+
+(base:constant module-count-limit u64 256)
+
+(base:constant module-depth-limit u64 64)
+
+; PATH_MAX is at most 4096 on the supported Darwin/Linux hosts.
+(base:constant module-path-capacity u64 4096)
+
+(base:constant module-byte-size u64 64)
+
+(base:constant import-byte-size u64 32)
+
+; Explicit layouts for the supported 64-bit ABI.
+(base:constant node-byte-size u64 80)
+
+(base:constant node-alignment u64 8)
+
+(base:constant llvm-handle-byte-size u64 8)
+
+(base:constant llvm-handle-alignment u64 8)
+
+; LLVM integer widths and the native process-status convention.
+(base:constant core-integer-width u32 64)
+
+(base:constant native-int-width u32 32)
+
+(base:constant exit-status-width u32 8)
+
+(base:constant runtime-failure-status exit-code 70)
+
+(base:constant temporary-object-template (pointer u8) "/tmp/verona-XXXXXX")
+
+(export
+  compiler-version
+  module-count-limit
+  module-depth-limit
+  module-path-capacity
+  module-byte-size
+  import-byte-size
+  initial-arena-bytes
+  syntax-depth-limit
+  sibling-form-limit
+  parameter-limit
+  evaluator-call-depth-limit
+  node-byte-size
+  node-alignment
+  llvm-handle-byte-size
+  llvm-handle-alignment
+  core-integer-width
+  native-int-width
+  exit-status-width
+  runtime-failure-status
+  temporary-object-template)

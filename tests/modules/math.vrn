@@ -1,6 +1,0 @@
-(type Square i64)
-
-(export Square square)
-
-(function square ((x i64)) i64
-  (* x x))

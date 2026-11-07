@@ -1,0 +1,524 @@
+(import base)
+(import core.model :as m)
+(import core.reader :as reader)
+(import core.configuration :as config)
+(import core.source :as source)
+(import core.check :as check)
+(import core.expand :as expand)
+(import core.constants :as constants)
+(import arena)
+(import array)
+(import error)
+(import foundation.compat.arithmetic)
+(import allocator)
+(import data)
+(import libc.stdio :as stdio)
+(import libc.types :as types)
+(import libc.string :as cstring)
+(import foundation.compat.arithmetic :as n)
+
+; Private host boundary: realpath writes at most PATH_MAX bytes (<=4096 on our targets).
+(base:external-function realpath "realpath" ((pointer u8) (pointer u8)) (pointer u8))
+
+; Ordered search directories, borrowed during one invocation. Strings are C strings.
+(array:define paths (pointer u8))
+
+(base:type paths-array (tuple (pointer (pointer u8)) u64 u64 array:layout))
+
+(base:function paths-new ((backing allocator:backend)) paths-array
+  (paths-empty (cast (pointer (pointer u8)) (m:empty-env)) (array:layout 8 8 backing)))
+
+; Borrowed loading working set: invocation arena, growing combined source
+; and tape descriptors, module session, and shared error counter. The record
+; owns no storage; the invocation arena retains loaded module data.
+(base:type loader
+  (product
+    (memory (pointer arena:arena))
+    (source (pointer data:data))
+    (items (pointer m:tape))
+    (session (pointer m:module-session))
+    (errors (pointer u64))
+    (roots (pointer paths-array))))
+
+(base:function append-bytes ((out (pointer data:data)) (value data:view)) unit
+  (let ((start u64 (data:length (deref out))))
+    (do
+      (m:storage (data:resize out (n:add start (field value length))))
+      (allocator:copy-bytes
+        (pointer-offset (data:bytes (deref out)) start)
+        (field value bytes)
+        (field value length)))))
+
+(base:function context ((l loader)) m:context
+  (m:context
+    ""
+    (data:borrow (deref (field l source)))
+    (field l items)
+    (field l memory)
+    (field l errors)
+    (cast (pointer void) (field l session))
+    0))
+
+(base:function file ((l loader) (id u64)) m:module-info
+  (m:file-info (context l) id))
+
+(base:function set-file ((l loader) (id u64) (v m:module-info)) unit
+  (do
+    (store
+      (deref (pointer-offset (tuple-get (deref (field (deref (field l session)) files)) 0) id))
+      v)
+    unit))
+
+(base:function canonical ((l loader) (path (pointer u8)) (site u64)) (pointer u8)
+  (let ((out data:data (data:empty (arena:allocator (field l memory)))))
+    (do
+      (m:storage (data:resize (& out) constants:module-path-capacity))
+      (match (m:is-empty (cast (pointer void) (realpath path (data:bytes out))))
+        (true (m:error (context l) site "cannot open source file: cannot resolve module path"))
+        (false unit))
+      (data:bytes out))))
+
+(base:function cached ((l loader) (name (pointer u8)) (i u64)) u64
+  (match (n:ge i (m:modules-length (deref (field (deref (field l session)) files))))
+    (true 0)
+    (false
+      (match (cstring:strcmp name (field (file l i) name))
+        (0 (n:add i 1))
+        (_ (cached l name (n:add i 1)))))))
+
+; Copy a parsed file into the session tape. IDs and offsets become session identities.
+(base:function remap ((id u64) (base u64)) u64
+  (match id (0 0) (_ (n:add id base))))
+
+(base:function copy-nodes
+  ((l loader) (local m:context) (base u64) (offset u64) (start u64) (count u64)) unit
+  (match count
+    (0 unit)
+    (1
+      (let ((v m:node (m:at local start)))
+        (do
+          (m:add
+            (context l)
+            (m:node
+              (field v kind)
+              (n:add offset (field v start))
+              (field v length)
+              (remap (field v child) base)
+              (remap (field v next) base)
+              0
+              0
+              0
+              0
+              0))
+          unit)))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do
+          (copy-nodes l local base offset start half)
+          (copy-nodes l local base offset (n:add start half) (n:sub count half)))))))
+
+(base:function read-file ((l loader) (path (pointer u8)) (site u64)) data:data
+  (let
+    ((out data:data (data:empty (arena:allocator (field l memory))))
+     (stream (pointer types:file-stream) (stdio:fopen path "rb")))
+    (do
+      (match (m:is-empty (cast (pointer void) stream))
+        (true (m:error (context l) site "cannot open module source file"))
+        (false unit))
+      (match (source:read-open stream (& out))
+        ((ok) out)
+        ((invalid-input) (do (m:error (context l) site "cannot read module source file") out))
+        (status (do (m:storage status) out))))))
+
+(base:function directory-end ((path (pointer u8)) (start u64) (count u64)) u64
+  (match count
+    (0 0)
+    (1
+      (let ((b u64 (base:convert (deref (pointer-offset path start)))))
+        (match b (47 (n:add start 1)) (_ 0))))
+    (_
+      (let
+        ((half u64 (n:div count 2))
+         (right u64 (directory-end path (n:add start half) (n:sub count half))))
+        (match right (0 (directory-end path start half)) (_ right))))))
+
+; Match parse-module-name: dotted components must be nonempty. Keep dots
+; in filenames (core.model -> core.model.vrn), rather than turning them into paths.
+(base:function name-components ((value data:view) (start u64) (count u64)) bool
+  (match count
+    (0 true)
+    (1
+      (match (deref (pointer-offset (field value bytes) start))
+        (46
+          (match start
+            (0 false)
+            (_
+              (match (deref (pointer-offset (field value bytes) (n:sub start 1)))
+                (46 false)
+                (_ true)))))
+        (_ true)))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (match (name-components value start half)
+          (false false)
+          (true (name-components value (n:add start half) (n:sub count half))))))))
+
+(base:function valid-module-name ((value data:view)) bool
+  (match (field value length)
+    (0 false)
+    (_
+      (match (deref (pointer-offset (field value bytes) (n:sub (field value length) 1)))
+        (46 false)
+        (_ (name-components value 0 (field value length)))))))
+
+(base:function module-name ((c m:context) (id u64)) unit
+  (let ((v m:node (m:at c id)))
+    (do
+      (m:require c id (check:atom c id) "expected module name")
+      (m:require
+        c
+        id
+        (match (check:integer-start c (field v start)) (true false) (false true))
+        "expected module name")
+      (m:require c id (match (m:is c id "unit") (true false) (false true)) "expected module name")
+      (m:require c id (match (m:is c id "true") (true false) (false true)) "expected module name")
+      (m:require c id (match (m:is c id "false") (true false) (false true)) "expected module name")
+      (m:require
+        c
+        id
+        (n:eq
+          (check:colon c (field v start) (n:add (field v start) (field v length)))
+          (n:add (field v start) (field v length)))
+        "expected unqualified module name")
+      (m:require
+        c
+        id
+        (valid-module-name (m:spelling c id))
+        "module name contains an empty component"))))
+
+(base:function copy-string ((l loader) (value data:view)) (pointer u8)
+  (let ((out data:data (data:empty (arena:allocator (field l memory)))))
+    (do
+      (m:storage (data:assign-bytes (& out) value))
+      (m:storage (data:append (& out) 0))
+      (data:bytes out))))
+
+; probe-file's existence check, before opening the selected source. In particular,
+; a directory in an earlier search root must not silently fall through to a later file.
+(base:external-function access "access" ((pointer u8) i32) i32)
+
+(base:function source-path ((l loader) (name (pointer u8)) (index u64) (site u64)) (pointer u8)
+  (let ((roots paths-array (deref (field l roots))))
+    (match (n:ge index (paths-length roots))
+      (true
+        (do
+          (match site
+            (0 (do (m:text 2 name) (m:fatal ": module not found (cannot resolve module path)")))
+            (_ (m:error (context l) site "module not found (cannot resolve module path)")))
+          ""))
+      (false
+        (let
+          ((root (pointer u8) (deref (pointer-offset (tuple-get roots 0) index)))
+           (length u64 (cstring:strlen root))
+           (out data:data (data:empty (arena:allocator (field l memory)))))
+          (do
+            (append-bytes (& out) (data:view root length))
+            (match length
+              (0 unit)
+              (_
+                (match (deref (pointer-offset root (n:sub length 1)))
+                  (47 unit)
+                  (_ (m:storage (data:append (& out) 47))))))
+            (append-bytes (& out) (data:view name (cstring:strlen name)))
+            (append-bytes (& out) (data:view ".vrn" 4))
+            (m:storage (data:append (& out) 0))
+            (match (access (data:bytes out) 0)
+              (0 (canonical l (data:bytes out) site))
+              (_ (source-path l name (n:add index 1) site)))))))))
+
+; File compilation prepends its directory once, not each dependency's directory.
+(base:function prepend-root ((l loader) (path (pointer u8))) paths-array
+  (let
+    ((roots paths-array (deref (field l roots)))
+     (replacement paths-array (paths-new (arena:allocator (field l memory))))
+     (count u64 (directory-end path 0 (cstring:strlen path)))
+     (directory (pointer u8) (match count (0 "./") (_ (copy-string l (data:view path count))))))
+    (do
+      (m:storage (paths-append (& replacement) directory))
+      (append-roots (& replacement) roots 0 (paths-length roots))
+      replacement)))
+
+(base:function append-roots
+  ((out (pointer paths-array)) (roots paths-array) (start u64) (count u64)) unit
+  (match count
+    (0 unit)
+    (1 (m:storage (paths-append out (deref (pointer-offset (tuple-get roots 0) start)))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do
+          (append-roots out roots start half)
+          (append-roots out roots (n:add start half) (n:sub count half)))))))
+
+(base:function extension-start ((path (pointer u8)) (start u64) (end u64)) u64
+  (match (n:eq start end)
+    (true end)
+    (false
+      (match (deref (pointer-offset path (n:sub end 1)))
+        (46 (n:sub end 1))
+        (_
+          (let ((found u64 (extension-start path start (n:sub end 1))))
+            (match (n:eq found (n:sub end 1)) (true end) (false found))))))))
+
+(base:function entry-name ((l loader) (path (pointer u8))) (pointer u8)
+  (let
+    ((length u64 (cstring:strlen path))
+     (start u64 (directory-end path 0 length))
+     (end u64 (extension-start path start length)))
+    (copy-string l (data:view (pointer-offset path start) (n:sub end start)))))
+
+(base:function alias-conflict ((l loader) (owner u64) (alias u64) (i u64)) unit
+  (let ((edges m:imports-array (deref (field (deref (field l session)) edges))))
+    (match (n:ge i (m:imports-length edges))
+      (true unit)
+      (false
+        (let ((v m:import-info (deref (pointer-offset (tuple-get edges 0) i))))
+          (do
+            (match (n:eq owner (field v owner))
+              (true
+                (m:require
+                  (context l)
+                  alias
+                  (match (m:same (context l) alias (field v alias)) (true false) (false true))
+                  "duplicate import alias"))
+              (false unit))
+            (alias-conflict l owner alias (n:add i 1))))))))
+
+(base:function append-exports ((c m:context) (tail u64) (names u64)) unit
+  (match (m:next c tail) (0 (m:link c tail names)) (_ (append-exports c (m:next c tail) names))))
+
+; Collect imports, exports, and macro definitions in source order before checking bodies.
+(base:function declarations
+  ((l loader) (owner u64) (root u64) (depth u64) (first (pointer u64)) (tail (pointer u64))) unit
+  (match root
+    (0 unit)
+    (_
+      (let ((c m:context (context l)) (head u64 (m:child c root)) (next u64 (m:next c root)))
+        (do
+          (base:cond
+            ((base:or (m:is c head "import") (m:is c head "%import"))
+             (m:require
+               c
+               root
+               (match (check:arity c head 2) (true true) (false (check:arity c head 4)))
+               "%import requires module name and optional :as alias")
+             (let
+               ((name u64 (m:next c head))
+                (marker u64 (m:next c name))
+                (alias u64 (match marker (0 name) (_ (m:next c marker)))))
+               (do
+                 (module-name c name)
+                 (match marker
+                   (0 unit)
+                   (_
+                     (do
+                       (m:require c marker (m:is c marker ":as") "%import requires :as alias")
+                       (module-name c alias))))
+                 (let
+                   ((target u64 (load l (copy-string l (m:spelling c name)) (n:add depth 1) name)))
+                   (do
+                     (alias-conflict l owner alias 0)
+                     (m:storage
+                       (m:imports-append
+                         (field (deref (field l session)) edges)
+                         (m:import-info owner target alias root))))))))
+            ((base:or (m:is c head "export") (m:is c head "%export"))
+             (let ((v m:module-info (file l owner)))
+               (do
+                 ; Reference collect-module appends all export declarations.
+                 (match (field v exports)
+                   (0
+                     (set-file
+                       l
+                       owner
+                       (m:module-info
+                         (field v name)
+                         (field v path)
+                         (field v start)
+                         (field v length)
+                         root
+                         (field v state)
+                         (field v first)
+                         (field v last))))
+                   (_ (append-exports c (m:child c (field v exports)) (m:next c (m:child c root))))))))
+            (true (expand:declaration c root first tail)))
+          (declarations l owner next depth first tail))))))
+
+(base:function load ((l loader) (name (pointer u8)) (depth u64) (site u64)) u64
+  (let ((found u64 (cached l name 0)))
+    (match found
+      (0
+        (do
+          (m:require
+            (context l)
+            site
+            (n:lt depth constants:module-depth-limit)
+            "module dependency depth limit (64) exceeded")
+          (m:require
+            (context l)
+            site
+            (n:lt
+              (m:modules-length (deref (field (deref (field l session)) files)))
+              constants:module-count-limit)
+            "module count limit (256) exceeded")
+          (let
+            ((path (pointer u8) (source-path l name 0 site))
+             (input data:data (read-file l path site))
+             (items m:tape (m:empty (arena:allocator (field l memory))))
+             (local
+               m:context
+               (m:context
+                 path
+                 (data:borrow input)
+                 (& items)
+                 (field l memory)
+                 (field l errors)
+                 (m:empty-env)
+                 0))
+             (roots u64 (reader:read-with-features local (config:reader-features (context l))))
+             (id u64 (m:modules-length (deref (field (deref (field l session)) files))))
+             (offset u64 (data:length (deref (field l source))))
+             (base u64 (n:sub (m:nodes-length (deref (field l items))) 1)))
+            (do
+              (append-bytes (field l source) (data:borrow input))
+              ; A separator gives empty files and EOF unique positions.
+              (m:storage (data:append (field l source) 10))
+              (m:storage
+                (m:modules-append
+                  (field (deref (field l session)) files)
+                  (m:module-info name path offset (n:add (data:length input) 1) 0 1 0 0)))
+              (copy-nodes l local base offset 1 (n:sub (m:nodes-length items) 1))
+              (let ((first u64 0) (tail u64 0))
+                (do
+                  (declarations l id (remap roots base) depth (& first) (& tail))
+                  (let ((v m:module-info (file l id)))
+                    (set-file
+                      l
+                      id
+                      (m:module-info
+                        name
+                        path
+                        offset
+                        (field v length)
+                        (field v exports)
+                        2
+                        first
+                        tail)))))
+              id))))
+      (_
+        (let ((id u64 (n:sub found 1)))
+          (do
+            (match (field (file l id) state)
+              (1
+                (do
+                  (m:location (context l) (field (m:at (context l) site) start))
+                  (m:text 2 "import cycle: ")
+                  (cycle-names
+                    l
+                    id
+                    (m:modules-length (deref (field (deref (field l session)) files))))
+                  (m:text 2 name)
+                  (m:fatal "")))
+              (_ unit))
+            id))))))
+
+(base:function run ((l loader) (path (pointer u8))) u64
+  (let
+    ((roots paths-array (prepend-root l path))
+     (configured
+       loader
+       (loader
+         (field l memory)
+         (field l source)
+         (field l items)
+         (field l session)
+         (field l errors)
+         (& roots))))
+    (run-module configured (entry-name l path))))
+
+; Like compile-module, use only the supplied ordered roots for a named entry.
+(base:function run-module ((l loader) (name (pointer u8))) u64
+  (do
+    (match (valid-module-name (data:view name (cstring:strlen name)))
+      (true unit)
+      (false (do (m:text 2 name) (m:fatal ": module name contains an empty component"))))
+    (m:add (context l) (m:node 0 0 0 0 0 0 0 0 0 0))
+    (load l name 0 0)
+    (let ((first u64 0) (tail u64 0)) (do (order l 0 (& tail) (& first)) first))))
+
+; Dependency-first DFS, in source import order, as module-compilation-order.
+(base:function order-imports
+  ((l loader) (owner u64) (i u64) (tail (pointer u64)) (first (pointer u64))) unit
+  (let ((edges m:imports-array (deref (field (deref (field l session)) edges))))
+    (match (n:ge i (m:imports-length edges))
+      (true unit)
+      (false
+        (let ((edge m:import-info (deref (pointer-offset (tuple-get edges 0) i))))
+          (do
+            (match (n:eq (field edge owner) owner)
+              (true (order l (field edge target) tail first))
+              (false unit))
+            (order-imports l owner (n:add i 1) tail first)))))))
+
+(base:function order ((l loader) (id u64) (tail (pointer u64)) (first (pointer u64))) unit
+  (let ((v m:module-info (file l id)))
+    (match (field v state)
+      (3 unit)
+      (_
+        (do
+          (set-file
+            l
+            id
+            (m:module-info
+              (field v name)
+              (field v path)
+              (field v start)
+              (field v length)
+              (field v exports)
+              3
+              (field v first)
+              (field v last)))
+          (order-imports l id 0 tail first)
+          (match (field v first)
+            (0 unit)
+            (_
+              (do
+                (match (deref tail)
+                  (0 (store (deref first) (field v first)))
+                  (_ (m:link (context l) (deref tail) (field v first))))
+                (store (deref tail) (field v last))
+                unit))))))))
+
+(base:function cycle-names ((l loader) (i u64) (end u64)) unit
+  (match (n:ge i end)
+    (true unit)
+    (false
+      (do
+        (match (field (file l i) state)
+          (1 (do (m:text 2 (field (file l i) name)) (m:text 2 " -> ")))
+          (_ unit))
+        (cycle-names l (n:add i 1) end)))))
+
+(export
+  access
+  directory-end
+  append-bytes
+  valid-module-name
+  loader
+  context
+  run
+  run-module
+  paths-array
+  paths-new
+  paths-append
+  paths-length
+  paths-destroy)

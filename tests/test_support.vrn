@@ -1,0 +1,268 @@
+(import base)
+(import testing)
+(import allocator :as a)
+(import array)
+(import arena)
+(import data)
+(import error)
+(import system_allocator :as system)
+(import core.names :as names)
+(import core.span :as span)
+(import core.source :as source)
+(import core.model :as m)
+(import foundation.compat.arithmetic :as n)
+(import libc.stdio :as io)
+(import libc.filesystem :as fs)
+(import libc.types :as types)
+
+; Layout fixture: a leading byte forces padding before the embedded source span.
+(base:type span-probe (product (tag u8) (value span:span)))
+
+; Layout fixture: a leading byte tests alignment and stride of an interner slot.
+(base:type slot-probe (product (tag u8) (value names:names-slot)))
+
+(testing:test collection-layouts
+  (let
+    ((item span:span (span:span 0 0 0 0))
+     (slot names:names-slot (vacant))
+     (padded-span span-probe (span-probe 0 item))
+     (padded-slot slot-probe (slot-probe 0 slot)))
+    (testing:checks
+      (testing:check
+        (n:eq
+          (n:sub
+            (m:address (cast (pointer void) (pointer-offset (& item) 1)))
+            (m:address (cast (pointer void) (& item))))
+          32))
+      (testing:check
+        (n:eq
+          (n:sub
+            (m:address (cast (pointer void) (pointer-offset (& slot) 1)))
+            (m:address (cast (pointer void) (& slot))))
+          40))
+      (testing:check
+        (n:eq
+          (n:sub
+            (m:address (cast (pointer void) (pointer-offset (& padded-span) 1)))
+            (m:address (cast (pointer void) (& padded-span))))
+          40))
+      (testing:check
+        (n:eq
+          (n:sub
+            (m:address (cast (pointer void) (pointer-offset (& padded-slot) 1)))
+            (m:address (cast (pointer void) (& padded-slot))))
+          48)))))
+
+(base:function append-spans ((items (pointer span:span-array)) (index u64)) testing:result
+  (match (n:eq index 100)
+    (true (testing:empty))
+    (false
+      (testing:checks
+        (testing:check
+          (match (span:spans-append items (span:span 1 index 3 (n:add index 1)))
+            ((ok) true)
+            (_ false)))
+        (append-spans items (n:add index 1))))))
+
+(testing:test spans-survive-growth
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (items span:span-array (span:empty (arena:allocator (& memory))))
+     (result
+       testing:result
+       (testing:checks
+         (append-spans (& items) 0)
+         (testing:check (n:eq (span:spans-length items) 100))
+         (testing:check (n:eq (field (deref (tuple-get items 0)) name) 1))
+         (testing:check (n:eq (field (deref (pointer-offset (tuple-get items 0) 99)) start) 99)))))
+    (do (span:spans-destroy (& items)) (arena:destroy (& memory)) result)))
+
+(base:function add-names
+  ((table (pointer names:names-table)) (memory (pointer arena:arena)) (index u64)) testing:result
+  (match (n:eq index 100)
+    (true (testing:empty))
+    (false
+      (let ((byte u8 (base:convert index)))
+        (match (names:intern table memory (data:view (& byte) 1))
+          ((tuple status id)
+           (testing:checks
+             (testing:check (match status ((ok) true) (_ false)))
+             (testing:check (n:eq id (n:add index 1)))
+             (add-names table memory (n:add index 1)))))))))
+
+(base:function verify-names ((table names:names-table) (index u64)) testing:result
+  (match (n:eq index 100)
+    (true (testing:empty))
+    (false
+      (let ((byte u8 (base:convert index)) (id u64 0))
+        (testing:checks
+          (testing:check (names:names-get table (data:view (& byte) 1) (& id)))
+          (testing:check (n:eq id (n:add index 1)))
+          (verify-names table (n:add index 1)))))))
+
+(testing:test interned-ids-survive-growth-and-key-storage-is-copied
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (table names:names-table (names:names-empty (system:create)))
+     (result
+       testing:result
+       (testing:checks
+         (add-names (& table) (& memory) 0)
+         (verify-names table 0)
+         (testing:check (n:eq (names:names-count table) 100))
+         (let ((byte u8 42))
+           (match (names:intern (& table) (& memory) (data:view (& byte) 1))
+             ((tuple status id)
+              (testing:checks
+                (testing:check (match status ((ok) true) (_ false)))
+                (testing:check (n:eq id 43))
+                (testing:check (n:eq (names:names-count table) 100)))))))))
+    (do (names:names-destroy (& table)) (arena:destroy (& memory)) result)))
+
+; The runner owns this private temporary path for the duration of the tests.
+(base:variable path (pointer u8) "")
+
+(base:function set-path ((value (pointer u8))) unit
+  (do (assign path value) unit))
+
+(base:function write-fixture ((bytes data:view)) bool
+  (let ((file (pointer types:file-stream) (io:fopen path "wb")))
+    (match (m:is-empty (cast (pointer void) file))
+      (true false)
+      (false
+        (let
+          ((written
+             u64
+             (io:fwrite (cast (pointer void) (field bytes bytes)) 1 (field bytes length) file))
+           (closed i32 (io:fclose file)))
+          (match closed (0 (n:eq written (field bytes length))) (_ false)))))))
+
+(base:function read-size ((size u64)) testing:result
+  (let
+    ((fixture data:data (data:empty (system:create)))
+     (input data:data (data:empty (system:create)))
+     (result
+       testing:result
+       (match (data:resize (& fixture) size)
+         ((ok)
+          (testing:checks
+            (testing:check (write-fixture (data:borrow fixture)))
+            (testing:check (match (source:read path (& input)) ((ok) true) (_ false)))
+            (testing:check (n:eq (data:length input) size))
+            (testing:check (data:equal (data:borrow input) (data:borrow fixture)))))
+         (_ (testing:fail)))))
+    (do (data:destroy (& fixture)) (data:destroy (& input)) result)))
+
+(testing:test empty-source
+  (read-size 0))
+
+(testing:test exact-read-window
+  (read-size 65536))
+
+(testing:test large-source
+  (read-size 262145))
+
+(testing:test source-bytes-are-preserved
+  (let
+    ((input data:data (data:empty (system:create)))
+     (text data:view (data:view "\n alpha beta alpha" 18))
+     (result
+       testing:result
+       (testing:checks
+         (testing:check (write-fixture text))
+         (testing:check (match (source:read path (& input)) ((ok) true) (_ false)))
+         (testing:check (data:equal (data:borrow input) text)))))
+    (do (data:destroy (& input)) result)))
+
+(testing:test directory-read-fails
+  (let
+    ((input data:data (data:empty (system:create)))
+     (status error:status (source:read "/tmp" (& input))))
+    (do (data:destroy (& input)) (testing:check (match status ((ok) false) (_ true))))))
+
+(testing:test missing-source-fails
+  (let
+    ((removed i32 (fs:unlink path))
+     (input data:data (data:empty (system:create)))
+     (status error:status (source:read path (& input))))
+    (do
+      (data:destroy (& input))
+      (testing:checks
+        (testing:assert-equal removed 0)
+        (testing:check (match status ((ok) false) (_ true)))))))
+
+(base:variable budget u64 0)
+
+(base:variable live u64 0)
+
+(base:function oom () a:error
+  (out-of-memory))
+
+(base:function acquire ((context (pointer void)) (size u64) (alignment u64)) a:result
+  (match (n:eq budget 0)
+    (true (a:failure (oom)))
+    (false
+      (do
+        (assign budget (n:sub budget 1))
+        (match (a:allocate (system:create) size alignment)
+          ((allocated bytes) (do (assign live (n:add live 1)) (a:success bytes)))
+          (reason reason))))))
+
+(base:function release ((context (pointer void)) (bytes (pointer u8)) (size u64) (alignment u64))
+  unit
+  (do (assign live (n:sub live 1)) (a:deallocate (system:create) bytes size alignment) unit))
+
+(base:function allocation-case ((limit u64)) testing:result
+  (do
+    (assign budget limit)
+    (let
+      ((backing a:backend (a:backend (cast (pointer void) "") acquire release))
+       (session arena:arena (arena:create backing 4096))
+       (compilation arena:arena (arena:create backing 4096))
+       (input data:data (data:empty backing))
+       (table names:names-table (names:names-empty backing))
+       (items span:span-array (span:empty (arena:allocator (& compilation))))
+       (loaded error:status (source:read path (& input)))
+       (status
+         error:status
+         (match loaded
+           ((ok)
+            (match (names:intern (& table) (& session) (data:borrow input))
+              ((tuple interned id)
+               (match interned
+                 ((ok) (span:spans-append (& items) (span:span 1 0 (data:length input) id)))
+                 (reason reason)))))
+           (reason reason))))
+      (do
+        (span:spans-destroy (& items))
+        (names:names-destroy (& table))
+        (data:destroy (& input))
+        (arena:destroy (& compilation))
+        (arena:destroy (& session))
+        (testing:checks
+          (testing:check (n:eq live 0))
+          (match limit
+            (0 (testing:check (match status ((allocation-error _) true) (_ false))))
+            (16 (testing:check (match status ((ok) true) (_ false))))
+            (_ (testing:check (match status ((ok) true) ((allocation-error _) true) (_ false))))))))))
+
+(base:function allocation-cases ((limit u64)) testing:result
+  (testing:checks
+    (allocation-case limit)
+    (match limit (16 (testing:empty)) (_ (allocation-cases (n:add limit 1))))))
+
+(testing:test allocation-failures-release-owned-storage
+  (testing:checks (testing:check (write-fixture (data:view "alpha" 5))) (allocation-cases 0)))
+
+(export
+  set-path
+  collection-layouts
+  spans-survive-growth
+  interned-ids-survive-growth-and-key-storage-is-copied
+  empty-source
+  exact-read-window
+  large-source
+  source-bytes-are-preserved
+  directory-read-fails
+  missing-source-fails
+  allocation-failures-release-owned-storage)

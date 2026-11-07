@@ -1,4 +1,5 @@
 build/
+/factorial
 CMakeUserPresets.json
 compile_flags.txt
 /aclocal.m4

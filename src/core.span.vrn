@@ -1,0 +1,21 @@
+(import base)
+(import allocator)
+(import array)
+(import error)
+(import foundation.compat.arithmetic)
+
+; File IDs and interned-name IDs occupy distinct fields. Offsets are bytes.
+; Source identity and half-open byte range [start, start + length).
+; Name is an optional interned identifier ID; zero means no interned name.
+(base:type span (product (file u64) (start u64) (length u64) (name u64)))
+
+(array:define spans span)
+
+; Owning span array: pointer, length, capacity, allocation layout. Release with
+; spans-destroy; retain indices rather than element pointers across growth.
+(base:type span-array (tuple (pointer span) u64 u64 array:layout))
+
+(base:function empty ((backing allocator:backend)) span-array
+  (spans-empty (cast (pointer span) (cast (pointer void) "")) (array:layout 32 8 backing)))
+
+(export span span-array empty spans-append spans-length spans-destroy)

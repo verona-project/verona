@@ -1,0 +1,914 @@
+(import base)
+(import core.constants :as constants)
+(import allocator)
+(import arena)
+(import data)
+(import system_allocator :as system)
+(import libc.stdio :as stdio)
+(import libc.filesystem :as fs)
+(import libc.errno :as errno)
+(import libc.constants :as c)
+(import libc.types :as types)
+(import libc.descriptor :as fd)
+(import libc.process :as process)
+(import libc.string :as cstring)
+(import core.model :as m)
+(import core.reader :as reader)
+(import core.source :as source)
+(import core.modules :as modules)
+(import array)
+(import error)
+(import core.check :as check)
+(import core.eval :as eval)
+(import core.emit :as emit)
+(import core.link :as link)
+(import core.header :as header)
+(import core.format :as format)
+(import core.configuration :as config)
+(import core.target :as backend-target)
+(import core.build :as build)
+(import llvm)
+(import llvm.core :as ir)
+(import llvm.enums :as enum)
+(import llvm.types :as t)
+(import llvm.target :as target)
+(import foundation.compat.arithmetic :as n)
+(import foundation.compat.signed_arithmetic :as signed)
+
+(base:type machine-options
+  (product (triple (pointer u8)) (cpu (pointer u8)) (features (pointer u8))))
+
+; Compare two borrowed NUL-terminated strings for exact byte equality.
+(base:function equal ((x (pointer u8)) (y (pointer u8))) bool
+  (match (cstring:strcmp x y) (0 true) (_ false)))
+
+; Print an i64 decimal result to stdout without a newline.
+; Format negative magnitudes with unsigned arithmetic so minBound remains representable.
+(base:function signed-number ((value i64)) unit
+  (let ((bits u64 (base:convert value)))
+    (match (signed:lt value 0)
+      (true (do (m:text 1 "-") (m:number 1 (n:sub 0 bits))))
+      (false (m:number 1 bits)))))
+
+; Wait for the selected child, retrying interrupted waits; return true only for status zero.
+(base:function wait-result ((pid i32)) bool
+  (let ((status i32 0) (result i32 (process:waitpid pid (& status) 0)))
+    (match result
+      (-1
+        (match (signed:eq (base:convert (deref (errno:errno-pointer))) (base:convert c:EINTR))
+          (true (wait-result pid))
+          (false false)))
+      (_ (match status (0 true) (_ false))))))
+
+; Run Clang with owned argv storage. Option strings are borrowed; generated
+; library flags live in MEMORY until the parent has waited for the child.
+(base:function native-tool
+  ((input (pointer u8))
+   (output (pointer u8))
+   (config link:options)
+   (kind (pointer u8))
+   (platform (pointer u8))) bool
+  (let
+    ((configured
+       (pointer u8)
+       (process:getenv
+         (match (equal kind "static-library") (true "VERONA_CORE_AR") (false "VERONA_CORE_CLANG"))))
+     (fallback
+       (pointer u8)
+       (process:getenv
+         (match (equal kind "static-library") (true "VERONA_AR") (false "VERONA_LINKER"))))
+     (tool
+       (pointer u8)
+       (match (m:is-empty (cast (pointer void) configured))
+         (true
+           (match (m:is-empty (cast (pointer void) fallback))
+             (true (match (equal kind "static-library") (true "ar") (false "clang")))
+             (false fallback)))
+         (false configured)))
+     (memory arena:arena (arena:create (system:create) 4096))
+     (args link:strings-array (link:strings-new (system:create)))
+     (status
+       error:status
+       (link:artifact-arguments-for (& args) (& memory) tool input output config kind platform))
+     (result
+       bool
+       (match status
+         ((ok)
+          (let ((pid i32 (process:fork)))
+            (match pid
+              (-1 false)
+              (0 (do (process:execvp tool (tuple-get args 0)) (process:exit 127) false))
+              (_ (wait-result pid)))))
+         (_ (do (m:text 2 "cannot allocate native linker arguments\n") false)))))
+    (do (link:strings-destroy (& args)) (arena:destroy (& memory)) result)))
+
+; Release a transferred LLVM diagnostic/text message if nonnull, including success messages.
+(base:function dispose-message ((message (pointer u8))) unit
+  (match (target:is-null (cast (pointer void) message))
+    (true unit)
+    (false (do (ir:message-dispose message) unit))))
+
+; Print a transferred LLVM diagnostic (or fallback text) and release the message.
+(base:function llvm-error ((message (pointer u8))) unit
+  (do
+    (m:text 2 "LLVM: ")
+    (match (target:is-null (cast (pointer void) message))
+      (true (m:text 2 "operation failed"))
+      (false (m:text 2 message)))
+    (m:text 2 "\n")
+    (dispose-message message)
+    unit))
+
+; Object output has no linker or entry wrapper. Own every LLVM diagnostic.
+(base:function emit-object ((owner llvm:session) (machine t:machine-ref) (output (pointer u8)))
+  exit-code
+  (let
+    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+     (status
+       i32
+       (target:emit-file machine (field owner module) output enum:object-file (& message))))
+    (match status (0 (do (dispose-message message) 0)) (_ (do (llvm-error message) 2)))))
+
+; Emit an object to a private mkstemp file, invoke the native linker, and remove the file.
+; Borrow the LLVM session/machine and return zero on success or compiler-error status on failure.
+(base:function object-and-link
+  ((c m:context)
+   (owner llvm:session)
+   (machine t:machine-ref)
+   (output (pointer u8))
+   (links link:options)
+   (kind (pointer u8))) exit-code
+  (let ((path data:data (data:empty (arena:allocator (field c memory)))))
+    (do
+      (m:storage
+        (data:assign-bytes
+          (& path)
+          (data:view
+            constants:temporary-object-template
+            (n:add (cstring:strlen constants:temporary-object-template) 1))))
+      (let ((descriptor i32 (fs:mkstemp (data:bytes path))))
+        (match descriptor
+          (-1 (do (m:text 2 "cannot create temporary object file\n") 2))
+          (_
+            (let ((closed i32 (fd:close descriptor)))
+              (match closed
+                (0
+                  (let
+                    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+                     (status
+                       i32
+                       (target:emit-file
+                         machine
+                         (field owner module)
+                         (data:bytes path)
+                         enum:object-file
+                         (& message)))
+                     (result
+                       exit-code
+                       (match status
+                         (0
+                           (do
+                             (dispose-message message)
+                             (match
+                               (native-tool
+                                 (data:bytes path)
+                                 output
+                                 links
+                                 kind
+                                 (config:target-platform c))
+                               (true 0)
+                               (false (do (m:text 2 "native compilation failed\n") 2)))))
+                         (_ (do (llvm-error message) 2)))))
+                    (do (fs:unlink (data:bytes path)) result)))
+                (_
+                  (do
+                    (fs:unlink (data:bytes path))
+                    (m:text 2 "cannot close temporary object file\n")
+                    2))))))))))
+
+(base:function optimization-level ((level (pointer u8))) i32
+  (base:cond ((equal level "-O0") 0) ((equal level "-O1") 1) ((equal level "-O2") 2) (true 3)))
+
+; Create and own a native LLVM target machine while emitting/linking the borrowed module.
+; Release the machine and transferred diagnostics before returning the command status.
+(base:function compile
+  ((c m:context)
+   (owner llvm:session)
+   (output (pointer u8))
+   (optimization (pointer u8))
+   (links link:options)
+   (kind (pointer u8))) exit-code
+  (let
+    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+     (machine
+       t:machine-ref
+       (backend-target:configured-machine
+         c
+         (field owner module)
+         (optimization-level optimization)
+         (& message))))
+    (match (target:is-null (cast (pointer void) machine))
+      (true (do (llvm-error message) 2))
+      (false
+        (do
+          (dispose-message message)
+          (let
+            ((result
+               exit-code
+               (match (equal kind "object")
+                 (true (emit-object owner machine output))
+                 (false (object-and-link c owner machine output links kind)))))
+            (do (target:machine-dispose machine) result)))))))
+
+; Build and verify an owned LLVM session, then print IR or compile the executable.
+; Release printed text, diagnostics, and the session before returning.
+(base:function generate
+  ((c m:context)
+   (all u64)
+   (main u64)
+   (mode (pointer u8))
+   (output (pointer u8))
+   (optimization (pointer u8))
+   (links link:options)
+   (kind (pointer u8))) exit-code
+  (let
+    ((owner llvm:session (emit:build c all main (equal mode "compile-report")))
+     (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+     (status i32 (llvm:verify owner (& message)))
+     (result
+       exit-code
+       (match status
+         (0
+           (do
+             (dispose-message message)
+             (match (equal mode "emit-llvm")
+               (true
+                 (let ((text (pointer u8) (ir:module-string (field owner module))))
+                   (do (m:text 1 text) (ir:message-dispose text) 0)))
+               (false
+                 (let ((code exit-code (compile c owner output optimization links kind)))
+                   (match
+                     (base:and-then
+                       (n:eq (base:convert code) 0)
+                       (base:or (equal kind "static-library") (equal kind "shared-library")))
+                     (true (match (header:write c all output) (true 0) (false 2)))
+                     (false code)))))))
+         (_ (do (llvm-error message) 2)))))
+    (do (llvm:destroy owner) result)))
+
+; Read a source file for syntax inspection.
+; Own the source/tape arena for this invocation and destroy it on normal command return.
+(base:function execute-reader
+  ((path (pointer u8)) (requested (pointer u8)) (features (pointer void))) exit-code
+  (let
+    ((memory arena:arena (arena:create (system:create) constants:initial-arena-bytes))
+     (input data:data (data:empty (arena:allocator (& memory))))
+     (configuration
+       config:configuration
+       (backend-target:resolve (& memory) requested "generic" "" 0 features))
+     (items m:tape (m:empty (arena:allocator (& memory))))
+     (file (pointer types:file-stream) (stdio:fopen path "rb")))
+    (do
+      (match (m:is-empty (cast (pointer void) file))
+        (true (m:fatal "cannot open source file"))
+        (false unit))
+      (match (source:read-open file (& input))
+        ((ok) unit)
+        ((invalid-input) (m:fatal "cannot read source file"))
+        (status (m:storage status)))
+      (let
+        ((errors u64 0)
+         (c
+           m:context
+           (m:context path (data:borrow input) (& items) (& memory) (& errors) (m:empty-env) 0)))
+        (do
+          (reader:dump-with-features c (field configuration features))
+          (arena:destroy (& memory))
+          0)))))
+
+(base:function link-policy ((links link:options) (platform (pointer u8))) unit
+  (match
+    (base:and
+      (n:gt (link:strings-length (field links frameworks)) 0)
+      (base:not (equal platform "darwin")))
+    (true (m:fatal "frameworks are supported only on Darwin targets"))
+    (false unit)))
+
+; Return the final dot after DIRECTORY, or END when the filename has no extension.
+(base:function source-extension
+  ((path (pointer u8)) (index u64) (end u64) (directory u64) (last u64)) u64
+  (match (n:eq index end)
+    (true last)
+    (false
+      (source-extension
+        path
+        (n:add index 1)
+        end
+        directory
+        (match (deref (pointer-offset path index))
+          (46 (match (n:gt index directory) (true index) (false last)))
+          (_ last))))))
+
+; Match the reference driver's source-adjacent default artifact names.
+(base:function default-output
+  ((memory (pointer arena:arena)) (path (pointer u8)) (kind (pointer u8)) (platform (pointer u8)))
+  (pointer u8)
+  (let
+    ((length u64 (cstring:strlen path))
+     (directory u64 (modules:directory-end path 0 length))
+     (stem-end u64 (source-extension path directory length directory length))
+     (out data:data (data:empty (arena:allocator memory))))
+    (do
+      (m:storage (format:append-view (& out) (data:view path length) 0 directory))
+      (match (base:or (equal kind "static-library") (equal kind "shared-library"))
+        (true (format:append (& out) "lib"))
+        (false unit))
+      (match (n:eq directory stem-end)
+        (true (format:append (& out) "a.out"))
+        (false
+          (m:storage
+            (format:append-view
+              (& out)
+              (data:view path length)
+              directory
+              (n:sub stem-end directory)))))
+      (base:cond
+        ((equal kind "object") (format:append (& out) ".o"))
+        ((equal kind "static-library") (format:append (& out) ".a"))
+        ((equal kind "shared-library")
+         (format:append (& out) (match (equal platform "darwin") (true ".dylib") (false ".so"))))
+        (true unit))
+      (m:storage (data:append (& out) 0))
+      (data:bytes out))))
+
+; Load named modules once using the configured search path and execute the command.
+(base:function execute
+  ((mode (pointer u8))
+   (path (pointer u8))
+   (output (pointer u8))
+   (optimization (pointer u8))
+   (roots modules:paths-array)
+   (links link:options)
+   (kind (pointer u8))
+   (requested (pointer u8))
+   (cpu (pointer u8))
+   (machine-features (pointer u8))
+   (features (pointer void))
+   (selected (pointer void))) exit-code
+  (match (equal mode "read")
+    (true (execute-reader path requested features))
+    (false
+      (let
+        ((memory arena:arena (arena:create (system:create) constants:initial-arena-bytes))
+         (configuration
+           config:configuration
+           (match (m:is-empty selected)
+             (true
+               (backend-target:resolve
+                 (& memory)
+                 requested
+                 cpu
+                 machine-features
+                 (optimization-level optimization)
+                 features))
+             (false (deref (cast (pointer config:configuration) selected)))))
+         (items m:tape (m:empty (arena:allocator (& memory))))
+         (errors u64 0)
+         (files
+           m:modules-array
+           (m:modules-empty
+             (cast (pointer m:module-info) (m:empty-env))
+             (array:layout
+               constants:module-byte-size
+               constants:node-alignment
+               (arena:allocator (& memory)))))
+         (edges
+           m:imports-array
+           (m:imports-empty
+             (cast (pointer m:import-info) (m:empty-env))
+             (array:layout
+               constants:import-byte-size
+               constants:node-alignment
+               (arena:allocator (& memory)))))
+         (session
+           m:module-session
+           (m:module-session (& files) (& edges) 0 0 (cast (pointer void) (& configuration)) 0))
+         (source data:data (data:empty (arena:allocator (& memory))))
+         (search modules:paths-array roots)
+         (loader
+           modules:loader
+           (modules:loader (& memory) (& source) (& items) (& session) (& errors) (& search)))
+         (policy unit (link-policy links (field configuration platform)))
+         (functions u64 (modules:run loader path))
+         (c m:context (modules:context loader))
+         (main u64 (check:check-with-entry c functions (equal kind "executable")))
+         (actual-output
+           (pointer u8)
+           (match (equal output "")
+             (true (default-output (& memory) path kind (field configuration platform)))
+             (false output)))
+         (result
+           exit-code
+           (base:cond
+             ((n:gt errors 0) 2)
+             ((equal mode "check") 0)
+             ((base:and (equal mode "eval") (check:command-line-main c main))
+              (do
+                (m:report
+                  c
+                  main
+                  "eval requires a parameterless main; command-line arguments are unavailable")
+                2))
+             ((equal mode "eval")
+              (let
+                ((args eval:values-array (eval:values-new (system:create)))
+                 (outcome
+                   eval:outcome
+                   (eval:run
+                     c
+                     main
+                     args
+                     (eval:options 0 constants:evaluator-call-depth-limit)
+                     (system:create)))
+                 (code
+                   exit-code
+                   (match (field outcome code)
+                     (0
+                       (do
+                         (match (field (field outcome result) ty)
+                           (3 (signed-number (field (field outcome result) scalar)))
+                           (_
+                             (eval:write-value c (field outcome aggregates) (field outcome result))))
+                         (m:text 1 "\n")
+                         0))
+                     (_ (do (eval:report c outcome) constants:runtime-failure-status)))))
+                (do (eval:destroy (& outcome)) (eval:values-destroy (& args)) code)))
+             (true (generate c functions main mode actual-output optimization links kind)))))
+        (do (arena:destroy (& memory)) result)))))
+
+; Print supported command forms to stderr and return usage-error status 2.
+(base:function usage () exit-code
+  (do
+    (m:text
+      2
+      "usage: verona {read|check|eval|emit-llvm} FILE [--module-path DIRECTORY ...] [--feature NAME ...] [--target TRIPLE]\n       verona {compile|compile-report} FILE [-o OUTPUT] [--emit object|executable|static-library|shared-library] [-O0|-O1|-O2|-O3] [--module-path DIRECTORY ...] [--library NAME ...] [--library-path DIRECTORY ...] [--framework NAME ...] [--feature NAME ...] [--target TRIPLE] [--cpu CPU] [--features FEATURES]\n       verona build TARGET OUTPUT-DIRECTORY [--feature NAME ...]\n       verona {--version|-V}\n")
+    2))
+
+; Parse module search paths and grouped native link options in command-line order.
+; The CLI owns ROOTS and LINKS; execute borrows both for this invocation.
+(base:function command-options
+  ((argv (pointer (pointer u8)))
+   (index u64)
+   (end u64)
+   (compile bool)
+   (roots (pointer modules:paths-array))
+   (output (pointer (pointer u8)))
+   (level (pointer (pointer u8)))
+   (links (pointer link:options))
+   (kind (pointer (pointer u8)))
+   (machine (pointer machine-options))
+   (features (pointer (pointer void)))
+   (memory (pointer arena:arena))) bool
+  (match (n:eq index end)
+    (true true)
+    (false
+      (let ((option (pointer u8) (deref (pointer-offset argv index))))
+        (base:cond
+          ((base:or-else
+             (base:or (equal option "--target") (equal option "--feature"))
+             (base:or (equal option "--cpu") (equal option "--features")))
+           (match
+             (base:and
+               (n:lt (n:add index 1) end)
+               (base:or
+                 compile
+                 (base:not (base:or (equal option "--cpu") (equal option "--features")))))
+             (false false)
+             (true
+               (let ((value (pointer u8) (deref (pointer-offset argv (n:add index 1)))))
+                 (match (base:or (equal option "--features") (n:gt (cstring:strlen value) 0))
+                   (false false)
+                   (true
+                     (do
+                       (base:cond
+                         ((equal option "--target")
+                          (store
+                            (deref machine)
+                            (machine-options
+                              value
+                              (field (deref machine) cpu)
+                              (field (deref machine) features))))
+                         ((equal option "--cpu")
+                          (store
+                            (deref machine)
+                            (machine-options
+                              (field (deref machine) triple)
+                              value
+                              (field (deref machine) features))))
+                         ((equal option "--features")
+                          (store
+                            (deref machine)
+                            (machine-options
+                              (field (deref machine) triple)
+                              (field (deref machine) cpu)
+                              value)))
+                         (true (config:add-feature memory features value)))
+                       (command-options
+                         argv
+                         (n:add index 2)
+                         end
+                         compile
+                         roots
+                         output
+                         level
+                         links
+                         kind
+                         machine
+                         features
+                         memory))))))))
+          ((equal option "--emit")
+           (match (base:and-then compile (n:lt (n:add index 1) end))
+             (false false)
+             (true
+               (let ((value (pointer u8) (deref (pointer-offset argv (n:add index 1)))))
+                 (match
+                   (base:or-else
+                     (equal value "object")
+                     (equal value "executable")
+                     (equal value "static-library")
+                     (equal value "shared-library"))
+                   (false false)
+                   (true
+                     (do
+                       (store (deref kind) value)
+                       (command-options
+                         argv
+                         (n:add index 2)
+                         end
+                         compile
+                         roots
+                         output
+                         level
+                         links
+                         kind
+                         machine
+                         features
+                         memory))))))))
+          ((equal option "--module-path")
+           (match (n:lt (n:add index 1) end)
+             (false false)
+             (true
+               (let ((path (pointer u8) (deref (pointer-offset argv (n:add index 1)))))
+                 (match (n:gt (cstring:strlen path) 0)
+                   (false false)
+                   (true
+                     (do
+                       (m:storage (modules:paths-append roots path))
+                       (command-options
+                         argv
+                         (n:add index 2)
+                         end
+                         compile
+                         roots
+                         output
+                         level
+                         links
+                         kind
+                         machine
+                         features
+                         memory))))))))
+          ((base:or-else (equal option "--library") (equal option "-l"))
+           (link-option
+             argv
+             index
+             end
+             compile
+             roots
+             output
+             level
+             links
+             kind
+             0
+             machine
+             features
+             memory))
+          ((base:or-else (equal option "--library-path") (equal option "-L"))
+           (link-option
+             argv
+             index
+             end
+             compile
+             roots
+             output
+             level
+             links
+             kind
+             1
+             machine
+             features
+             memory))
+          ((equal option "--framework")
+           (link-option
+             argv
+             index
+             end
+             compile
+             roots
+             output
+             level
+             links
+             kind
+             2
+             machine
+             features
+             memory))
+          ((base:or (equal option "-o") (equal option "--output"))
+           (match (base:and-then compile (n:lt (n:add index 1) end))
+             (false false)
+             (true
+               (match (equal (deref output) "")
+                 (false false)
+                 (true
+                   (do
+                     (store (deref output) (deref (pointer-offset argv (n:add index 1))))
+                     (command-options
+                       argv
+                       (n:add index 2)
+                       end
+                       compile
+                       roots
+                       output
+                       level
+                       links
+                       kind
+                       machine
+                       features
+                       memory)))))))
+          ((base:or-else
+             (equal option "-O0")
+             (equal option "-O1")
+             (equal option "-O2")
+             (equal option "-O3"))
+           (optimization-option
+             argv
+             index
+             end
+             compile
+             roots
+             output
+             level
+             links
+             kind
+             option
+             machine
+             features
+             memory))
+          (true false))))))
+
+(base:function link-option
+  ((argv (pointer (pointer u8)))
+   (index u64)
+   (end u64)
+   (compile bool)
+   (roots (pointer modules:paths-array))
+   (output (pointer (pointer u8)))
+   (level (pointer (pointer u8)))
+   (links (pointer link:options))
+   (artifact (pointer (pointer u8)))
+   (kind u64)
+   (machine (pointer machine-options))
+   (features (pointer (pointer void)))
+   (memory (pointer arena:arena))) bool
+  (match (base:and-then compile (n:lt (n:add index 1) end))
+    (false false)
+    (true
+      (match (link:add-option links kind (deref (pointer-offset argv (n:add index 1))))
+        ((ok)
+         (command-options
+           argv
+           (n:add index 2)
+           end
+           compile
+           roots
+           output
+           level
+           links
+           artifact
+           machine
+           features
+           memory))
+        (_ (do (m:text 2 "cannot allocate link options\n") false))))))
+
+(base:function optimization-option
+  ((argv (pointer (pointer u8)))
+   (index u64)
+   (end u64)
+   (compile bool)
+   (roots (pointer modules:paths-array))
+   (output (pointer (pointer u8)))
+   (level (pointer (pointer u8)))
+   (links (pointer link:options))
+   (kind (pointer (pointer u8)))
+   (option (pointer u8))
+   (machine (pointer machine-options))
+   (features (pointer (pointer void)))
+   (memory (pointer arena:arena))) bool
+  (match compile
+    (false false)
+    (true
+      (do
+        (store (deref level) option)
+        (command-options
+          argv
+          (n:add index 1)
+          end
+          compile
+          roots
+          output
+          level
+          links
+          kind
+          machine
+          features
+          memory)))))
+
+(base:function source-command ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (match (signed:lt (base:convert argc) 3)
+    (true (usage))
+    (false
+      (let
+        ((mode (pointer u8) (deref (pointer-offset argv 1)))
+         (path (pointer u8) (deref (pointer-offset argv 2)))
+         (compile bool (base:or-else (equal mode "compile") (equal mode "compile-report")))
+         (valid
+           bool
+           (base:or-else
+             (equal mode "read")
+             (equal mode "check")
+             (equal mode "eval")
+             (equal mode "emit-llvm")
+             compile))
+         (memory arena:arena (arena:create (system:create) 4096))
+         (machine machine-options (machine-options "native" "generic" ""))
+         (features (pointer void) (m:empty-env))
+         (roots modules:paths-array (modules:paths-new (system:create)))
+         (links link:options (link:options-new (system:create)))
+         (output (pointer u8) "")
+         (level (pointer u8) "-O0")
+         (kind (pointer u8) "executable")
+         (count u64 (base:convert argc))
+         (options
+           bool
+           (command-options
+             argv
+             3
+             count
+             compile
+             (& roots)
+             (& output)
+             (& level)
+             (& links)
+             (& kind)
+             (& machine)
+             (& features)
+             (& memory)))
+         (result
+           exit-code
+           (match
+             (base:or-else
+               (base:or (base:not valid) (base:not options))
+               (base:and (equal mode "compile-report") (base:not (equal kind "executable"))))
+             (true (usage))
+             (false
+               (execute
+                 mode
+                 path
+                 output
+                 level
+                 roots
+                 links
+                 kind
+                 (field machine triple)
+                 (field machine cpu)
+                 (field machine features)
+                 features
+                 (m:empty-env))))))
+        (do
+          (link:options-destroy (& links))
+          (modules:paths-destroy (& roots))
+          (arena:destroy (& memory))
+          result)))))
+
+(base:function build-features
+  ((argv (pointer (pointer u8)))
+   (index u64)
+   (end u64)
+   (memory (pointer arena:arena))
+   (features (pointer (pointer void)))) bool
+  (match (n:eq index end)
+    (true true)
+    (false
+      (match
+        (base:and-then
+          (n:lt (n:add index 1) end)
+          (equal (deref (pointer-offset argv index)) "--feature")
+          (n:gt (cstring:strlen (deref (pointer-offset argv (n:add index 1)))) 0))
+        (false false)
+        (true
+          (do
+            (config:add-feature memory features (deref (pointer-offset argv (n:add index 1))))
+            (build-features argv (n:add index 2) end memory features)))))))
+
+(base:function build-command ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (features (pointer void) (m:empty-env))
+     (valid bool (build-features argv 4 (base:convert argc) (& memory) (& features)))
+     (result
+       exit-code
+       (match valid
+         (false (usage))
+         (true
+           (let
+             ((request
+                build:request
+                (build:read
+                  (& memory)
+                  (deref (pointer-offset argv 2))
+                  (deref (pointer-offset argv 3))
+                  features))
+              (configuration
+                config:configuration
+                (backend-target:resolve
+                  (& memory)
+                  (field request triple)
+                  "generic"
+                  ""
+                  (optimization-level (field request level))
+                  (field request features)))
+              (items m:tape (m:empty (arena:allocator (& memory))))
+              (errors u64 0)
+              (c
+                m:context
+                (m:context
+                  "verona.build"
+                  (data:view "" 0)
+                  (& items)
+                  (& memory)
+                  (& errors)
+                  (m:empty-env)
+                  0)))
+             (do
+               (link-policy (field request links) (field configuration platform))
+               (build:directories
+                 c
+                 (field request output)
+                 1
+                 (n:sub
+                   (modules:directory-end
+                     (field request output)
+                     0
+                     (cstring:strlen (field request output)))
+                   1))
+               (let
+                 ((code
+                    exit-code
+                    (execute
+                      "compile"
+                      (field request root)
+                      (field request output)
+                      (field request level)
+                      (field request paths)
+                      (field request links)
+                      (field request kind)
+                      (field request triple)
+                      "generic"
+                      ""
+                      (field request features)
+                      (cast (pointer void) (& configuration)))))
+                 (do
+                   (match code (0 (do (m:text 1 (field request output)) (m:text 1 "\n"))) (_ unit))
+                   code))))))))
+    (do (arena:destroy (& memory)) result)))
+
+(base:function command ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (match
+    (base:and-then
+      (base:not (signed:lt (base:convert argc) 2))
+      (equal (deref (pointer-offset argv 1)) "build"))
+    (false (source-command argc argv))
+    (true
+      (match (signed:lt (base:convert argc) 4) (true (usage)) (false (build-command argc argv))))))
+
+(base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (match
+    (base:and-then
+      (base:not (signed:lt (base:convert argc) 2))
+      (base:or
+        (equal (deref (pointer-offset argv 1)) "--version")
+        (equal (deref (pointer-offset argv 1)) "-V")))
+    (true
+      (match (signed:eq (base:convert argc) 2)
+        (true (do (m:text 1 constants:compiler-version) (m:text 1 "\n") 0))
+        (false (usage))))
+    (false (command argc argv))))

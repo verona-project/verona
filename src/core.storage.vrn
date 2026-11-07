@@ -1,0 +1,91 @@
+(import base)
+(import core.model :as m)
+(import core.check :as check)
+(import core.numeric :as num)
+(import foundation.compat.arithmetic :as n)
+
+; Native 64-bit object layout, shared by the managed evaluator's byte storage.
+; Pointer values are opaque eight-byte tokens. Booleans occupy one byte.
+(base:type layout (product (size u64) (alignment u64)))
+
+(base:function maximum ((a u64) (b u64)) u64
+  (match (n:gt a b) (true a) (false b)))
+
+(base:function add ((c m:context) (a u64) (b u64)) u64
+  (do (m:require c 0 (n:le a (n:sub (base:maxBound) b)) "object layout overflow") (n:add a b)))
+
+(base:function align ((c m:context) (size u64) (alignment u64)) u64
+  (let ((rest u64 (num:remainder size alignment)))
+    (match rest (0 size) (_ (add c size (n:sub alignment rest))))))
+
+(base:function fields ((c m:context) (id u64) (size u64) (alignment u64)) layout
+  (match id
+    (0 (layout (align c size alignment) alignment))
+    (_
+      (let ((part layout (of c (check:parameter-type c id))))
+        (fields
+          c
+          (m:next c id)
+          (add c (align c size (field part alignment)) (field part size))
+          (maximum alignment (field part alignment)))))))
+
+(base:function cases ((c m:context) (id u64) (size u64) (alignment u64)) layout
+  (match id
+    (0 (layout (align c size alignment) alignment))
+    (_
+      (let ((part layout (fields c (m:next c (m:child c id)) 0 1)))
+        (cases
+          c
+          (m:next c id)
+          (maximum size (field part size))
+          (maximum alignment (field part alignment)))))))
+
+(base:function union-layout ((c m:context) (ty u64)) layout
+  (cases c (check:type-components c ty) 0 1))
+
+(base:function union-offset ((c m:context) (ty u64)) u64
+  (align c 4 (field (union-layout c ty) alignment)))
+
+(base:function of ((c m:context) (ty u64)) layout
+  (base:cond
+    ((n:eq ty 2) (layout 1 1))
+    ((num:integer-type ty) (let ((size u64 (n:div (num:width ty) 8))) (layout size size)))
+    ((n:eq ty 12) (layout 4 4))
+    ((match ty (1 true) (11 true) (13 true) (_ false)) (layout 8 8))
+    (true
+      (match (check:type-kind c ty)
+        (34 (layout 8 8))
+        (20 (fields c (check:type-components c ty) 0 1))
+        (22 (fields c (check:type-components c ty) 0 1))
+        (49
+          (let
+            ((part layout (of c (check:array-element c ty))) (count u64 (check:array-length c ty)))
+            (do
+              (match (field part size)
+                (0 unit)
+                (_
+                  (m:require
+                    c
+                    0
+                    (n:le count (n:div (base:maxBound) (field part size)))
+                    "object layout overflow")))
+              (layout (n:mul count (field part size)) (field part alignment)))))
+        (21
+          (let
+            ((payload layout (union-layout c ty))
+             (alignment u64 (maximum 4 (field payload alignment))))
+            (layout (align c (add c (union-offset c ty) (field payload size)) alignment) alignment)))
+        (_ (do (m:error c 0 "incomplete object layout") (layout 0 1)))))))
+
+(base:function component-offset ((c m:context) (fields u64) (index u64) (offset u64)) u64
+  (match fields
+    (0 offset)
+    (_
+      (let
+        ((part layout (of c (check:parameter-type c fields)))
+         (start u64 (align c offset (field part alignment))))
+        (match index
+          (0 start)
+          (_ (component-offset c (m:next c fields) (n:sub index 1) (add c start (field part size)))))))))
+
+(export align layout of component-offset union-offset fields)

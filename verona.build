@@ -1,0 +1,22 @@
+(executable
+  verona
+  (root core.cli)
+  (version "0.1.0")
+  (module-path "src")
+  (module-path "projects/base/src")
+  (module-path "projects/foundation/src")
+  (module-path "projects/libc/src")
+  (module-path "projects/llvm/src")
+  (library "LLVM")
+  (optimize 2))
+
+(executable
+  compiler-tests
+  (root suite)
+  (module-path "tests")
+  (module-path "src")
+  (module-path "projects/base/src")
+  (module-path "projects/foundation/src")
+  (module-path "projects/libc/src")
+  (module-path "projects/testing/src")
+  (optimize 2))

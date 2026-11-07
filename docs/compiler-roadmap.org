@@ -1,458 +1,163 @@
-#+TITLE: Verona Compiler: Current Status and Remaining Work
+#+TITLE: Verona Compiler Roadmap
 #+DATE: 2026-11-07
 #+STARTUP: overview
 
-* Purpose and sources of truth
-This is the maintained implementation plan for the compiler and evaluator written
-in Verona. It consolidates the former initial-scope, foundations, reader,
-type-checking, evaluator, code-generation, structured-type, language-expansion,
-self-hosting, and project-tool plans and the compiler's SELF_HOSTING.md checklist.
-Those documents have been removed; their historical versions remain in Git.
+* Current baseline
 
-Use this document for status and next steps, and these references for contracts:
-- [[file:../projects/compiler/README.md][Compiler commands, syntax, representations, ownership, and limits]].
-- [[file:API.md][Reference compiler and language API]].
-- [[file:compiler-boolean-operations.org][Eager and short-circuit Boolean operations]].
-- [[file:self-hosted-project-audit.md][Maintained project-audit commands and policies]].
+The maintained compiler is written in Verona and lives at the repository root.
+Its source is in =src/=, its manifest is =verona.build=, and its tests are in
+=tests/=. The Common Lisp implementation is archived separately in the
+=verona-sbcl-compiler= repository and is no longer part of the build.
 
-The Common Lisp compiler in src/ is the behavior reference for reading, module
-resolution, expansion, checking, specialization, diagnostics, LLVM lowering,
-native ABI, linking, and builds. Port its rules and tests; identify differences
-explicitly. The evaluator is implemented in Verona and does not require a Common
-Lisp interpreter or runtime. Retain the reference compiler for bootstrap and
-recovery. Its removal and performance tuning are separate work.
+The local =build/verona= executable is the current development seed. It can read,
+check, evaluate, compile, and rebuild the compiler. Generated binaries and test
+evidence under =build/= are not source inputs and are excluded from version
+control.
 
-Read AGENT.md, projects/compiler/AGENTS.md, and /Users/dias/.codex/RTK.md before
-implementation. Work in small validated steps. Before each item, describe the
-reference code/tests involved, supporting features needed, and remaining gaps.
+The Nix flake supplies LLVM/Clang 23, Python, Autoconf, and Automake on
+=aarch64-darwin=, =aarch64-linux=, and =x86_64-linux=. The Make/Autoconf build
+interface is being recreated for the root compiler. Projects under =projects/=
+remain in their current locations and are outside the immediate cleanup work.
 
-* Verified baseline
-** Current clean-checkout checkpoint
-The release gate passed for root revision
-00d572d259b9ff63f0e8f5d87a326069e92a51f8 and compiler revision
-a891dc4d9b8f9cd9a957c5366862af5121d7a209, using the pinned submodules,
-LLVM/Clang 23.1.0, SBCL 2.6.8, and arm64 Darwin 25.1.0.
-The run completed on 2026-11-07.
+* Sources of truth
 
-Command: make verify-compiler-release in the pinned Nix shell. The isolated
-checkout passed make test, a fresh A/B/C bootstrap, the maintained project audit
-using that run’s C, distribution inspection, and final source-cleanliness checks.
-Each A/B/C passed 126 regressions and 64 shared fixtures. B and C compared exactly.
-All 26 audited targets had their intended outcomes, including seven libraries,
-two expected failures, and the explicitly build-only echo server.
+- [[file:../README.md][Compiler commands, syntax, representations, ownership, and limits]].
+- =tests/compiler_contracts.json= for language, ABI, and CLI dispositions.
+- =tests/compile_time_parity.json= for the compile-time helper API.
+- [[file:compiler-boolean-operations.org][Boolean operation contracts]].
+- =tests/test_core.py= for compiler regressions.
+- =tests/shared/fixtures.json= for evaluator/native behavioral fixtures.
 
-Clean B/C SHA-256:
-#+begin_example
-bb912c98e52c0998e86dfdb7e76ce1916a00245262b2ddcf3d096b3ad75ec959
-#+end_example
-Source distribution verona-0.1.0.tar.gz SHA-256:
-#+begin_example
-167c5cef1481dd27cc2e50034c7ffabcab32bccd7b2232b8d36218b66bc3100b
-#+end_example
+The archived compiler is historical evidence, not a build dependency. Current
+Verona source, tests, and documented intentional differences define maintained
+behavior.
 
-Evidence:
-- [[file:../build/compiler-release/run-7jxil15y/result.json][Clean release result, revisions, commands, toolchain, and hashes]].
-- [[file:../build/compiler-release/run-7jxil15y/bootstrap/run-o5ygxraa/result.json][Clean A/B/C comparison]].
-- [[file:../build/compiler-release/run-7jxil15y/projects/run-lmuul_0t/REPORT.md][Clean project audit]].
+* Current validation
 
-The preceding workspace gate also passed in build/self-hosting/run-nk1rr0hq,
-with B/C each 993,144 bytes and SHA-256
-bdf9e70af5864416608b00fc6ea1be7b459981e170b252e18484082f8ed59836;
-its selected C passed build/self-hosted-projects/run-8a682sfv. That bootstrap
-captured a working-tree snapshot before the implementation commits. Exact B/C
-equality is established within each run. The different clean/workspace hashes
-do not establish reproducibility across checkout paths. Native execution on
-other hosts remains unverified; foreign-object checks have narrower scope.
-This documentation update records the tested revision; it was not part of that
-release archive.
+Enter the pinned development shell:
 
-** Target-option and default-output checkpoint
-Root revision fa27be1aadef77bd5ab319c73417ae43c5df3bae and compiler revision
-26ef66d implement direct --cpu/--features target-machine configuration and
-source-adjacent default output paths. On arm64 Darwin with LLVM 23, the focused
-tests, 127 compiler regressions, 64 evaluator/native shared fixtures, LLVM binding
-suite, and compiler-support suite passed. A fresh A/B/C bootstrap then passed the
-same compiler suites at every stage and compared B/C exactly. Each B/C compiler
-is 993,224 bytes with SHA-256:
-
-#+begin_example
-ca44acb5de4f6ed79f63480f80858dfc66931006f3f3f3973d1c2115eecd5121
-#+end_example
-
-The selected C passed all 26 maintained project-audit targets. Evidence:
-- [[file:../build/self-hosting/run-d_6es0ns/result.json][A/B/C comparison]].
-- [[file:../build/self-hosting/run-d_6es0ns/inputs.json][Revisions, toolchain, inputs, and options]].
-- [[file:../build/self-hosted-projects/run-4nc_8e1e/REPORT.md][Project audit]].
-
-This documentation-only update follows the tested revision and does not change
-the compiler inputs validated by that checkpoint.
-
-** Historical checkpoints
-Self-hosting has been achieved on arm64 Darwin with LLVM 23 and the existing
-64-bit C ABI. It is not an outstanding language milestone.
-
-| Artifact | Built by |
-|----------+----------|
-| A | Common Lisp compiler compiling the Verona compiler source |
-| B | A compiling the actual compiler entry point and dependency graph |
-| C | B compiling the same source and dependency graph |
-
-The recorded run build/self-hosting/run-dxxqndnh passed all three builds,
-87 regressions and 47 shared fixtures at each stage, and exact B/C byte comparison.
-B and C are each 771,144 bytes with SHA-256:
-
-#+begin_example
-ce00eb412f4169dce68da8420c1933cb0fc08e316993f6370ab86892f92da5e4
-#+end_example
-
-Later self-hosted rebuilds added project support. The maintained audit
-build/self-hosted-projects/run-9o40vzhb passed all 26 inventoried targets:
-17 normal executables, seven libraries, and two intentional failures at their
-expected analysis/link phases. Applicable runtime and generated-header checks
-passed; echo-server is explicitly build-only. Projects build directly through
-verona-core build, including the compiler's own manifest. That recorded
-core validation reported 117 regressions and 60 shared fixtures, plus 33 driver
-checks and the support suite.
-
-These records establish different facts: the earlier gate proves a complete
-A/B/C rebuild and exact equality for that source snapshot; later self-hosted
-rebuilds and the project audit exercise newer features. Those later changes had
-not repeated the complete A/B/C comparison before the current checkpoint above.
-That audit recorded working sources and did not certify a clean release checkout. Counts are dated evidence,
-not permanent expectations for a growing suite.
-
-Evidence is generated locally and excluded from source control:
-- [[file:../build/self-hosting/run-dxxqndnh/result.json][Original successful bootstrap result]].
-- [[file:../build/self-hosted-tools/manifests-1duny4qr/verification.json][Manifest and self-hosted rebuild validation]].
-- [[file:../build/self-hosted-projects/run-9o40vzhb/REPORT.md][Maintained project-audit summary]].
-- [[file:../build/self-hosted-projects/run-9o40vzhb/results.json][Project commands, compiler provenance, inputs, and outcomes]].
-These links require the original local build directories. Preserve the recorded
-facts above when cleaning generated output, and replace them with new evidence
-after rerunning the gates.
-
-* Implemented capabilities
-Do not reopen these as missing features without a concrete failing case:
-- Source-aware reader, indexed syntax, named modules, ordered search roots,
-  import aliases, exports, dependency-first collection, and reader features.
-- Lexical bindings, sequencing, direct and indirect calls, recursion,
-  conditionals, Boolean operations, and source diagnostics.
-- Eight integer widths, f32/f64, concrete conversions, wrapping arithmetic,
-  comparisons, bit operations, data literals, and character literals.
-- Products, tuples, sums, fixed-size arrays, transparent aliases, opaque handles,
-  recursive pointer fields, and the documented shallow pattern forms.
-- Address-taking, pointer offsets, reads/writes, mutable globals, managed
-  evaluator storage, function pointers, native calls and C ABI adapters in
-  compiled programs. Runtime evaluation of native calls is restricted below.
-- Concrete generic overloads, constrained parametric specialization, protocol
-  evidence, default numeric dispatch, and pointer equality.
-- Source-defined macros, quote/quasiquote/unquote/splicing, declaration batches,
-  expression expansion caching, reductions, session state, nth, and plist-ref.
-- LLVM construction/verification/object emission, argc/argv entry points,
-  native exports, C headers, executable/object/static/shared artifact output.
-- Declarative build TARGET OUTPUT-DIRECTORY, manifest-relative paths, native
-  dependencies, optimization 0–3, version metadata, features, and target facts.
-- Target selection and C ABI support for AArch64/x86-64 Darwin/Linux with
-  64-bit little-endian pointers; cross-object checks complement host execution.
-
-* Remaining steps, in order
-** DONE 1. Consolidate documentation
-Keep one current roadmap. Remove superseded plans, fix contradictory README
-passages, repair incoming links, and update distribution inputs. Keep the detailed
-compiler reference and audit guide. Preserve source/ownership and validation
-decisions below instead of repeating historical implementation logs.
-
-Completion: no live links or distribution entries point at deleted documents,
-and current references agree that self-hosting and manifest builds are implemented.
-
-** DONE 2. Repeat the complete gate for the current source
-Run in the pinned Nix development shell:
 #+begin_src sh
-make test-compiler-core test-compiler-support test-llvm-bindings
-make bootstrap-compiler
-make test-self-hosted-projects SELF_HOSTED_COMPILER=/absolute/path/to/new/run/C/verona-core
+nix develop --offline path:.
 #+end_src
 
-Select C from that newly successful run, rather than an older compiler. Record
-source revisions/hashes, submodule state, toolchain, target, options, and evidence
-paths. Investigate failures or B/C differences before updating the baseline.
-Do not infer equality of newer binaries from the older successful run.
+Check the compiler implementation with the current seed:
 
-Completion: current A/B/C each pass the current shared/regression suites; B and C
-compare exactly; the selected C passes the maintained project audit. Record
-whether the checkout was clean. A later clean-checkout release gate is step 10.
+#+begin_src sh
+build/verona check src/core.cli.vrn \
+  --module-path src \
+  --module-path projects/base/src \
+  --module-path projects/foundation/src \
+  --module-path projects/libc/src \
+  --module-path projects/llvm/src
+#+end_src
 
-** DONE 3. Establish an explicit reference-parity inventory
-Compare docs/API.md and src/ with the Verona implementation and tests. For every
-public reader, macro, semantic, diagnostic, ABI, and driver behavior, mark it
-implemented/tested, missing, intentionally restricted, or needing investigation.
-Attach a source/test reference to each entry. All projects building is evidence
-for that corpus, not proof of complete language or CLI parity.
+Run the regression and shared suites:
 
-The inventory is projects/compiler/tests/compiler_contracts.json: 22 contract
-families with reference paths, test names, retained limits, and planned checks.
-The helper-level inventory is projects/compiler/tests/compile_time_parity.json.
-The review found missing early return and CPU/feature CLI options. Early return
-is a retained limitation for now by user decision on 2026-11-07; CPU/feature
-CLI options remain parity gaps.
+#+begin_src sh
+python3 tests/test_core.py build/verona
+python3 tests/shared_suite.py build/verona
+#+end_src
 
-Start with core.expand.vrn and the helper inventory. Keep existing behavior covered
-while extending it. Do not classify documented reference limitations as bugs in
-the new compiler or silently extend the language during a parity port.
+Rebuild the compiler through its root manifest:
 
-Completion: each public contract has an explicit disposition and each missing
-contract has a focused failing test or a documented planned test.
+#+begin_src sh
+build/verona build verona build/compiler
+python3 tests/test_core.py build/compiler/verona
+python3 tests/shared_suite.py build/compiler/verona
+#+end_src
 
-** DONE 4. Complete the compile-time helper API
-Implementation now covers all five batches below, with immutable arena-owned
-arbitrary-precision integers and generated integer/float/data literals that retain
-expansion origins. The 126-test regression suite and 64 shared fixtures pass;
-reference comparisons, independent big-integer/float expectations, malformed
-inputs, numeric boundaries, and work limits are covered. The fresh workspace and
-clean-checkout bootstraps and project audits also passed, as recorded above.
+The replacement Makefile should provide concise targets for these commands
+without introducing a second implementation of build or test policy.
 
-Port related operations in small batches, comparing reference behavior and
-invalid-argument diagnostics before proceeding to the next batch:
-1. Syntax builders and identifier helpers: definitions, compiler:call,
-   compiler:map, compiler:reverse, symbol/name operations, and keyword helpers.
-   Preserve proper-list validation, association/order, source identity, and
-   qualification. Existing reduce/reduce-right and symbol-concat stay covered.
-2. Lists and collections: append, length, take/drop/reverse, predicates,
-   remaining plist operations, and alist operations. Keep inputs immutable;
-   test empty values, invalid shapes, duplicate keys, and stored nil.
-3. Strings and conversions: concatenation, length, substring, comparisons,
-   prefix/suffix, split/join/replace, and number/string conversion. Port ASCII,
-   boundary, empty-separator, and invalid-input behavior exactly.
-4. Arithmetic and numeric predicates: +, -, *, /, quotient/remainder,
-   min/max/abs, ordered comparisons, and number?/integer?. Compile-time integers
-   require arbitrary precision, unlike fixed-width runtime values. Choose and
-   test storage/ownership first. Preserve exact integer arithmetic, reference
-   floating conversion/overflow behavior, and range checking on emitted literals.
-5. Compilation-context queries: compiler:feature?, compiler:features, and
-   compiler:target-info. Report selected-target facts, keep session state
-   isolated, and never substitute host facts for foreign targets.
+* Implemented compiler capabilities
 
-Completion for each batch: positive/negative reference comparisons, expansion
-origin diagnostics, limits and cleanup tests, and evaluator/native agreement for
-the programs produced by macros. Rebuild the compiler with a verified self-hosted
-compiler and run the affected projects. Mark individual operations complete only
-after verification; unlisted API gaps found in step 3 also require disposition.
+- Source-aware reader, indexed syntax, modules, imports, aliases, exports,
+  dependency collection, source-defined macros, and reader features.
+- Lexical bindings, sequencing, calls, recursion, conditionals, pattern matching,
+  diagnostics, and whole-program checking.
+- Signed and unsigned integer widths, f32/f64, conversions, wrapping arithmetic,
+  comparisons, bit operations, data literals, and u8 character literals.
+- Products, tuples, sums, arrays, transparent aliases, opaque handles, pointers,
+  mutable globals, function pointers, native calls, and C ABI adapters.
+- Concrete generic overloads, constrained specialization, protocols, default
+  numeric dispatch, and pointer equality.
+- Compile-time syntax construction, collections, strings, arbitrary-precision
+  arithmetic, conversion, compilation context, and isolated session state.
+- LLVM construction, verification, IR printing, object emission, native exports,
+  generated C headers, and executable/object/static/shared artifacts.
+- Manifest builds, optimization levels, reader features, target triples, CPU and
+  machine features, native link options, and default artifact paths.
+- AArch64 and x86-64 target support for Darwin and Linux with 64-bit
+  little-endian pointers.
 
-** DONE 5. Reconcile macro hygiene and execution scope
-The earlier plan requested lexical hygiene. Current expansion follows the
-reference compiler's rehydration of returned syntax in the invocation module;
-that is not a demonstration of capture-free lexical syntax contexts.
+* Next work
 
-Decision: retain reference-compatible invocation-module rehydration and capture.
-The new test_macro_reference_capture_contract verifies a generated binder
-capturing a returned reference; existing module/state/cache tests remain covered.
-Lexical hygiene is a future language extension, not part of this port.
+** 1. Restore the root build interface
 
-Specify any future extension using definition-site references, invocation-site
-arguments, generated binders, shadowing, repeated unquotes, and qualified names.
-Choose whether reference-compatible behavior remains the contract or a hygienic
-language extension is adopted. Document the decision before changing expansion;
-an extension needs coordinated reference compiler, Base, API, and manual changes.
+Create the new Autoconf/Automake files around the self-hosted compiler. The build
+must accept an explicit seed compiler, build =verona= from the root manifest, run
+the Python and Verona test suites, and install the resulting compiler. Do not
+restore SBCL, ASDF, CL-LLVM, or the archived IDE server.
 
-Retain source origins, once-per-source expansion caching, declaration order,
-session-state isolation, step/depth budgets, and promotion of returned syntax
-before scratch cleanup. Keep dependency discovery explicit until macros that
-introduce imports have a specified loading/expansion order.
+Define how a fresh checkout obtains a compatible seed compiler. A local ignored
+=build/verona= is sufficient for development but not for a reproducible source
+release. The release process should either accept an explicit seed path or fetch
+a versioned compiler artifact with a recorded hash.
 
-Completion: the chosen contract and any deliberate-capture mechanism have
-focused capture, module-resolution, malformed-output, and cleanup tests. Verify
-that the required macro execution runs in Verona without a Lisp runtime.
+** 2. Disposition retained language restrictions
 
-** DONE 6. Specify the runtime evaluator's native-call boundary
-The runtime evaluator checks native declarations but fails explicitly when
-execution reaches a native call. It supports managed pointers, aggregates,
-mutation, and calls to Verona functions; it does not execute native allocation,
-file/process I/O, or arbitrary C calls. The macro evaluator is a separate syntax
-execution layer; do not conflate these capability surfaces.
+Early return remains out of scope by decision. If revisited, implement never-type
+checking, unreachable diagnostics, terminating LLVM control flow, evaluator
+cleanup, and focused tests together.
 
-Decision: retain the explicit native-call failure. Existing ABI tests and the new
-generated-native-symbol test check that evaluation rejects native execution while
-compiled execution succeeds. No managed/native pointer bridge is introduced.
+The following restrictions still need an explicit retain-or-implement decision:
 
-Any future native operations in interpreted execution need a separate contract. Keeping
-the current restriction is a valid documented scope choice. If native execution
-is required, define an explicit bridge: supported signatures, managed/native
-pointer conversion, ownership, callbacks, target restrictions, and failure cleanup.
-Do not pass managed pointer tokens to C as host addresses.
+- Pattern guards, nested structured patterns, and product destructuring.
+- Aggregate/computed constants and aggregate/runtime global initializers.
+- Generic inference and changing-type recursive specialization limitations.
+- Separate compilation and persistent compilation caches.
 
-Completion: supported calls have focused ABI, lifetime, callback, and failure
-tests; unsupported calls retain explicit outcomes and source traces. Shared
-fixtures declare applicability, so unavailable native evaluation is never
-mistaken for successful parity. This extension is not a prerequisite to the
-self-hosting already achieved.
+Character literals deliberately remain =u8= with explicit conversions rather
+than adopting a distinct character type and implicit widening.
 
-** TODO 7. Disposition remaining language restrictions
-The parity inventory retains the existing pattern, global-initializer, generic,
-and caching restrictions below. Character literals deliberately remain u8 with
-explicit conversions, as selected by the user on 2026-11-06; the reference has a
-distinct char type and implicit widening. README.md and API.md record this.
+** 3. Finish compiler driver review
 
-Early return is retained as a documented limitation for now by user decision on
-2026-11-07. If it is implemented later, add never-type checking, unreachable
-diagnostics, terminating LLVM branches/joins, and evaluator frame/storage cleanup
-together. The inventory records the planned cases for that future work.
+Review remaining CLI and artifact behavior against the contract inventory. Focus
+on option validation, search and link ordering, failure cleanup, exported symbols,
+headers, target facts, installation, and release behavior. Projects and package
+management are deferred until the compiler build interface is stable.
 
-Review against the reference before scheduling implementation:
-- Guards, nested structured patterns, and product destructuring are unsupported.
-- Aggregate/computed constant initializers and aggregate/runtime global
-  initializers are unsupported; some restrictions match the reference compiler.
-- Generic inference and changing-type recursive specialization retain the
-  documented restrictions; do not assume full generic-language parity from
-  the compiler successfully specializing its own dependencies.
-- Separate compilation and persistent caching are not implemented.
+** 4. Broaden native validation
 
-Completion: each restriction is explicitly retained or has an approved language
-contract and implementation tests. Extend the checker, evaluator, native lowering,
-typed result protocol, diagnostics, and ownership rules together where needed.
-These are follow-up decisions, not failed self-hosting criteria.
+Run native ABI, callback, shared-library, and compiler-rebuild tests on each
+supported host. Foreign object inspection does not prove execution. New hosts or
+architectures require target facts, layout, ABI classification, native execution,
+and clear rejection tests.
 
-** TODO 8. Finish driver and workflow parity review
-Manifest builds and all four direct artifact kinds already work. Version reporting
-(--version/-V) and --output as an alias for -o are now implemented and tested.
-Direct compilation now derives source-adjacent default names for all four artifact
-kinds. --cpu and --features configure LLVM target-machine creation, and target
-context reports the selected CPU. Focused tests cover a foreign object, option
-validation, compile-time target information, and default artifact/header paths.
-Use the inventory
-from step 3 to find actual remaining driver/CLI differences rather than rebuilding
-those features. Review option validation, search/link order, exported symbol and
-header contracts, failure cleanup, target facts, and developer tooling separately.
+** 5. Optional compiler improvements
 
-Manifests currently describe individual targets, not a dependency build graph;
-build native dependencies first. The maintained audit has its own reviewed
-dependency policy. Package management, installation/release integration, and IDE
-integration with the self-hosted compiler require explicit scope and parity checks
-before claiming replacement of every reference-tool workflow.
+Debug information, native stack reporting, an LLVM IR optimization pipeline,
+closures, bytecode/JIT execution, tail-call optimization, and native calls from
+the evaluator remain separately scoped work. None is required to maintain the
+current self-hosted compiler.
 
-Keep the known wc bare '-' option issue separate from compiler parity: '-- -'
-works, while bare '-' was rejected in the recorded checks. Preserve an independent
-tool regression if that source bug is fixed.
+* Design constraints
 
-Completion: each inventoried workflow has documented invocation and positive/
-negative checks. All 26 audited targets retain their intended outcomes, fresh
-libraries and headers are used, and no host-compiler fallback is introduced.
-
-** TODO 9. Broaden portability and optional tooling
-Run native shared, ABI, callback, library-client, and project suites on each
-supported architecture/OS; foreign object inspection alone does not prove execution.
-Extend the bootstrap runner beyond its arm64 Darwin prerequisite only with those
-checks and target-specific native tools in place. New architectures or layouts
-need target facts, value layout, ABI classification, and clear rejection tests.
-
-Debug information, native call-stack reporting, and custom optimization pipelines
-remain deferred. Optimization flags currently select LLVM target-machine
-code-generation levels, not an IR pass pipeline. Treat these as separately scoped
-items with diagnostics or semantic-equivalence checks appropriate to the change.
-Closures, bytecode/JIT execution, and tail-call optimization are also outside the
-current completion contract unless explicitly selected as new work.
-
-Completion: publish the tested host/target/optimization matrix with exact scope;
-keep unsupported combinations explicit. Preserve source-aware runtime failures
-even while native stack traces remain unavailable.
-
-** DONE 10. Establish a clean-checkout release checkpoint
-The new make verify-compiler-release command implements this gate in
-scripts/verify-compiler-release.py. It rejects dirty/unpinned inputs, clones the
-selected revision and local pinned submodules without network fallback, retains
-logs, checks exact bootstrap equality, audits the selected C, and inspects the
-source distribution. Seven Python runner tests pass, and the full clean release run
-passed for revision 00d572d as recorded above.
-
-Record every root/submodule revision and pinned dependency/toolchain. Build from
-a clean checkout with fresh outputs, repeat step 2, and validate the selected
-self-hosted compiler's project manifests without existing native Verona artifacts.
-Run the appropriate broader reference suites, ending with make test.
-
-Verify release packaging includes the roadmap, references, manifests, and audit
-tooling while excluding build artifacts. Document how a user selects a verified
-compiler, enters the pinned shell, builds dependencies, builds a project, and
-reproduces validation. Publish hashes and reproducibility scope separately from
-feature coverage. Do not remove the recovery compiler as a side effect.
-
-Completion: documented clean-checkout reproduction of self-hosting, artifact
-comparison, project builds, and required suites; all retained limitations are
-listed and all release inputs are pinned.
-
-* Design decisions to preserve throughout
-** Shared analysis and representations
-Reader syntax is separate from checked expressions. Both execution paths consume
-the same resolved typed tape, with stable declaration/binder/type IDs and source
-spans; neither backend repeats name lookup or type checking. Check unused bodies,
-recover across independent semantic errors, suppress dependent cascades, and never
-execute the internal error type. Keep macro expansion ahead of semantic checking.
-
-Products and sums have nominal identity; tuples have structural identity.
-LLVM computes actual target layouts. Private structured values use typed LLVM
-structs and sum case storage; C objects use their separately specified layouts and
-ABI conversion. Do not assume payload sizes or expose a private layout as C ABI.
-
-Preserve left-to-right operand/argument/construction order, single scrutinee
-evaluation, lazy branches, exact numeric types, wrapping integer operations, and
-guarded invalid division. Observable failure order is part of the contract.
-
-** Mixed allocation and ownership
-Use indices across growable arrays. Keep source, syntax, names, checked program,
-per-run frames/values, managed regions, and native handles alive for their clients.
-Choose scratch/session arenas or reclaiming allocators by actual lifetime; avoid
-retaining every old buffer during growth. Collections store shallow descriptors,
-so nested resources need explicit cleanup.
-
-Evaluator outcomes own aggregate/managed storage and traces. Returned values
-survive callee cleanup; borrowed input storage is validated/copied according to
-the API. Destroy success and failure outcomes. A checked program must remain
-reusable after success, language failure, limit exhaustion, or allocation failure.
-Test expired pointers, bounds, alignment, read-only literals, repeated runs, and
-injected allocation failures. Release files/process/LLVM handles independently
-of arena reclamation.
-
-** Native backend and tool boundary
-Use the Verona LLVM bindings for construction, verification, printing, and object
-emission. Keep target-machine/module/builder ownership in the backend, and artifact
-policy, native tools, output paths, and manifests in the driver. Pass argv vectors,
-not shell strings. Retain temporary-object and argument-storage cleanup on every
-outcome. Pin library sources through submodule revisions and host tools through
-the Nix environment; record the actual linked LLVM and native tool configuration.
-
-** Independent expectations and complete results
-Keep focused reader, resolution, checking, expansion, ABI, and diagnostic tests
-in addition to shared behavioral fixtures. Backend agreement alone can conceal
-a common frontend error. Fixtures name source/modules, entry/arguments, and an
-independent typed expected value or expected failure with relevant locations.
-
-The current shared harness supports nullary main; arbitrary checked entries and
-typed arguments have reusable-evaluator coverage. Extend harness applicability
-explicitly before requiring new entry conventions. Encode full signed/unsigned
-values, float bits, and nested aggregate type/case/component identity. Process
-status is not a full-value protocol. Distinguish language, resource, tool, and
-internal failures; native stacks need not match evaluator traces.
-
-** Reproducible validation
-The bootstrap command uses fresh A/B/C directories and the same selected source
-snapshot. It records hashes, revisions/patches, tool paths/versions, target/ABI,
-optimization, link settings, and relevant environment; it stops on failure or
-input changes and retains diagnostics/IR. A uses manifest optimization 2; B/C
-currently use explicit compile at -O0 with module paths and the LLVM dependency.
-Manifest support is implemented even though the gate retains explicit commands.
-
-Run each stage's evaluator and native suites before exact B/C comparison. Do not
-normalize meaningful instruction, constant, control-flow, signature, or helper
-differences. If exact equality fails, record behavioral/IR findings without
-reporting the exact gate as passed. Broaden normalization only for explicitly
-identified irrelevant metadata. Keep reproducibility status distinct from
-behavioral coverage.
-
-The project audit selects an explicit compiler, isolates source/output, records
-provenance, checks fresh native libraries/headers, and validates intended negative
-phases. Never substitute a host-built artifact or count a stale output as success.
-See the audit guide for maintained policy and timeout/dependency behavior.
+- Reader syntax and checked expressions remain separate. Evaluation and LLVM
+  lowering consume the same resolved typed representation.
+- Preserve source locations, left-to-right evaluation, lazy branches, wrapping
+  integer behavior, failure ordering, and explicit ownership.
+- Keep LLVM ownership in the backend and artifact/link policy in the driver.
+  Invoke native tools with argument vectors, never shell command strings.
+- Destroy owning success and failure values. Keep borrowed source, syntax, names,
+  checked programs, regions, and native handles alive for their consumers.
+- Maintain independent expected results in focused tests; backend agreement alone
+  can conceal a shared frontend error.
+- Keep generated outputs outside source control and record the seed compiler,
+  toolchain, source revision, options, and hashes for release validation.
 
 * Updating this document
-Change a TODO only when its completion evidence exists. Record the source snapshot,
-commands, outcomes, limits, and evidence paths beside the item; distinguish tests
-run now from inherited records. After each validated change, update the relevant
-API/manual/README contract and the parity inventory. Keep this roadmap current
-instead of adding another overlapping status plan.
+
+Update this roadmap when scope or retained restrictions change. Do not append
+historical implementation diaries; Git history records completed work. Keep the
+current baseline, validation commands, and next actionable compiler work accurate.

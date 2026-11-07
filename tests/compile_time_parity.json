@@ -1,0 +1,1067 @@
+{
+  "version": 1,
+  "scope": "Compile-time operations added or pending in roadmap step 4. Existing core helpers retain their focused tests.",
+  "operations": [
+    {
+      "name": "compiler:call",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (compiler:call 'wrap '(value)) '(wrap (value)))",
+        "(equal? (compiler:call 'm:f 'x) '(m:f x))"
+      ],
+      "negative": [
+        {
+          "expression": "(compiler:call 42)",
+          "diagnostic": "callable name"
+        },
+        {
+          "expression": "(compiler:call)",
+          "diagnostic": "callable name"
+        }
+      ]
+    },
+    {
+      "name": "compiler:map",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (compiler:map 'pair '(a b) '(x y)) '((pair a x) (pair b y)))",
+        "(equal? (compiler:map 'f nil nil) nil)",
+        "(equal? (compiler:map 'wrap '((a) (b))) '((wrap (a)) (wrap (b))))"
+      ],
+      "negative": [
+        {
+          "expression": "(compiler:map 'f '(a) nil)",
+          "diagnostic": "equal length"
+        },
+        {
+          "expression": "(compiler:map 'f nil '(a))",
+          "diagnostic": "equal length"
+        },
+        {
+          "expression": "(compiler:map 'f)",
+          "diagnostic": "proper list"
+        },
+        {
+          "expression": "(compiler:map 'f 1)",
+          "diagnostic": "list"
+        }
+      ]
+    },
+    {
+      "name": "compiler:reverse",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (compiler:reverse '(a b c)) '(c b a))",
+        "(equal? (compiler:reverse nil) nil)"
+      ],
+      "negative": [
+        {
+          "expression": "(compiler:reverse 1)",
+          "diagnostic": "list"
+        }
+      ]
+    },
+    {
+      "name": "reverse",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (reverse '(a b c)) '(c b a))",
+        "(equal? (reverse nil) nil)"
+      ],
+      "negative": [
+        {
+          "expression": "(reverse 1)",
+          "diagnostic": "list"
+        }
+      ]
+    },
+    {
+      "name": "symbol",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (symbol-name (symbol \"answer\")) \"answer\")",
+        "(symbol? (symbol \"true\"))"
+      ],
+      "negative": [
+        {
+          "expression": "(symbol \"\")",
+          "diagnostic": "non-empty"
+        },
+        {
+          "expression": "(symbol 1)",
+          "diagnostic": "string"
+        }
+      ]
+    },
+    {
+      "name": "keyword",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (symbol-name (keyword \"answer\")) \"answer\")",
+        "(symbol? (keyword \"true\"))"
+      ],
+      "negative": [
+        {
+          "expression": "(keyword \"\")",
+          "diagnostic": "non-empty"
+        },
+        {
+          "expression": "(keyword 1)",
+          "diagnostic": "string"
+        }
+      ]
+    },
+    {
+      "name": "symbol-name",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (symbol-name 'answer) \"answer\")"
+      ],
+      "negative": [
+        {
+          "expression": "(symbol-name 'm:x)",
+          "diagnostic": "symbol"
+        },
+        {
+          "expression": "(symbol-name true)",
+          "diagnostic": "symbol"
+        }
+      ]
+    },
+    {
+      "name": "keyword-concat",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (keyword-concat (keyword \"left-\") (symbol \"right\")) 'left-right)"
+      ],
+      "negative": [
+        {
+          "expression": "(keyword-concat)",
+          "diagnostic": "at least"
+        },
+        {
+          "expression": "(keyword-concat \"\")",
+          "diagnostic": "empty"
+        },
+        {
+          "expression": "(keyword-concat true)",
+          "diagnostic": "data or symbols"
+        }
+      ]
+    },
+    {
+      "name": "append",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (append '(a) nil '(b c)) '(a b c))",
+        "(equal? (append) nil)",
+        "(let ((x '(a b))) (and (equal? (append x '(c)) '(a b c)) (equal? x '(a b))))"
+      ],
+      "negative": [
+        {
+          "expression": "(append 1)",
+          "diagnostic": "list"
+        }
+      ]
+    },
+    {
+      "name": "length",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (length '(a b c)) 3)",
+        "(equal? (length \"a\\nb\") 3)",
+        "(equal? (length nil) 0)"
+      ],
+      "negative": [
+        {
+          "expression": "(length true)",
+          "diagnostic": "list"
+        }
+      ]
+    },
+    {
+      "name": "take",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (take 2 '(a b c)) '(a b))",
+        "(equal? (take 0 nil) nil)"
+      ],
+      "negative": [
+        {
+          "expression": "(take 2 '(a))",
+          "diagnostic": "bounds"
+        },
+        {
+          "expression": "(take -1 '(a))",
+          "diagnostic": "bounds"
+        }
+      ]
+    },
+    {
+      "name": "drop",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (drop 2 '(a b c)) '(c))",
+        "(equal? (drop 0 nil) nil)"
+      ],
+      "negative": [
+        {
+          "expression": "(drop 2 '(a))",
+          "diagnostic": "bounds"
+        },
+        {
+          "expression": "(drop -1 '(a))",
+          "diagnostic": "bounds"
+        }
+      ]
+    },
+    {
+      "name": "number?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(number? 1.5)"
+      ],
+      "negative": [
+        {
+          "expression": "(number?)",
+          "diagnostic": "argument"
+        },
+        {
+          "expression": "(number? 1.5 1.5)",
+          "diagnostic": "argument"
+        }
+      ]
+    },
+    {
+      "name": "integer?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(integer? 99999999999999999999999999999)"
+      ],
+      "negative": [
+        {
+          "expression": "(integer?)",
+          "diagnostic": "argument"
+        },
+        {
+          "expression": "(integer? 99999999999999999999999999999 99999999999999999999999999999)",
+          "diagnostic": "argument"
+        }
+      ]
+    },
+    {
+      "name": "string?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(string? \"hello\")"
+      ],
+      "negative": [
+        {
+          "expression": "(string?)",
+          "diagnostic": "argument"
+        },
+        {
+          "expression": "(string? \"hello\" \"hello\")",
+          "diagnostic": "argument"
+        }
+      ]
+    },
+    {
+      "name": "symbol?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(symbol? 'm:x)"
+      ],
+      "negative": [
+        {
+          "expression": "(symbol?)",
+          "diagnostic": "argument"
+        },
+        {
+          "expression": "(symbol? 'm:x 'm:x)",
+          "diagnostic": "argument"
+        }
+      ]
+    },
+    {
+      "name": "keyword?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(keyword? ':name)"
+      ],
+      "negative": [
+        {
+          "expression": "(keyword?)",
+          "diagnostic": "argument"
+        },
+        {
+          "expression": "(keyword? ':name ':name)",
+          "diagnostic": "argument"
+        }
+      ]
+    },
+    {
+      "name": "list?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(list? nil)"
+      ],
+      "negative": [
+        {
+          "expression": "(list?)",
+          "diagnostic": "argument"
+        },
+        {
+          "expression": "(list? nil nil)",
+          "diagnostic": "argument"
+        }
+      ]
+    },
+    {
+      "name": "boolean?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(boolean? false)"
+      ],
+      "negative": [
+        {
+          "expression": "(boolean?)",
+          "diagnostic": "argument"
+        },
+        {
+          "expression": "(boolean? false false)",
+          "diagnostic": "argument"
+        }
+      ]
+    },
+    {
+      "name": "keyword-name",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(equal? (keyword-name ':name) \"name\")"
+      ],
+      "negative": [
+        {
+          "expression": "(keyword-name 'name)",
+          "diagnostic": "colon-prefixed"
+        }
+      ]
+    },
+    {
+      "name": "symbol->keyword",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(equal? (symbol->keyword 'name) ':name)",
+        "(equal? (symbol->keyword ':name) ':name)"
+      ],
+      "negative": [
+        {
+          "expression": "(symbol->keyword 'm:x)",
+          "diagnostic": "symbol"
+        }
+      ]
+    },
+    {
+      "name": "keyword->symbol",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(equal? (keyword->symbol ':name) 'name)"
+      ],
+      "negative": [
+        {
+          "expression": "(keyword->symbol 'name)",
+          "diagnostic": "colon-prefixed"
+        }
+      ]
+    },
+    {
+      "name": "string-concat",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (string-concat) \"\")",
+        "(equal? (string-concat \"a\" \"\\n\" \"b\") \"a\\nb\")"
+      ],
+      "negative": [
+        {
+          "expression": "(string-concat 1)",
+          "diagnostic": "string"
+        }
+      ]
+    },
+    {
+      "name": "string-length",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (string-length \"a\\nb\") 3)"
+      ],
+      "negative": [
+        {
+          "expression": "(string-length nil)",
+          "diagnostic": "string"
+        }
+      ]
+    },
+    {
+      "name": "substring",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (substring \"abcd\" 1 3) \"bc\")",
+        "(equal? (substring \"abcd\" 2) \"cd\")",
+        "(equal? (substring \"\" 0 0) \"\")"
+      ],
+      "negative": [
+        {
+          "expression": "(substring \"a\" 2)",
+          "diagnostic": "bounds"
+        },
+        {
+          "expression": "(substring \"ab\" 2 1)",
+          "diagnostic": "bounds"
+        }
+      ]
+    },
+    {
+      "name": "string=",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(string= \"abc\" (string-concat \"a\" \"bc\"))",
+        "(not (string= \"A\" \"a\"))"
+      ],
+      "negative": [
+        {
+          "expression": "(string= \"a\" 1)",
+          "diagnostic": "string"
+        }
+      ]
+    },
+    {
+      "name": "string-prefix?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(string-prefix? \"ab\" \"abc\")",
+        "(string-prefix? \"\" \"abc\")",
+        "(not (string-prefix? \"abcd\" \"abc\"))"
+      ],
+      "negative": []
+    },
+    {
+      "name": "string-suffix?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(string-suffix? \"bc\" \"abc\")",
+        "(string-suffix? \"\" \"abc\")",
+        "(not (string-suffix? \"ABC\" \"abc\"))"
+      ],
+      "negative": []
+    },
+    {
+      "name": "string-split",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(equal? (string-split \"a,,b,\" \",\") '(\"a\" \"\" \"b\" \"\"))",
+        "(equal? (string-split \"\" \",\") '(\"\"))"
+      ],
+      "negative": [
+        {
+          "expression": "(string-split \"abc\" \"\")",
+          "diagnostic": "empty"
+        }
+      ]
+    },
+    {
+      "name": "string-join",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(equal? (string-join '(\"a\" \"\" \"b\") \",\") \"a,,b\")",
+        "(equal? (string-join nil \",\") \"\")"
+      ],
+      "negative": [
+        {
+          "expression": "(string-join '(\"a\" 1) \",\")",
+          "diagnostic": "string"
+        }
+      ]
+    },
+    {
+      "name": "string-replace",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compile-time.lisp",
+      "positive": [
+        "(equal? (string-replace \"aaaaa\" \"aa\" \"x\") \"xxa\")",
+        "(equal? (string-replace \"abc\" \"x\" \"y\") \"abc\")"
+      ],
+      "negative": [
+        {
+          "expression": "(string-replace \"abc\" \"\" \"x\")",
+          "diagnostic": "empty"
+        }
+      ]
+    },
+    {
+      "name": "+",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (+) 0)",
+        "(= (+ 1 2 3) 6)",
+        "(= (+ 999999999999999999999999 1) 1000000000000000000000000)",
+        "(= (+ 1.25 2) 3.25)"
+      ],
+      "negative": [
+        {
+          "expression": "(+ true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "-",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (- 4) -4)",
+        "(= (- -4) 4)",
+        "(= (- 1000000000000000000000000 1) 999999999999999999999999)",
+        "(= (- 1.5 0.25) 1.25)"
+      ],
+      "negative": [
+        {
+          "expression": "(- true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "*",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (*) 1)",
+        "(= (* -12345678901234567890 98765432109876543210) -1219326311370217952237463801111263526900)",
+        "(= (* 1.25 2.0) 2.5)"
+      ],
+      "negative": [
+        {
+          "expression": "(* true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "/",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (/ 4 2) 2)",
+        "(= (/ 1 2) 0.5)",
+        "(= (/ -1 2) -0.5)",
+        "(= (/ 1 3 7) 0.047619047619047616)",
+        "(= (/ 4) 0.25)",
+        "(= (/ 1.5 2) 0.75)"
+      ],
+      "negative": [
+        {
+          "expression": "(/ 1 0)",
+          "diagnostic": "zero"
+        }
+      ]
+    },
+    {
+      "name": "quotient",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (quotient -7 3) -2)",
+        "(= (quotient 1000000000000000000000000 3) 333333333333333333333333)"
+      ],
+      "negative": [
+        {
+          "expression": "(quotient 1 0)",
+          "diagnostic": "zero"
+        }
+      ]
+    },
+    {
+      "name": "remainder",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (remainder -7 3) -1)",
+        "(= (remainder 1000000000000000000000000 3) 1)"
+      ],
+      "negative": [
+        {
+          "expression": "(remainder 1 0)",
+          "diagnostic": "zero"
+        }
+      ]
+    },
+    {
+      "name": "min",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (min -10000000000000000000000 2 -3) -10000000000000000000000)",
+        "(= (min 1 2.0) 1.0)"
+      ],
+      "negative": [
+        {
+          "expression": "(min true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "max",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (max -10000000000000000000000 -2 -3) -2)",
+        "(= (max 1.0 2) 2.0)"
+      ],
+      "negative": [
+        {
+          "expression": "(max true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "abs",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (abs -10000000000000000000000) 10000000000000000000000)",
+        "(= (abs -1.25) 1.25)"
+      ],
+      "negative": [
+        {
+          "expression": "(abs true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "=",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= 1 1.0 1)",
+        "(not (= 1 2))",
+        "(= -0 +0 000)",
+        "(and (= 0.0 -0.0) (not (equal? 0.0 -0.0)))"
+      ],
+      "negative": [
+        {
+          "expression": "(= true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "/=",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(/= 1 2 3)",
+        "(not (/= 1 2 1))",
+        "(not (/= 1 1.0))"
+      ],
+      "negative": [
+        {
+          "expression": "(/= true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "<",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(< -100000000000000000000000 -1 0 1)",
+        "(not (< 1 1))"
+      ],
+      "negative": [
+        {
+          "expression": "(< true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "<=",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(<= 1 1 2)",
+        "(not (<= 2 1))"
+      ],
+      "negative": [
+        {
+          "expression": "(<= true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": ">",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(> 3 2 1)",
+        "(not (> 1 1))"
+      ],
+      "negative": [
+        {
+          "expression": "(> true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": ">=",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(>= 2 2 1)",
+        "(not (>= 1 2))"
+      ],
+      "negative": [
+        {
+          "expression": "(>= true 1)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "number->string",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (number->string 123456789012345678901234567890) \"123456789012345678901234567890\")",
+        "(equal? (number->string -0) \"0\")",
+        "(equal? (number->string 1.25) \"1.25\")",
+        "(equal? (number->string 0.1) \"0.1\")",
+        "(equal? (number->string -0.0) \"-0.0\")",
+        "(equal? (number->string 1.0) \"1.0\")"
+      ],
+      "negative": [
+        {
+          "expression": "(number->string true)",
+          "diagnostic": "number"
+        }
+      ]
+    },
+    {
+      "name": "string->number",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(= (string->number \" 123456789012345678901234567890 \") 123456789012345678901234567890)",
+        "(= (string->number (number->string 1.25)) 1.25)",
+        "(= (string->number (number->string 0.1)) 0.1)",
+        "(= (string->number \" -0.5\\n\") -0.5)"
+      ],
+      "negative": [
+        {
+          "expression": "(string->number \"1/2\")",
+          "diagnostic": "numeric string"
+        },
+        {
+          "expression": "(string->number \"1 2\")",
+          "diagnostic": "numeric string"
+        },
+        {
+          "expression": "(string->number \"1e2\")",
+          "diagnostic": "numeric string"
+        },
+        {
+          "expression": "(string->number \"1.\")",
+          "diagnostic": "numeric string"
+        },
+        {
+          "expression": "(string->number \"+.1\")",
+          "diagnostic": "numeric string"
+        },
+        {
+          "expression": "(string->number \"--1\")",
+          "diagnostic": "numeric string"
+        },
+        {
+          "expression": "(string->number \" \")",
+          "diagnostic": "numeric string"
+        },
+        {
+          "expression": "(string->number \"+\")",
+          "diagnostic": "numeric string"
+        }
+      ]
+    },
+    {
+      "name": "compiler:feature?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(compiler:feature? \"POINTER_64\")",
+        "(compiler:feature? 'little_endian)",
+        "(not (compiler:feature? 'does_not_exist))"
+      ],
+      "negative": [
+        {
+          "expression": "(compiler:feature? 1)",
+          "diagnostic": "symbol"
+        }
+      ]
+    },
+    {
+      "name": "compiler:features",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(list? (compiler:features))",
+        "(string? (car (compiler:features)))"
+      ],
+      "negative": []
+    },
+    {
+      "name": "compiler:target-info",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (plist-ref (compiler:target-info) ':pointer-width) 64)",
+        "(string? (plist-ref (compiler:target-info) ':triple))"
+      ],
+      "negative": []
+    },
+    {
+      "name": "plist-has?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(plist-has? '(:a nil) ':a)",
+        "(not (plist-has? '(:a nil) ':b))"
+      ],
+      "negative": [
+        {
+          "expression": "(plist-has? '(:a 1 :a 2) ':a)",
+          "diagnostic": "duplicate"
+        }
+      ]
+    },
+    {
+      "name": "plist-set",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (plist-set '(:a 1 :b 2) ':a 3) '(:a 3 :b 2))",
+        "(equal? (plist-set '(:a 1) ':b 2) '(:a 1 :b 2))"
+      ],
+      "negative": [
+        {
+          "expression": "(plist-set '(:a 1 :a 2) ':a 2)",
+          "diagnostic": "duplicate"
+        }
+      ]
+    },
+    {
+      "name": "plist-remove",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (plist-remove '(:a 1 :b 2) ':a) '(:b 2))",
+        "(equal? (plist-remove nil ':a) nil)"
+      ],
+      "negative": [
+        {
+          "expression": "(plist-remove '(:a 1 :a 2) ':a)",
+          "diagnostic": "duplicate"
+        }
+      ]
+    },
+    {
+      "name": "plist-keys",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (plist-keys '(:a 1 :b 2)) '(:a :b))"
+      ],
+      "negative": [
+        {
+          "expression": "(plist-keys '(:a 1 :a 2))",
+          "diagnostic": "duplicate"
+        }
+      ]
+    },
+    {
+      "name": "alist-ref",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (alist-ref '((key nil)) 'key 7) nil)",
+        "(equal? (alist-ref nil 'key 7) 7)",
+        "(equal? (alist-ref '((0.0 1) (-0.0 2)) -0.0) 2)"
+      ],
+      "negative": [
+        {
+          "expression": "(alist-ref '((a 1) (a 2)) 'a)",
+          "diagnostic": "duplicate"
+        },
+        {
+          "expression": "(alist-ref '((a 1 2)) 'a)",
+          "diagnostic": "two elements"
+        }
+      ]
+    },
+    {
+      "name": "alist-has?",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(alist-has? '((key nil)) 'key)",
+        "(not (alist-has? nil 'key))"
+      ],
+      "negative": [
+        {
+          "expression": "(alist-has? '((a 1) (a 2)) 'a)",
+          "diagnostic": "duplicate"
+        },
+        {
+          "expression": "(alist-has? '((a 1 2)) 'a)",
+          "diagnostic": "two elements"
+        }
+      ]
+    },
+    {
+      "name": "alist-set",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (alist-set '((a 1) (b 2)) 'a 3) '((a 3) (b 2)))",
+        "(equal? (alist-set nil 'a 1) '((a 1)))"
+      ],
+      "negative": [
+        {
+          "expression": "(alist-set '((a 1) (a 2)) 'a 2)",
+          "diagnostic": "duplicate"
+        },
+        {
+          "expression": "(alist-set '((a 1 2)) 'a 2)",
+          "diagnostic": "two elements"
+        }
+      ]
+    },
+    {
+      "name": "alist-remove",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (alist-remove '((a 1) (b 2)) 'a) '((b 2)))"
+      ],
+      "negative": [
+        {
+          "expression": "(alist-remove '((a 1) (a 2)) 'a)",
+          "diagnostic": "duplicate"
+        },
+        {
+          "expression": "(alist-remove '((a 1 2)) 'a)",
+          "diagnostic": "two elements"
+        }
+      ]
+    },
+    {
+      "name": "alist-keys",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (alist-keys '((a 1) (b 2))) '(a b))"
+      ],
+      "negative": [
+        {
+          "expression": "(alist-keys '((a 1) (a 2)))",
+          "diagnostic": "duplicate"
+        },
+        {
+          "expression": "(alist-keys '((a 1 2)))",
+          "diagnostic": "two elements"
+        }
+      ]
+    },
+    {
+      "name": "alist-values",
+      "status": "implemented",
+      "reference": "archived SBCL compiler compile-time API",
+      "positive": [
+        "(equal? (alist-values '((a 1) (b 2))) '(1 2))"
+      ],
+      "negative": [
+        {
+          "expression": "(alist-values '((a 1) (a 2)))",
+          "diagnostic": "duplicate"
+        },
+        {
+          "expression": "(alist-values '((a 1 2)))",
+          "diagnostic": "two elements"
+        }
+      ]
+    },
+    {
+      "name": "car",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (car '(a b)) 'a)"
+      ],
+      "negative": [
+        {
+          "expression": "(car nil)",
+          "diagnostic": "non-empty"
+        }
+      ]
+    },
+    {
+      "name": "cdr",
+      "status": "implemented",
+      "reference": "archived SBCL compiler: src/compiler.lisp",
+      "positive": [
+        "(equal? (cdr '(a b)) '(b))"
+      ],
+      "negative": [
+        {
+          "expression": "(cdr nil)",
+          "diagnostic": "non-empty"
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,0 @@
-(import math :as m)
-(export distance-squared)
-
-(function distance-squared ((x m:Square)) m:Square
-  (m:square x))

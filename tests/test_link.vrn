@@ -1,0 +1,113 @@
+(import base)
+(import testing)
+(import core.link :as link)
+(import core.model :as m)
+(import allocator :as a)
+(import arena)
+(import error)
+(import system_allocator :as system)
+(import libc.string :as cstring)
+(import foundation.compat.arithmetic :as n)
+
+(base:variable budget u64 0)
+
+(base:variable live u64 0)
+
+(base:function acquire ((context (pointer void)) (size u64) (alignment u64)) a:result
+  (match budget
+    (0 (a:failure (out-of-memory)))
+    (_
+      (do
+        (assign budget (n:sub budget 1))
+        (match (a:allocate (system:create) size alignment)
+          ((allocated bytes) (do (assign live (n:add live 1)) (a:success bytes)))
+          (reason reason))))))
+
+(base:function release ((context (pointer void)) (bytes (pointer u8)) (size u64) (alignment u64))
+  unit
+  (do (assign live (n:sub live 1)) (a:deallocate (system:create) bytes size alignment) unit))
+
+(base:function option
+  ((owner (pointer link:options)) (status error:status) (kind u64) (value (pointer u8)))
+  error:status
+  (match status ((ok) (link:add-option owner kind value)) (reason reason)))
+
+(base:function allocation-case ((limit u64) (kind (pointer u8))) testing:result
+  (do
+    (assign budget limit)
+    (let
+      ((backing a:backend (a:backend (m:empty-env) acquire release))
+       (config link:options (link:options-new backing))
+       (memory arena:arena (arena:create backing 4096))
+       (args link:strings-array (link:strings-new backing))
+       (library error:status (link:add-option (& config) 0 "fixture"))
+       (path error:status (option (& config) library 1 "path with spaces"))
+       (framework
+         error:status
+         (match (link:frameworks-supported)
+           (true (option (& config) path 2 "Foundation"))
+           (false path)))
+       (status
+         error:status
+         (match framework
+           ((ok)
+            (link:artifact-arguments
+              (& args)
+              (& memory)
+              "clang"
+              "input object"
+              "output executable"
+              config
+              kind))
+           (reason reason)))
+       (checks
+         testing:result
+         (testing:checks
+           (testing:check (match status ((ok) true) ((allocation-error _) true) (_ false)))
+           (match limit
+             (20
+               (testing:checks
+                 (testing:check (match status ((ok) true) (_ false)))
+                 (testing:check
+                   (n:eq
+                     (link:strings-length args)
+                     (match (cstring:strcmp kind "static-library")
+                       (0 5)
+                       (_
+                         (n:add
+                           (match (link:frameworks-supported) (true 10) (false 8))
+                           (match (cstring:strcmp kind "shared-library") (0 1) (_ 0)))))))
+                 (testing:check
+                   (match (cstring:strcmp kind "static-library")
+                     (0 (match (cstring:strcmp (link:strings-at args 1) "rcs") (0 true) (_ false)))
+                     (_
+                       (match
+                         (cstring:strcmp
+                           (link:strings-at
+                             args
+                             (match (cstring:strcmp kind "shared-library") (0 5) (_ 4)))
+                           "-lfixture")
+                         (0 true)
+                         (_ false)))))
+                 (testing:check
+                   (m:is-empty
+                     (cast
+                       (pointer void)
+                       (link:strings-at args (n:sub (link:strings-length args) 1)))))))
+             (_ (testing:empty))))))
+      (do
+        (link:strings-destroy (& args))
+        (link:options-destroy (& config))
+        (arena:destroy (& memory))
+        (testing:checks
+          checks
+          (testing:check (n:eq live 0))
+          (match limit (20 (testing:empty)) (_ (allocation-case (n:add limit 1) kind))))))))
+
+(testing:test argument-storage-and-allocation-cleanup
+  (testing:checks
+    (allocation-case 0 "executable")
+    (allocation-case 0 "static-library")
+    (allocation-case 0 "shared-library")))
+
+(export argument-storage-and-allocation-cleanup)

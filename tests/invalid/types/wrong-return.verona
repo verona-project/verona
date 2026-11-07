@@ -1,1 +1,0 @@
-(function main () i64 (+ (cast i32 1) 2))

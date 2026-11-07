@@ -1,1 +1,0 @@
-(function invalid () i32 (compiler:state-ref 'key))

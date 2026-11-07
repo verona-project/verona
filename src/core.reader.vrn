@@ -1,0 +1,253 @@
+(import base)
+(import core.sexpr :as syntax)
+(import core.constants :as constants)
+(import core.span :as span)
+(import core.names :as names)
+(import core.configuration :as config)
+(import core.model :as m)
+(import arena)
+(import data)
+(import system_allocator :as system)
+(import foundation.compat.arithmetic :as n)
+
+; Convert indexed syntax to the existing checked tape without recursive walking.
+(base:function link-range ((c m:context) (ids (pointer u64)) (start u64) (count u64)) unit
+  (match count
+    (0 unit)
+    (1 (m:link c (n:add (deref (pointer-offset ids start)) 1) 0))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do
+          (link-range c ids start half)
+          (link-range c ids (n:add start half) (n:sub count half))
+          (m:link
+            c
+            (n:add (deref (pointer-offset ids (n:sub (n:add start half) 1))) 1)
+            (n:add (deref (pointer-offset ids (n:add start half))) 1)))))))
+
+(base:function transfer ((c m:context) (tree syntax:syntax) (start u64) (count u64)) unit
+  (match count
+    (0 unit)
+    (1
+      (let
+        ((v syntax:node (deref (pointer-offset (tuple-get (field tree items) 0) start)))
+         (loc span:span (field v location))
+         (children (pointer u64) (tuple-get (field tree children) 0)))
+        (do
+          (match (n:gt (field v count) constants:sibling-form-limit)
+            (true (m:error-at c (field loc start) "form count limit (4096) exceeded"))
+            (false unit))
+          (m:add
+            c
+            (m:node
+              (match (field v kind) (2 1) (4 25) (5 26) (6 28) (7 29) (8 30) (9 31) (10 35) (_ 0))
+              (field loc start)
+              (field loc length)
+              (match (field v count)
+                (0 0)
+                (_ (n:add (deref (pointer-offset children (field v first))) 1)))
+              0
+              0
+              0
+              0
+              0
+              0))
+          unit)))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do (transfer c tree start half) (transfer c tree (n:add start half) (n:sub count half)))))))
+
+(base:function connect ((c m:context) (tree syntax:syntax) (start u64) (count u64)) unit
+  (match count
+    (0 unit)
+    (1
+      (let ((v syntax:node (deref (pointer-offset (tuple-get (field tree items) 0) start))))
+        (link-range c (tuple-get (field tree children) 0) (field v first) (field v count))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do (connect c tree start half) (connect c tree (n:add start half) (n:sub count half)))))))
+
+(base:function print-ids ((ids (pointer u64)) (start u64) (count u64)) unit
+  (match count
+    (0 unit)
+    (1 (do (m:text 1 " ") (m:number 1 (deref (pointer-offset ids start)))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do (print-ids ids start half) (print-ids ids (n:add start half) (n:sub count half)))))))
+
+; Flat indexed tree output remains safe at arbitrary reader nesting depth.
+(base:function print-range ((c m:context) (tree syntax:syntax) (start u64) (count u64)) unit
+  (match count
+    (0 unit)
+    (1
+      (let
+        ((v syntax:node (deref (pointer-offset (tuple-get (field tree items) 0) start)))
+         (loc span:span (field v location)))
+        (do
+          (m:number 1 start)
+          (m:text 1 " ")
+          (m:text
+            1
+            (match (field v kind)
+              (0 "identifier")
+              (1 "integer")
+              (4 "data")
+              (5 "character")
+              (6 "quote")
+              (7 "quasiquote")
+              (8 "unquote")
+              (9 "splice")
+              (10 "float")
+              (_ "list")))
+          (m:text 1 " file=")
+          (m:number 1 (field loc file))
+          (m:text 1 " bytes=")
+          (m:number 1 (field loc start))
+          (m:text 1 "..")
+          (m:number 1 (n:add (field loc start) (field loc length)))
+          (m:text 1 " name=")
+          (m:number 1 (field loc name))
+          (m:text 1 " at=")
+          (m:number 1 (tuple-get (syntax:position tree (field loc start)) 0))
+          (m:text 1 ":")
+          (m:number 1 (tuple-get (syntax:position tree (field loc start)) 1))
+          (match (field v kind)
+            (2
+              (do
+                (m:text 1 " children=[")
+                (print-ids (tuple-get (field tree children) 0) (field v first) (field v count))
+                (m:text 1 " ]")))
+            (_
+              (do
+                (m:text 1 " spelling=")
+                (m:write
+                  1
+                  (data:view
+                    (pointer-offset (field (field c source) bytes) (field loc start))
+                    (field loc length))))))
+          (m:text 1 "\n"))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do
+          (print-range c tree start half)
+          (print-range c tree (n:add start half) (n:sub count half)))))))
+
+; Analysis still has a bounded recursive implementation; reading is unrestricted.
+(base:function analysis-depth
+  ((c m:context) (tree syntax:syntax) (start u64) (count u64) (depth (pointer u64))) unit
+  (match count
+    (0 unit)
+    (1
+      (let ((v syntax:token (deref (pointer-offset (tuple-get (field tree lexemes) 0) start))))
+        (do
+          (match (field v kind)
+            (2 (do (store (deref depth) (n:add (deref depth) 1)) unit))
+            (3 (do (store (deref depth) (n:sub (deref depth) 1)) unit))
+            (_ unit))
+          (match (n:gt (deref depth) constants:syntax-depth-limit)
+            (true
+              (m:error-at c (field (field v location) start) "syntax nesting limit (256) exceeded"))
+            (false unit)))))
+    (_
+      (let ((half u64 (n:div count 2)))
+        (do
+          (analysis-depth c tree start half depth)
+          (analysis-depth c tree (n:add start half) (n:sub count half) depth))))))
+
+(base:function run-with-features ((c m:context) (dump bool) (features syntax:features)) u64
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (table names:names-table (names:names-empty (system:create)))
+     (tree syntax:syntax (syntax:empty (system:create)))
+     (diagnostic
+       syntax:diagnostic
+       (syntax:read-target
+         (field c source)
+         1
+         features
+         (system:create)
+         (& table)
+         (& memory)
+         (& tree)))
+     (code u64 (field diagnostic code)))
+    (do
+      (match code
+        (0 unit)
+        (_
+          (let ((offset u64 (field (field diagnostic location) start)))
+            (do
+              (syntax:destroy (& tree))
+              (names:names-destroy (& table))
+              (arena:destroy (& memory))
+              (m:error-at
+                c
+                offset
+                (match code
+                  (1 "unexpected closing parenthesis")
+                  (2 "unclosed list")
+                  (3
+                    (match (m:byte c offset)
+                      (0 "NUL byte in source")
+                      (92 "reader extension syntax is not supported by the core reader yet")
+                      (_ "invalid source byte (only ASCII core syntax is supported)")))
+                  (4 "malformed integer literal (invalid decimal i64 literal)")
+                  (6 "unterminated data literal")
+                  (7 "unsupported data escape")
+                  (8 "data literal requires non-NUL ASCII bytes")
+                  (9 "invalid ASCII character literal")
+                  (10 "reader prefix requires an operand")
+                  (11 "reader prefix nesting limit exceeded")
+                  (12 "expected a feature name after reader conditional")
+                  (13 "reader prefix requires a selected operand")
+                  (_ "compiler storage allocation failed")))))))
+      (let
+        ((result
+           u64
+           (match dump
+             (true
+               (do
+                 (m:text 1 "roots=[")
+                 (print-ids
+                   (tuple-get (field tree roots) 0)
+                   0
+                   (syntax:ids-length (field tree roots)))
+                 (m:text 1 " ]\n")
+                 (print-range c tree 0 (syntax:nodes-length (field tree items)))
+                 0))
+             (false
+               (do
+                 (let ((depth u64 0))
+                   (analysis-depth c tree 0 (syntax:tokens-length (field tree lexemes)) (& depth)))
+                 (match (n:gt (syntax:ids-length (field tree roots)) constants:sibling-form-limit)
+                   (true (m:error-at c 0 "form count limit (4096) exceeded"))
+                   (false unit))
+                 (m:add c (m:node 0 0 0 0 0 0 0 0 0 0))
+                 (transfer c tree 0 (syntax:nodes-length (field tree items)))
+                 (connect c tree 0 (syntax:nodes-length (field tree items)))
+                 (link-range
+                   c
+                   (tuple-get (field tree roots) 0)
+                   0
+                   (syntax:ids-length (field tree roots)))
+                 (match (syntax:ids-length (field tree roots))
+                   (0 0)
+                   (_ (n:add (deref (tuple-get (field tree roots) 0)) 1))))))))
+        (do
+          (syntax:destroy (& tree))
+          (names:names-destroy (& table))
+          (arena:destroy (& memory))
+          result)))))
+
+(base:function read ((c m:context)) u64
+  (run-with-features c false (config:reader-features c)))
+
+(base:function dump ((c m:context)) u64
+  (run-with-features c true (config:reader-features c)))
+
+(base:function read-with-features ((c m:context) (features syntax:features)) u64
+  (run-with-features c false features))
+
+(base:function dump-with-features ((c m:context) (features syntax:features)) u64
+  (run-with-features c true features))
+
+(export read dump read-with-features dump-with-features)

@@ -1,0 +1,244 @@
+(import base)
+(import core.model :as m)
+(import allocator)
+(import array)
+(import arena)
+(import data)
+(import error)
+(import libc.string :as cstring)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+
+; Arrays own their pointer storage and borrow their NUL-terminated strings.
+(array:define strings (pointer u8))
+
+(base:type strings-array (tuple (pointer (pointer u8)) u64 u64 array:layout))
+
+(base:function strings-new ((backing allocator:backend)) strings-array
+  (strings-empty (cast (pointer (pointer u8)) (m:empty-env)) (array:layout 8 8 backing)))
+
+(base:function strings-at ((items strings-array) (index u64)) (pointer u8)
+  (deref (pointer-offset (tuple-get items 0) index)))
+
+; Options borrow process argv strings. Destroy each owner once after compilation.
+(base:type options
+  (product (libraries strings-array) (paths strings-array) (frameworks strings-array)))
+
+(base:function options-new ((backing allocator:backend)) options
+  (options (strings-new backing) (strings-new backing) (strings-new backing)))
+
+(base:function add-option ((owner (pointer options)) (kind u64) (value (pointer u8))) error:status
+  (match (n:lt kind 3)
+    (false (error:invalid))
+    (true
+      (let
+        ((v options (deref owner))
+         (items
+           strings-array
+           (match kind (0 (field v libraries)) (1 (field v paths)) (_ (field v frameworks))))
+         (status error:status (strings-append (& items) value)))
+        (do
+          (store
+            (deref owner)
+            (options
+              (match kind (0 items) (_ (field v libraries)))
+              (match kind (1 items) (_ (field v paths)))
+              (match kind (2 items) (_ (field v frameworks)))))
+          status)))))
+
+(base:function options-destroy ((owner (pointer options))) unit
+  (let
+    ((v options (deref owner))
+     (libraries strings-array (field v libraries))
+     (paths strings-array (field v paths))
+     (frameworks strings-array (field v frameworks)))
+    (do
+      (strings-destroy (& libraries))
+      (strings-destroy (& paths))
+      (strings-destroy (& frameworks))
+      (store (deref owner) (options libraries paths frameworks))
+      unit)))
+
+#+darwin (base:function frameworks-supported () bool
+           true)
+
+#-darwin (base:function frameworks-supported () bool
+           false)
+
+; Retain the first allocation error and stop appending after it.
+(base:function append-value
+  ((args (pointer strings-array)) (status error:status) (value (pointer u8))) error:status
+  (match status ((ok) (strings-append args value)) (reason reason)))
+
+(base:function append-pairs
+  ((args (pointer strings-array))
+   (status error:status)
+   (flag (pointer u8))
+   (items strings-array)
+   (index u64)) error:status
+  (match status
+    ((ok)
+     (match (n:eq index (strings-length items))
+       (true (error:success))
+       (false
+         (let
+           ((first error:status (strings-append args flag))
+            (second error:status (append-value args first (strings-at items index))))
+           (append-pairs args second flag items (n:add index 1))))))
+    (reason reason)))
+
+(base:function append-libraries
+  ((args (pointer strings-array))
+   (memory (pointer arena:arena))
+   (status error:status)
+   (items strings-array)
+   (index u64)) error:status
+  (match status
+    ((ok)
+     (match (n:eq index (strings-length items))
+       (true (error:success))
+       (false
+         (let ((name (pointer u8) (strings-at items index)) (length u64 (cstring:strlen name)))
+           (match (allocator:checked-add-size length 3)
+             ((tuple false _) (error:too-large))
+             ((tuple valid size)
+              (let ((text data:data (data:empty (arena:allocator memory))))
+                (match (data:resize (& text) size)
+                  ((ok)
+                   (do
+                     (store (deref (data:bytes text)) 45)
+                     (store (deref (pointer-offset (data:bytes text) 1)) 108)
+                     (allocator:copy-bytes
+                       (pointer-offset (data:bytes text) 2)
+                       name
+                       (n:add length 1))
+                     (append-libraries
+                       args
+                       memory
+                       (strings-append args (data:bytes text))
+                       items
+                       (n:add index 1))))
+                  (reason reason)))))))))
+    (reason reason)))
+
+; Build the reference driver's grouped argv: object, paths, libraries, frameworks,
+; output. Generated -l strings belong to MEMORY, which must outlive fork/exec/wait.
+; Partial arrays remain destroyable on every failure. The final entry is null.
+(base:function build-arguments-for
+  ((args (pointer strings-array))
+   (memory (pointer arena:arena))
+   (tool (pointer u8))
+   (input (pointer u8))
+   (output (pointer u8))
+   (config options)
+   (platform (pointer u8))) error:status
+  (match
+    (base:and
+      (n:gt (strings-length (field config frameworks)) 0)
+      (match (cstring:strcmp platform "darwin") (0 false) (_ true)))
+    (true (error:invalid))
+    (false
+      (let
+        ((start error:status (strings-append args tool))
+         (object error:status (append-value args start input))
+         (paths error:status (append-pairs args object "-L" (field config paths) 0))
+         (libraries error:status (append-libraries args memory paths (field config libraries) 0))
+         (frameworks
+           error:status
+           (append-pairs args libraries "-framework" (field config frameworks) 0))
+         (flag error:status (append-value args frameworks "-o"))
+         (result error:status (append-value args flag output)))
+        (append-value args result (cast (pointer u8) (m:empty-env)))))))
+
+#+darwin (base:function shared-flag () (pointer u8)
+           "-dynamiclib")
+
+#-darwin (base:function shared-flag () (pointer u8)
+           "-shared")
+
+; Artifact policy stays in the driver. Static archives ignore native link
+; options, matching the reference driver. The argv vector always ends in null.
+(base:function artifact-arguments-for
+  ((args (pointer strings-array))
+   (memory (pointer arena:arena))
+   (tool (pointer u8))
+   (input (pointer u8))
+   (output (pointer u8))
+   (config options)
+   (kind (pointer u8))
+   (platform (pointer u8))) error:status
+  (match (cstring:strcmp kind "static-library")
+    (0
+      (let
+        ((a error:status (strings-append args tool))
+         (b error:status (append-value args a "rcs"))
+         (c error:status (append-value args b output))
+         (d error:status (append-value args c input)))
+        (append-value args d (cast (pointer u8) (m:empty-env)))))
+    (_
+      (match (cstring:strcmp kind "shared-library")
+        (0
+          (let
+            ((status
+               error:status
+               (build-arguments-for args memory tool input output config platform)))
+            (match status
+              ((ok)
+               ; Keep TOOL as argv[0], then the platform flag, before the object.
+               (let ((count u64 (strings-length (deref args))))
+                 (match (strings-append args (cast (pointer u8) (m:empty-env)))
+                   ((ok)
+                    (do
+                      (shift-arguments (deref args) count)
+                      (store
+                        (deref (pointer-offset (tuple-get (deref args) 0) 1))
+                        (match (cstring:strcmp platform "darwin") (0 "-dynamiclib") (_ "-shared")))
+                      (error:success)))
+                   (reason reason))))
+              (reason reason))))
+        (_ (build-arguments-for args memory tool input output config platform))))))
+
+(base:function shift-arguments ((args strings-array) (index u64)) unit
+  (match (n:gt index 1)
+    (false unit)
+    (true
+      (do
+        (store (deref (pointer-offset (tuple-get args 0) index)) (strings-at args (n:sub index 1)))
+        (shift-arguments args (n:sub index 1))))))
+
+(base:function native-platform () (pointer u8)
+  (match (frameworks-supported) (true "darwin") (false "linux")))
+
+(base:function build-arguments
+  ((args (pointer strings-array))
+   (memory (pointer arena:arena))
+   (tool (pointer u8))
+   (input (pointer u8))
+   (output (pointer u8))
+   (config options)) error:status
+  (build-arguments-for args memory tool input output config (native-platform)))
+
+(base:function artifact-arguments
+  ((args (pointer strings-array))
+   (memory (pointer arena:arena))
+   (tool (pointer u8))
+   (input (pointer u8))
+   (output (pointer u8))
+   (config options)
+   (kind (pointer u8))) error:status
+  (artifact-arguments-for args memory tool input output config kind (native-platform)))
+
+(export
+  artifact-arguments-for
+  artifact-arguments
+  options
+  options-new
+  options-destroy
+  add-option
+  frameworks-supported
+  strings-array
+  strings-new
+  strings-at
+  strings-length
+  strings-destroy
+  build-arguments)

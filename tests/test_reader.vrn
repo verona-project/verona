@@ -1,0 +1,247 @@
+(import base)
+(import testing)
+(import core.sexpr :as r)
+(import core.span :as span)
+(import core.names :as names)
+(import core.model :as m)
+(import allocator :as a)
+(import arena)
+(import data)
+(import error)
+(import system_allocator :as system)
+(import libc.string :as cstring)
+(import foundation.compat.arithmetic :as n)
+
+(base:function at ((tree r:syntax) (id u64)) r:node
+  (deref (pointer-offset (tuple-get (field tree items) 0) id)))
+
+(base:function child ((tree r:syntax) (id u64)) u64
+  (deref (pointer-offset (tuple-get (field tree children) 0) id)))
+
+(testing:test structure-and-spans
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (table names:names-table (names:names-empty (system:create)))
+     (tree r:syntax (r:empty (system:create)))
+     (text (pointer u8) "(a (a -12) ()) true 9223372036854775808")
+     (d
+       r:diagnostic
+       (r:read
+         (data:view text (cstring:strlen text))
+         42
+         (system:create)
+         (& table)
+         (& memory)
+         (& tree)))
+     (result
+       testing:result
+       (testing:checks
+         (testing:check (n:eq (field d code) 0))
+         (testing:check
+           (n:eq
+             (n:sub
+               (m:address (cast (pointer void) (pointer-offset (tuple-get (field tree items) 0) 1)))
+               (m:address (cast (pointer void) (tuple-get (field tree items) 0))))
+             56))
+         (testing:check
+           (n:eq
+             (n:sub
+               (m:address
+                 (cast (pointer void) (pointer-offset (tuple-get (field tree lexemes) 0) 1)))
+               (m:address (cast (pointer void) (tuple-get (field tree lexemes) 0))))
+             40))
+         (testing:check (n:eq (r:nodes-length (field tree items)) 8))
+         (testing:check (n:eq (r:ids-length (field tree roots)) 3))
+         (testing:check (n:eq (r:tokens-length (field tree lexemes)) 11))
+         (testing:check (n:eq (field (deref (tuple-get (field tree lexemes) 0)) kind) 2))
+         (testing:check
+           (n:eq (field (field (deref (tuple-get (field tree lexemes) 0)) location) start) 0))
+         (testing:check
+           (n:eq (field (field (deref (tuple-get (field tree lexemes) 0)) location) length) 1))
+         (testing:check
+           (n:eq
+             (field
+               (field (deref (pointer-offset (tuple-get (field tree lexemes) 0) 4)) location)
+               start)
+             6))
+         (testing:check
+           (n:eq
+             (field
+               (field (deref (pointer-offset (tuple-get (field tree lexemes) 0) 4)) location)
+               length)
+             3))
+         (testing:check (n:eq (field (at tree 2) kind) 1))
+         (testing:check (n:eq (field (at tree 7) kind) 1))
+         (testing:check
+           (n:eq
+             (field (field (at tree 0) location) name)
+             (field (field (at tree 1) location) name)))
+         (testing:check (n:eq (field (field (at tree 0) location) file) 42))
+         (testing:check (n:eq (field (field (at tree 2) location) start) 6))
+         (testing:check (n:eq (field (field (at tree 2) location) length) 3))
+         (testing:check (n:eq (field (at tree 4) count) 0))
+         (testing:check (n:eq (field (at tree 5) count) 3))
+         (testing:check (n:eq (field (field (at tree 5) location) length) 14))
+         (testing:check (n:eq (child tree (field (at tree 5) first)) 0))
+         (testing:check (n:eq (child tree (n:add (field (at tree 5) first) 1)) 3))
+         (testing:check (n:eq (child tree (n:add (field (at tree 5) first) 2)) 4)))))
+    (do (r:destroy (& tree)) (names:names-destroy (& table)) (arena:destroy (& memory)) result)))
+
+(base:function platform-case
+  ((platform (pointer u8)) (architecture (pointer u8)) (line u64) (digit u8) (negative u8))
+  testing:result
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (table names:names-table (names:names-empty (system:create)))
+     (tree r:syntax (r:empty (system:create)))
+     (text
+       (pointer u8)
+       "(#+DARWIN #+aarch64 1\n#+linux #+x86_64 2\n#+darwin #+linux (discard this)\n#-darwin 3 #-linux 4)")
+     (d
+       r:diagnostic
+       (r:read-target
+         (data:view text (cstring:strlen text))
+         42
+         (r:features platform architecture (r:null-features))
+         (system:create)
+         (& table)
+         (& memory)
+         (& tree)))
+     (result
+       testing:result
+       (testing:checks
+         (testing:check (n:eq (field d code) 0))
+         (testing:check (n:eq (r:nodes-length (field tree items)) 3))
+         (testing:check (n:eq (r:ids-length (field tree roots)) 1))
+         (testing:check (n:eq (field (at tree 2) count) 2))
+         (testing:check (n:eq (child tree 0) 0))
+         (testing:check (n:eq (child tree 1) 1))
+         (let
+           ((offset u64 (field (field (at tree 0) location) start))
+            (other u64 (field (field (at tree 1) location) start)))
+           (testing:checks
+             (testing:check (n:eq (tuple-get (r:position tree offset) 0) line))
+             (testing:check
+               (n:eq (base:convert (deref (pointer-offset text offset))) (base:convert digit)))
+             (testing:check
+               (n:eq (base:convert (deref (pointer-offset text other))) (base:convert negative))))))))
+    (do (r:destroy (& tree)) (names:names-destroy (& table)) (arena:destroy (& memory)) result)))
+
+(testing:test platform-conditionals
+  (testing:checks
+    (platform-case "darwin" "aarch64" 1 49 52)
+    (platform-case "linux" "x86_64" 2 50 51)))
+
+(base:function error-case ((text (pointer u8)) (size u64) (code u64) (offset u64) (length u64))
+  testing:result
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (table names:names-table (names:names-empty (system:create)))
+     (tree r:syntax (r:empty (system:create)))
+     (d r:diagnostic (r:read (data:view text size) 7 (system:create) (& table) (& memory) (& tree)))
+     (result
+       testing:result
+       (testing:checks
+         (testing:check (n:eq (field d code) code))
+         (testing:check (n:eq (field (field d location) file) 7))
+         (testing:check (n:eq (field (field d location) start) offset))
+         (testing:check (n:eq (field (field d location) length) length)))))
+    (do (r:destroy (& tree)) (names:names-destroy (& table)) (arena:destroy (& memory)) result)))
+
+(testing:test errors
+  (testing:checks
+    (error-case ")(" 2 1 0 1)
+    (error-case "( (x)" 5 2 0 1)
+    (error-case "((" 2 2 1 1)
+    (error-case "12x)" 4 4 0 3)
+    (error-case "-12x" 4 4 0 4)
+    (error-case "1.5.2" 5 4 0 5)
+    (error-case "" 1 3 0 1)
+    (error-case "\"x" 2 6 0 2)
+    (error-case "\"\\q\"" 4 7 2 1)
+    (error-case "#\\" 2 9 0 2)
+    (error-case "'" 1 10 0 1)))
+
+(testing:test lines-and-boundaries
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (table names:names-table (names:names-empty (system:create)))
+     (tree r:syntax (r:empty (system:create)))
+     (text (pointer u8) "- + -x +x true false unit_\n;hello_(a)\n")
+     (buffer data:data (data:empty (system:create)))
+     (allocated error:status (data:assign-bytes (& buffer) (data:view text (cstring:strlen text))))
+     (patched
+       unit
+       (do
+         (store (deref (pointer-offset (data:bytes buffer) 25)) 13)
+         (store (deref (pointer-offset (data:bytes buffer) 33)) 13)
+         unit))
+     (d r:diagnostic (r:read (data:borrow buffer) 1 (system:create) (& table) (& memory) (& tree)))
+     (result
+       testing:result
+       (testing:checks
+         (testing:check (n:eq (field d code) 0))
+         (testing:check (n:eq (names:names-count table) 8))
+         (testing:check (n:eq (r:ids-length (field tree lines)) 4))
+         (testing:check (n:eq (tuple-get (r:position tree 0) 0) 1))
+         (testing:check (n:eq (tuple-get (r:position tree 27) 0) 2))
+         (testing:check (n:eq (tuple-get (r:position tree 27) 1) 1))
+         (testing:check (n:eq (tuple-get (r:position tree (cstring:strlen text)) 0) 4))
+         (testing:check (n:eq (tuple-get (r:position tree (cstring:strlen text)) 1) 1)))))
+    (do
+      (data:destroy (& buffer))
+      (r:destroy (& tree))
+      (names:names-destroy (& table))
+      (arena:destroy (& memory))
+      result)))
+
+(base:variable budget u64 0)
+
+(base:variable live u64 0)
+
+(base:function acquire ((context (pointer void)) (size u64) (alignment u64)) a:result
+  (match budget
+    (0 (a:failure (out-of-memory)))
+    (_
+      (do
+        (assign budget (n:sub budget 1))
+        (match (a:allocate (system:create) size alignment)
+          ((allocated bytes) (do (assign live (n:add live 1)) (a:success bytes)))
+          (reason reason))))))
+
+(base:function release ((context (pointer void)) (bytes (pointer u8)) (size u64) (alignment u64))
+  unit
+  (do (assign live (n:sub live 1)) (a:deallocate (system:create) bytes size alignment) unit))
+
+(base:function allocation-case ((limit u64)) testing:result
+  (do
+    (assign budget limit)
+    (let
+      ((backing a:backend (a:backend (cast (pointer void) "") acquire release))
+       (memory arena:arena (arena:create backing 128))
+       (table names:names-table (names:names-empty backing))
+       (tree r:syntax (r:empty backing))
+       (text (pointer u8) "(a (b c d e f g h i j k l m n o p q r s t u v w x y z) ())")
+       (d
+         r:diagnostic
+         (r:read (data:view text (cstring:strlen text)) 1 backing (& table) (& memory) (& tree))))
+      (do
+        (r:destroy (& tree))
+        (names:names-destroy (& table))
+        (arena:destroy (& memory))
+        (testing:checks
+          (testing:check (n:eq live 0))
+          (match limit
+            (0 (testing:check (n:eq (field d code) 5)))
+            (80 (testing:check (n:eq (field d code) 0)))
+            (_ (testing:check (match (field d code) (0 true) (5 true) (_ false))))))))))
+
+(base:function allocation-cases ((limit u64)) testing:result
+  (testing:checks
+    (allocation-case limit)
+    (match limit (80 (testing:empty)) (_ (allocation-cases (n:add limit 1))))))
+
+(testing:test allocation-failures
+  (allocation-cases 0))
+
+(export platform-conditionals structure-and-spans errors lines-and-boundaries allocation-failures)

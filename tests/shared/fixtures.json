@@ -1,0 +1,727 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "name": "signed-minimum",
+      "source": "(%function main () i64 -9223372036854775808)\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "-9223372036854775808"
+      }
+    },
+    {
+      "name": "signed-maximum",
+      "source": "(%function main () i64 9223372036854775807)\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "9223372036854775807"
+      }
+    },
+    {
+      "name": "wrapping",
+      "source": "(%function main () i64 (%+-primitive-i64 9223372036854775807 1))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "-9223372036854775808"
+      }
+    },
+    {
+      "name": "lazy-branch",
+      "source": "(%function main () i64 (if false (%/-primitive-i64 1 0) 42))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "bindings",
+      "source": "(%function main () i64 (let ((x (cast i64 3)) (y (%+-primitive-i64 x 4))) (let ((x (cast i64 10))) (%+-primitive-i64 x y))))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "17"
+      }
+    },
+    {
+      "name": "recursion",
+      "source": "(%function factorial ((n i64)) i64 (if (%=-primitive-i64 n 0) 1 (%*-primitive-i64 n (factorial (%--primitive-i64 n 1)))))\n(%function main () i64 (factorial 5))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "120"
+      }
+    },
+    {
+      "name": "typed-internal-values",
+      "source": "(%function identity ((u unit) (b bool)) bool b)\n(%function main () i64 (if (identity unit true) 7 0))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "7"
+      }
+    },
+    {
+      "name": "module",
+      "source": "(%import math :as math)\n(%function main () i64 (math:answer))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      },
+      "modules": {
+        "math.vrn": "(%export answer)\n(%function answer () i64 42)\n"
+      }
+    },
+    {
+      "name": "division-zero",
+      "source": "(%function main () i64 (%/-primitive-i64 1 0))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "language",
+        "diagnostic": "division by zero",
+        "location": [
+          1,
+          24
+        ]
+      }
+    },
+    {
+      "name": "division-overflow",
+      "source": "(%function main () i64 (%/-primitive-i64 -9223372036854775808 -1))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "language",
+        "diagnostic": "signed division overflow",
+        "location": [
+          1,
+          24
+        ]
+      }
+    },
+    {
+      "name": "operand-order",
+      "source": "(%function main () i64 (%+-primitive-i64 (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "language",
+        "diagnostic": "division by zero",
+        "location": [
+          1,
+          42
+        ]
+      }
+    },
+    {
+      "name": "unknown-name",
+      "source": "(%function main () i64 missing)\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "analysis",
+        "diagnostic": "unknown local",
+        "location": [
+          1,
+          24
+        ]
+      }
+    },
+    {
+      "name": "wrong-type",
+      "source": "(%function main () i64 true)\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "analysis",
+        "diagnostic": "type mismatch",
+        "location": [
+          1,
+          24
+        ]
+      }
+    },
+    {
+      "name": "invalid-reader",
+      "source": ")",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "analysis",
+        "diagnostic": "unexpected",
+        "location": [
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "nested-products-tuples",
+      "source": "(%type Point (product (x i64) (y i64)))\n(%type Box (product (point Point) (active bool) (empty unit)))\n(%function make () Box (Box (Point 20 22) true unit))\n(%function identity ((b Box)) Box b)\n(%function main () (tuple Box i64) (let ((b (identity (make)))) (tuple b (%+-primitive-i64 (field (field b point) x) (field (field b point) y)))))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(product:0:Box(product:0:Point(i64:20,i64:22),bool:1,unit),i64:42)"
+      }
+    },
+    {
+      "name": "empty-and-single-tuples",
+      "source": "(%type Empty (product))\n(%function id ((a (tuple)) (b (tuple unit))) (tuple Empty (tuple) (tuple unit)) (tuple (Empty) a b))\n(%function main () (tuple Empty (tuple) (tuple unit)) (id (tuple) (tuple unit)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(product:0:Empty(),tuple(),tuple(unit))"
+      }
+    },
+    {
+      "name": "structural-tuple-branch",
+      "source": "(%function select ((b bool)) (tuple i64 bool) (if b (tuple 42 true) (tuple 17 false)))\n(%function main () (tuple i64 bool) (select true))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(i64:42,bool:1)"
+      }
+    },
+    {
+      "name": "sum-payload-match",
+      "source": "(%type Result (sum (Ok (tuple i64 bool)) (Error i64) (Empty)))\n(%function make () Result (let ((p (tuple (cast i64 42) true))) (Ok p)))\n(%function use ((r Result)) (tuple i64 bool) (match r ((Ok x) x) ((Error n) (tuple n false)) ((Empty) (tuple 0 false))))\n(%function main () (tuple Result (tuple i64 bool) unit) (tuple (make) (use (make)) unit))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(sum:0:Result:Ok(tuple(i64:42,bool:1)),tuple(i64:42,bool:1),unit)"
+      }
+    },
+    {
+      "name": "sum-every-case-and-wildcard",
+      "source": "(%type S (sum (None) (One i64) (Two bool unit)))\n(%function score ((s S)) i64 (match s ((None) 1) ((One x) x) ((Two b u) (if b 3 4))))\n(%function other ((s S)) i64 (match s ((One x) x) (_ 10)))\n(%function main () (tuple S S S i64 i64 i64 i64) (tuple (None) (One 2) (Two true unit) (score (None)) (score (One 2)) (score (Two true unit)) (other (Two false unit))))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(sum:0:S:None(),sum:0:S:One(i64:2),sum:0:S:Two(bool:1,unit),i64:1,i64:2,i64:3,i64:10)"
+      }
+    },
+    {
+      "name": "expected-and-qualified-cases",
+      "source": "(%type A (sum (Same i64)))\n(%type B (sum (Same bool)))\n(%function choose ((b bool)) A (if b (Same 42) (A:Same 17)))\n(%function main () (tuple A B) (let ((a A (choose true)) (b B (Same false))) (tuple a b)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(sum:0:A:Same(i64:42),sum:0:B:Same(bool:0))"
+      }
+    },
+    {
+      "name": "forward-layouts",
+      "source": "(%type Outer (product (inner Inner)))\n(%type Inner (product (value i64)))\n(%function main () Outer (Outer (Inner -9223372036854775808)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "product:0:Outer(product:0:Inner(i64:-9223372036854775808))"
+      }
+    },
+    {
+      "name": "structured-modules",
+      "source": "(%import values :as v)\n(%function main () (tuple v:Point v:Result) (tuple (v:Point 42) (v:Result:Ok unit)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(product:1:Point(i64:42),sum:1:Result:Ok(unit))"
+      },
+      "modules": {
+        "values.vrn": "(%export Point Result)\n(%type Point (product (x i64)))\n(%type Result (sum (Ok unit) (Bad)))\n"
+      }
+    },
+    {
+      "name": "bool-entry",
+      "source": "(%function main () bool true)\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "bool:1"
+      }
+    },
+    {
+      "name": "unit-entry",
+      "source": "(%function main () unit unit)\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "unit"
+      }
+    },
+    {
+      "name": "aggregate-recursion-and-sharing",
+      "source": "(%type Point (product (x i64)))\n(%function grow ((n i64) (p Point)) Point (if (%=-primitive-i64 n 0) p (grow (%--primitive-i64 n 1) (Point (%+-primitive-i64 (field p x) 1)))))\n(%function main () (tuple Point Point) (let ((p (Point 2))) (tuple (grow 40 p) p)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(product:0:Point(i64:42),product:0:Point(i64:2))"
+      }
+    },
+    {
+      "name": "nested-matches-and-large-payloads",
+      "source": "(%type Empty (product))\n(%type Big (product (a i64) (b (tuple i64 bool)) (c unit) (d Empty)))\n(%type S (sum (None) (Small bool) (Large Big i64 (tuple))))\n(%function main () S (match (Small true)\n  ((None) (None))\n  ((Small b) (match (None) ((None) (Large (Big 42 (tuple -17 b) unit (Empty)) 99 (tuple))) (_ (Small false))))\n  ((Large x n t) (Large x n t))))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "sum:0:S:Large(product:0:Big(i64:42,tuple(i64:-17,bool:1),unit,product:0:Empty()),i64:99,tuple())"
+      }
+    },
+    {
+      "name": "expected-tuple-and-match-results",
+      "source": "(%type A (sum (Same i64)))\n(%type B (sum (Same bool)))\n(%type C (sum (First) (Second)))\n(%function main () (tuple A B) (match (First)\n  ((First) (tuple (Same 42) (Same true)))\n  ((Second) (tuple (Same 0) (Same false)))))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(sum:0:A:Same(i64:42),sum:0:B:Same(bool:1))"
+      }
+    },
+    {
+      "name": "product-construction-order",
+      "source": "(%type P (product (a i64) (b i64)))\n(%function main () P (P (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "runtime",
+        "diagnostic": "division by zero",
+        "location": [
+          2,
+          25
+        ]
+      }
+    },
+    {
+      "name": "sum-construction-order",
+      "source": "(%type S (sum (Case i64 i64)))\n(%function main () S (Case (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "runtime",
+        "diagnostic": "division by zero",
+        "location": [
+          2,
+          28
+        ]
+      }
+    },
+    {
+      "name": "tuple-construction-order",
+      "source": "(%function main () (tuple i64 i64) (tuple (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "runtime",
+        "diagnostic": "division by zero",
+        "location": [
+          1,
+          43
+        ]
+      }
+    },
+    {
+      "name": "default-dotted-module-type",
+      "source": "(%import package.types)\n(%function main () package.types:P (package.types:P 42))\n",
+      "modules": {
+        "package.types.vrn": "(%export P)(%export)(%export P P)(%type P (product (x i64)))\n"
+      },
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "product:1:P(i64:42)"
+      }
+    },
+    {
+      "name": "integer-widths-and-conversions",
+      "source": "(%function narrow ((v u64)) u8 (let ((mask (cast u8 255))) (%and-primitive-u8 (%trunc-primitive-u64-u8 v) mask)))\n(%function main () (tuple i8 i16 i32 u8 u16 u32 u64 u64 bool bool)\n  (tuple (%+-primitive-i8 127 1)\n         (%sext-primitive-i8-i16 -128)\n         (%trunc-primitive-i64-i32 4294967295)\n         (narrow 18446744073709551615)\n         (%zext-primitive-u8-u16 255)\n         (%reinterpret-primitive-i32-u32 -1)\n         (%/-primitive-u64 18446744073709551615 2)\n         (%sext-primitive-i8-u64 -1)\n         (%>-primitive-u64 18446744073709551615 1)\n         (%/=-primitive-i8 -128 -128)))",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(i8:-128,i16:-128,i32:-1,u8:255,u16:255,u32:4294967295,u64:9223372036854775807,u64:18446744073709551615,bool:1,bool:0)"
+      }
+    },
+    {
+      "name": "integer-bit-operations",
+      "source": "(%function main () (tuple u8 u16 u32 u64 i8 u8)\n  (tuple (%and-primitive-u8 240 63)\n         (%or-primitive-u16 256 255)\n         (%xor-primitive-u32 4294967295 4294967294)\n         (%shl-primitive-u64 1 63)\n         (%shr-primitive-i8 -5 1)\n         (%shl-primitive-u8 1 9)))",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "tuple(u8:48,u16:511,u32:1,u64:9223372036854775808,i8:-3,u8:2)"
+      }
+    },
+    {
+      "name": "narrow-signed-division-overflow",
+      "source": "(%function main () i8 (%/-primitive-i8 -128 -1))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "runtime",
+        "diagnostic": "signed division overflow",
+        "location": [
+          1,
+          23
+        ]
+      }
+    },
+    {
+      "name": "unsigned-division-by-zero",
+      "source": "(%function main () u64 (%/-primitive-u64 18446744073709551615 0))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "runtime",
+        "diagnostic": "division by zero",
+        "location": [
+          1,
+          24
+        ]
+      }
+    },
+    {
+      "name": "tuple-component-patterns",
+      "source": "(%function choose ((value (tuple bool i64))) i64 (match value ((tuple false _) 0) ((tuple ok total) (if ok total 1))))(%function main () i64 (choose (tuple true (cast i64 42))))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "sum-literal-payload-patterns",
+      "source": "(%type S (sum (Some i64) (None)))(%function choose ((value S)) i64 (match value ((Some 0) 10) ((Some x) x) ((None) 0)))(%function main () i64 (choose (Some 42)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "sum-payload-wildcards",
+      "source": "(%type S (sum (Some bool i64) (None)))(%function main () i64 (match (Some false 42) ((Some true _) 0) ((Some _ x) x) ((None) 0)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "expression-macro-expected-type",
+      "source": "(%macro identity (form) form)(%function main () i8 (identity 42))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "i8:42"
+      }
+    },
+    {
+      "name": "compile-time-helper-control",
+      "source": "(%macro helper (input) `(let ((items ,input)) (cond ((empty? items) 0) (true (car (cdr items))))))(%macro answer (&rest values) (helper values))(%function main () i64 (answer skip 42))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "imported-expression-macro-helper",
+      "source": "(%import macros :as m)(%function main () i64 (m:select 42))\n",
+      "modules": {
+        "macros.vrn": "(%export select)(%macro helper (form) `(car (list ,form)))(%macro select (form) (helper form))\n"
+      },
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "macro-nil-arguments",
+      "source": "(%macro empty (&rest values) (equal? values '(() ())))(%function main () bool (empty nil nil))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "bool:1"
+      }
+    },
+    {
+      "name": "default-division",
+      "source": "(%function main () i64 (/ (cast i64 84) 2))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "default-numeric-literal-context",
+      "source": "(%function main () u8 (+ 40 2))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "u8:42"
+      }
+    },
+    {
+      "name": "default-unsigned-comparison",
+      "source": "(%function main () bool (> (cast u64 18446744073709551615) 1))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "structured",
+        "encoding": "bool:1"
+      }
+    },
+    {
+      "name": "default-generic-nominal-extension",
+      "source": "(%type Point (product (value i64)))(%implementation + ((a Point) (b Point)) Point (Point (+ (field a value) (field b value))))(%function main () i64 (field (+ (Point 40) (Point 2)) value))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "default-generic-ambiguous-literals",
+      "source": "(%function main () unit (do (+ 1 1) unit))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "analysis",
+        "diagnostic": "ambiguous numeric literal",
+        "location": [
+          1,
+          32
+        ]
+      }
+    },
+    {
+      "name": "mutable-global-address",
+      "source": "(%variable value i64 40)\n(%function address () (pointer i64) (& value))\n(%function main () i64 (do (store (deref (address)) (%+-primitive-i64 value 2)) value))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "mutable-global-modules",
+      "source": "(%import state :as s)\n(%import state :as alias)\n(%function main () i64 (do (store s:value 40) (alias:bump) (store (deref (& alias:value)) (%+-primitive-i64 s:value 1)) alias:value))\n",
+      "modules": {
+        "state.vrn": "(%variable value i64 1)\n(%function bump () unit (store value (%+-primitive-i64 value 1)))\n(%export value bump)\n"
+      },
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "mutable-global-invalid-initializer",
+      "source": "(%variable value i64\n  (%+-primitive-i64 1 2))\n(%function main () i64 value)\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "analysis",
+        "diagnostic": "variable initializer must be a scalar or data literal",
+        "location": [
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "compile-time-state-data",
+      "source": "(compiler:state-set! (quote answer) (quote (:value (42))))\n(%macro answer () (nth 0 (plist-ref (compiler:state-ref (quote answer)) (quote :value))))\n(%function main () i64 (answer))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "compile-time-state-module-aliases",
+      "source": "(%import registry :as r)\n(%import registry :as other)\n(compiler:state-set! (quote (r:key)) 42)\n(%macro answer () (cond ((equal? (compiler:state-ref (quote r:items)) (quote (ready))) (compiler:state-ref (quote (other:key)))) (true 0)))\n(%function main () i64 (answer))\n",
+      "modules": {
+        "registry.vrn": "(compiler:state-set! (quote registry:items) (quote (ready)))\n"
+      },
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "compile-time-state-specialization-cache",
+      "source": "(compiler:state-set! (quote calls) nil)\n(%macro observe () (let ((old (compiler:state-ref (quote calls)))) (compiler:state-set! (quote calls) (cons (quote call) old)) 42))\n(%function touch (for (T)) ((value T)) i64 (observe))\n(%function use () i64 (%+-primitive-i64 (touch (cast i8 0)) (touch (cast i16 0))))\n(%macro answer () (cond ((equal? (compiler:state-ref (quote calls)) (quote (call))) 42) (true 0)))\n(%function main () i64 (answer))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "compile-time-duplicate-property-key",
+      "source": "(%macro answer ()\n  (plist-ref (quote (:a 1 :a 2)) (quote :a)))\n(%function main () i64 (answer))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "analysis",
+        "diagnostic": "duplicate collection key",
+        "location": [
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "pointer-equality-offset-handles",
+      "source": "(%function main () i64 (let ((x i64 1) (p (& x))) (if (== p (pointer-offset p 0)) 42 0)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "pointer-equality-literal-origin",
+      "source": "(%function main () i64 (let ((p \"abc\")) (if (== p (pointer-offset p 0)) (if (!= p (pointer-offset p 1)) 42 0) 0)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "pointer-equality-callback-identity",
+      "source": "(%type Callback (pointer (function () i64)))\n(%function answer () i64 42)\n(%function main () i64 (let ((a Callback answer) (b Callback answer)) (if (== a b) 42 0)))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "pointer-equality-rejects-implicit-void-conversion",
+      "source": "(%function main () bool\n  (let ((x i64 0))\n    (== (& x) (cast (pointer void) (& x)))))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "analysis",
+        "diagnostic": "no matching generic implementation",
+        "location": [
+          3,
+          5
+        ]
+      }
+    },
+    {
+      "name": "native-export-keeps-local-calls",
+      "source": "(%function answer () i64 42)\n(native-export answer \"public_answer\")\n(%function main () i64 (answer))\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      }
+    },
+    {
+      "name": "native-export-rejects-unit",
+      "source": "(%function invalid () unit unit)\n(native-export invalid)\n(%function main () i64 42)\n",
+      "entry": "main",
+      "arguments": [],
+      "expected": {
+        "failure": "analysis",
+        "diagnostic": "native export must use C-compatible value types",
+        "location": [
+          2,
+          1
+        ]
+      }
+    },
+    {
+      "name": "macro-arbitrary-integer",
+      "source": "(%macro value () (- (+ 18446744073709551615 1) 18446744073709551574))\n(%function main () i64 (value))",
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      },
+      "entry": "main",
+      "arguments": []
+    },
+    {
+      "name": "macro-computed-data",
+      "source": "(%macro value () (string-concat (symbol-name 'an) \"swer\"))\n(%function main () (pointer u8) (value))",
+      "expected": {
+        "type": "data",
+        "encoding": "data:6:answer"
+      },
+      "entry": "main",
+      "arguments": []
+    },
+    {
+      "name": "macro-fractional-value",
+      "source": "(%macro value () (/ 1 2))\n(%function main () f64 (value))",
+      "expected": {
+        "type": "f64",
+        "encoding": "f64:4602678819172646912"
+      },
+      "entry": "main",
+      "arguments": []
+    },
+    {
+      "name": "macro-collection-construction",
+      "source": "(%macro value () (plist-ref (plist-set '(:answer 0) ':answer 42) ':answer))\n(%function main () i64 (value))",
+      "expected": {
+        "type": "i64",
+        "value": "42"
+      },
+      "entry": "main",
+      "arguments": []
+    }
+  ]
+}
