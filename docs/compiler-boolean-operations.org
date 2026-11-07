@@ -2,6 +2,9 @@
 #+DATE: 2026-11-01
 #+STARTUP: overview
 
+For current compiler status and remaining work, see
+[[file:compiler-roadmap.org][the compiler roadmap]]. This document specifies the implemented Boolean API.
+
 * Base API
 | Form                       | Evaluation                                    |
 |----------------------------+-----------------------------------------------|

@@ -254,8 +254,15 @@ unit, command-line, and compiler-reader equivalence suites.
 
 For the complete source-language, Common Lisp, LLVM, compiler-driver, and
 declarative-build reference, see [the API documentation](docs/API.md).
-The planned language and tooling work is described in the
-[roadmap](docs/ROADMAP.md).
+The self-hosted compiler's verified status and remaining work are described in the
+[compiler roadmap](docs/compiler-roadmap.org).
+
+Run `make verify-compiler-release` in the pinned Nix shell from a clean,
+committed checkout to validate an isolated clone of that revision and its pinned
+submodules. It runs `make test`, a fresh A/B/C bootstrap, the project audit using
+the new C, and source-distribution checks. Reports, logs, compiler hashes, and
+the archive remain under `build/compiler-release/`. This native gate currently
+requires arm64 Darwin; it does not certify other execution platforms.
 
 ## Auditing projects with the self-hosted compiler
 

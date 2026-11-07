@@ -638,6 +638,11 @@ integer when an integer is expected, which makes character literals and values
 usable with C APIs such as `putchar`; integer-to-`char` conversion remains
 explicit. Unicode characters are not supported yet.
 
+That character contract describes the Common Lisp reference compiler. The
+compiler written in Verona deliberately keeps character values as `u8` and
+requires explicit integer conversions. This difference was retained by user
+decision on 2026-11-06; see the [compiler roadmap](compiler-roadmap.org).
+
 | Form or function | Signature / behavior |
 | --- | --- |
 | `(let ((name Type initializer) ...) body)` | Introduces sequential immutable lexical bindings. Each initializer is resolved before its own name enters scope; a binding's address may be taken with `&`, but it cannot be assigned through its name. |

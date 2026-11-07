@@ -56,6 +56,9 @@
 
               shellHook = ''
                 export VERONA_CL_LLVM="${clLLVM}"
+                # Keep all LLVM tools on the pinned major version even when an
+                # inherited PATH already contains a different LLVM installation.
+                export PATH="${pkgs.llvmPackages_23.llvm}/bin:${pkgs.llvmPackages_23.clang}/bin:$PATH"
                 # The compiler driver supplies the platform startup objects
                 # and defaults needed to turn a Verona object into a process.
                 export VERONA_LINKER="${pkgs.llvmPackages_23.clang}/bin/clang"

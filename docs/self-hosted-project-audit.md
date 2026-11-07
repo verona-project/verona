@@ -1,5 +1,8 @@
 # Self-hosted project audit
 
+See the [compiler roadmap](compiler-roadmap.org) for verified self-hosting evidence,
+remaining parity work, and the full A/B/C validation sequence.
+
 Inside the pinned Nix development shell, select an existing self-hosted compiler:
 
 ```sh
@@ -83,3 +86,14 @@ New targets, removed targets, changed artifact kinds, unknown checks, dependency
 cycles, and unsupported artifacts fail validation before builds begin. Review
 the policy whenever a target's behavior changes rather than weakening a failing
 check. Add runner tests when extending policy behavior or failure handling.
+
+## Clean release verification
+
+From a clean committed checkout with every submodule at its recorded revision,
+enter the pinned Nix shell and run `make verify-compiler-release`. The command
+clones local committed inputs into a fresh directory without remote fallback,
+runs all tests and a new A/B/C bootstrap, and passes that run’s C explicitly to
+this audit. It also checks the source distribution for required documentation
+and tooling and for leaked generated artifacts. Evidence is retained under
+`build/compiler-release/run-*/`, including the isolated checkout and logs on
+failure. The current native gate requires arm64 Darwin and LLVM 23.

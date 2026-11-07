@@ -12,3 +12,10 @@ compile_flags.txt
 # Native shared libraries (macOS and Linux).
 *.dylib
 *.so
+
+# Generated Autotools configuration state.
+/config.log
+/config.status
+/config.cache
+__pycache__/
+*.pyc

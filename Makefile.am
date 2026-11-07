@@ -17,7 +17,7 @@ project_dist_files = $(shell cd $(verona_srcdir) && find projects -type f ! -nam
 verona_project_files = $(shell find $(verona_srcdir)/projects/project $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
 verona_formatter_files = $(shell find $(verona_srcdir)/projects/formatter/src $(verona_srcdir)/projects/foundation/src $(verona_srcdir)/projects/base/src $(verona_srcdir)/projects/libc/src -type f -name '*.vrn' -print)
 verona_lisp_files = $(shell find $(verona_srcdir)/src -type f -name '*.lisp' -print)
-EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/compiler-foundations.org docs/compiler-in-verona.org docs/IDE-WORKFLOWS.md \
+EXTRA_DIST = AGENT.md CMakeLists.txt assets/calico.png docs/API.md docs/compiler-roadmap.org docs/compiler-boolean-operations.org docs/self-hosted-project-audit.md docs/IDE-WORKFLOWS.md \
 	editors/emacs/verona-mode.el editors/emacs/verona-ide.el editors/emacs/verona-server.el editors/emacs/README.md flake.lock flake.nix license $(project_dist_files) readme.md \
 	scripts src tests $(cl_llvm_files) verona.asd
 
@@ -46,6 +46,7 @@ help:
 	@printf '%s\n' '  make test-compiler-core Compare core evaluation with native LLVM execution'
 	@printf '%s\n' '  make bootstrap-compiler Run recorded A/B/C self-hosting validation'
 	@printf '%s\n' '  make test-self-hosted-projects SELF_HOSTED_COMPILER=/path/to/verona-core'
+	@printf '%s\n' '  make verify-compiler-release Validate a clean revision in an isolated checkout'
 	@printf '%s\n' '  make test-swank     Run optional Swank adapter integration tests'
 	@printf '%s\n' '  make test-editor    Run optional Emacs integration tests'
 	@printf '%s\n' '  make test-workflows Run all compiler, Swank and editor acceptance tests'
@@ -86,7 +87,7 @@ install-exec-local: $(VERONA_EXECUTABLE) $(VERONA_PROJECT) $(VERONA_FORMATTER)
 uninstall-local:
 	$(RM) '$(DESTDIR)$(bindir)/verona' '$(DESTDIR)$(bindir)/verona-project' '$(DESTDIR)$(bindir)/verona-fmt'
 
-test: test-frontend test-llvm test-compiler test-verona test-bounded test-foundation test-formatter test-compiler-core test-llvm-bindings test-compiler-support test-self-hosted-projects-runner
+test: test-frontend test-llvm test-compiler test-verona test-bounded test-foundation test-formatter test-compiler-core test-llvm-bindings test-compiler-support test-self-hosted-projects-runner test-compiler-release-runner
 
 test-frontend:
 	cd $(verona_srcdir) && $(SBCL) --script tests/run.lisp
@@ -213,3 +214,11 @@ test-self-hosted-projects-runner:
 test-self-hosted-projects: test-self-hosted-projects-runner
 	@test -n "$(SELF_HOSTED_COMPILER)" || { echo 'Set SELF_HOSTED_COMPILER to an existing self-hosted verona-core executable.' >&2; exit 1; }
 	$(PYTHON) $(verona_srcdir)/scripts/self-hosted-projects.py --compiler "$(SELF_HOSTED_COMPILER)" --output "$(SELF_HOSTED_PROJECTS_OUTPUT)" --jobs "$(SELF_HOSTED_PROJECTS_JOBS)"
+
+.PHONY: verify-compiler-release test-compiler-release-runner
+test-compiler-release-runner:
+	$(PYTHON) $(verona_srcdir)/tests/test-compiler-release.py
+
+# No build prerequisite: reject dirty inputs before starting a release build.
+verify-compiler-release: test-compiler-release-runner
+	$(PYTHON) $(verona_srcdir)/scripts/verify-compiler-release.py --output $(abs_top_builddir)/build/compiler-release
