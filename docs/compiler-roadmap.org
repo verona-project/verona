@@ -1,5 +1,5 @@
 #+TITLE: Verona Compiler: Current Status and Remaining Work
-#+DATE: 2026-11-06
+#+DATE: 2026-11-07
 #+STARTUP: overview
 
 * Purpose and sources of truth
@@ -27,6 +27,46 @@ implementation. Work in small validated steps. Before each item, describe the
 reference code/tests involved, supporting features needed, and remaining gaps.
 
 * Verified baseline
+** Current clean-checkout checkpoint
+The release gate passed for root revision
+00d572d259b9ff63f0e8f5d87a326069e92a51f8 and compiler revision
+a891dc4d9b8f9cd9a957c5366862af5121d7a209, using the pinned submodules,
+LLVM/Clang 23.1.0, SBCL 2.6.8, and arm64 Darwin 25.1.0.
+The run completed on 2026-11-07.
+
+Command: make verify-compiler-release in the pinned Nix shell. The isolated
+checkout passed make test, a fresh A/B/C bootstrap, the maintained project audit
+using that run’s C, distribution inspection, and final source-cleanliness checks.
+Each A/B/C passed 126 regressions and 64 shared fixtures. B and C compared exactly.
+All 26 audited targets had their intended outcomes, including seven libraries,
+two expected failures, and the explicitly build-only echo server.
+
+Clean B/C SHA-256:
+#+begin_example
+bb912c98e52c0998e86dfdb7e76ce1916a00245262b2ddcf3d096b3ad75ec959
+#+end_example
+Source distribution verona-0.1.0.tar.gz SHA-256:
+#+begin_example
+167c5cef1481dd27cc2e50034c7ffabcab32bccd7b2232b8d36218b66bc3100b
+#+end_example
+
+Evidence:
+- [[file:../build/compiler-release/run-7jxil15y/result.json][Clean release result, revisions, commands, toolchain, and hashes]].
+- [[file:../build/compiler-release/run-7jxil15y/bootstrap/run-o5ygxraa/result.json][Clean A/B/C comparison]].
+- [[file:../build/compiler-release/run-7jxil15y/projects/run-lmuul_0t/REPORT.md][Clean project audit]].
+
+The preceding workspace gate also passed in build/self-hosting/run-nk1rr0hq,
+with B/C each 993,144 bytes and SHA-256
+bdf9e70af5864416608b00fc6ea1be7b459981e170b252e18484082f8ed59836;
+its selected C passed build/self-hosted-projects/run-8a682sfv. That bootstrap
+captured a working-tree snapshot before the implementation commits. Exact B/C
+equality is established within each run. The different clean/workspace hashes
+do not establish reproducibility across checkout paths. Native execution on
+other hosts remains unverified; foreign-object checks have narrower scope.
+This documentation update records the tested revision; it was not part of that
+release archive.
+
+** Historical checkpoints
 Self-hosting has been achieved on arm64 Darwin with LLVM 23 and the existing
 64-bit C ABI. It is not an outstanding language milestone.
 
@@ -49,15 +89,15 @@ build/self-hosted-projects/run-9o40vzhb passed all 26 inventoried targets:
 17 normal executables, seven libraries, and two intentional failures at their
 expected analysis/link phases. Applicable runtime and generated-header checks
 passed; echo-server is explicitly build-only. Projects build directly through
-verona-core build, including the compiler's own manifest. The latest recorded
-core validation reports 117 regressions and 60 shared fixtures, plus 33 driver
+verona-core build, including the compiler's own manifest. That recorded
+core validation reported 117 regressions and 60 shared fixtures, plus 33 driver
 checks and the support suite.
 
 These records establish different facts: the earlier gate proves a complete
 A/B/C rebuild and exact equality for that source snapshot; later self-hosted
-rebuilds and the project audit exercise newer features. The later changes have
-not yet repeated the complete A/B/C comparison. The audit recorded working
-sources and does not certify a clean release checkout. Counts are dated evidence,
+rebuilds and the project audit exercise newer features. Those later changes had
+not repeated the complete A/B/C comparison before the current checkpoint above.
+That audit recorded working sources and did not certify a clean release checkout. Counts are dated evidence,
 not permanent expectations for a growing suite.
 
 Evidence is generated locally and excluded from source control:
@@ -103,7 +143,7 @@ decisions below instead of repeating historical implementation logs.
 Completion: no live links or distribution entries point at deleted documents,
 and current references agree that self-hosting and manifest builds are implemented.
 
-** TODO 2. Repeat the complete gate for the current source
+** DONE 2. Repeat the complete gate for the current source
 Run in the pinned Nix development shell:
 #+begin_src sh
 make test-compiler-core test-compiler-support test-llvm-bindings
@@ -140,13 +180,13 @@ the new compiler or silently extend the language during a parity port.
 Completion: each public contract has an explicit disposition and each missing
 contract has a focused failing test or a documented planned test.
 
-** TODO 4. Complete the compile-time helper API
+** DONE 4. Complete the compile-time helper API
 Implementation now covers all five batches below, with immutable arena-owned
 arbitrary-precision integers and generated integer/float/data literals that retain
 expansion origins. The 126-test regression suite and 64 shared fixtures pass;
 reference comparisons, independent big-integer/float expectations, malformed
-inputs, numeric boundaries, and work limits are covered. Final completion still
-requires the fresh self-hosted bootstrap and project audit in step 2.
+inputs, numeric boundaries, and work limits are covered. The fresh workspace and
+clean-checkout bootstraps and project audits also passed, as recorded above.
 
 Port related operations in small batches, comparing reference behavior and
 invalid-argument diagnostics before proceeding to the next batch:
@@ -288,13 +328,13 @@ Completion: publish the tested host/target/optimization matrix with exact scope;
 keep unsupported combinations explicit. Preserve source-aware runtime failures
 even while native stack traces remain unavailable.
 
-** TODO 10. Establish a clean-checkout release checkpoint
+** DONE 10. Establish a clean-checkout release checkpoint
 The new make verify-compiler-release command implements this gate in
 scripts/verify-compiler-release.py. It rejects dirty/unpinned inputs, clones the
 selected revision and local pinned submodules without network fallback, retains
 logs, checks exact bootstrap equality, audits the selected C, and inspects the
-source distribution. Seven Python runner tests pass; the full clean release run
-is still pending.
+source distribution. Seven Python runner tests pass, and the full clean release run
+passed for revision 00d572d as recorded above.
 
 Record every root/submodule revision and pinned dependency/toolchain. Build from
 a clean checkout with fresh outputs, repeat step 2, and validate the selected
