@@ -10,6 +10,3 @@
 [submodule "projects/foundation"]
 	path = projects/foundation
 	url = https://github.com/verona-project/foundation.git
-[submodule "projects/project"]
-	path = projects/project
-	url = https://github.com/verona-project/project.git

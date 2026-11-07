@@ -110,6 +110,20 @@ Build the target from the directory containing the manifest:
 verona build hello build
 ```
 
+## Project management
+
+The repository also builds `verona-project`, a native tool for creating a
+minimal Verona project and listing locally available libraries:
+
+```sh
+build/verona-project new my-app
+build/verona-project libraries
+```
+
+`libraries` reads the absolute directory named by `VERONA_SOURCE_DIR` and
+groups its immediate library directories by name and available version. See
+`build/verona-project --help` for command usage.
+
 The output directory may be relative or absolute. Module and native-library
 paths are resolved relative to the manifest. Supported target options include
 `root`, repeatable `module-path`, `target`, `optimize`, `version`, `features`,

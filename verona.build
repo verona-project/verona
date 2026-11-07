@@ -23,6 +23,15 @@
   (optimize 2))
 
 (executable
+  verona-project
+  (root project)
+  (version "0.1.0")
+  (module-path "src")
+  (module-path "projects/base/src")
+  (module-path "projects/libc/src")
+  (optimize 2))
+
+(executable
   formatter-tests
   (root formatter.tests)
   (module-path "tests")
