@@ -1,0 +1,51 @@
+(import base)
+(import allocator)
+(import foundation.compat.arithmetic)
+(import foundation.compat.arithmetic :as n)
+(import array)
+(import arena)
+(import data)
+(import string)
+(import formatter.model)
+(import formatter.model :as m)
+(import formatter.lexer :as lexer)
+(import formatter.parser :as parser)
+(import formatter.layout :as layout)
+
+; Transactional output: failures leave an existing destination unchanged.
+; Source may borrow the destination, since all rendering precedes the commit.
+(base:function perform
+  ((source data:view) (width u64) (out (pointer data:data)) (backing allocator:backend)) m:status
+  (let
+    ((workspace arena:arena (arena:create backing 4096))
+     (items m:tape (m:empty (arena:allocator (& workspace))))
+     (staging data:data (data:empty (field (tuple-get (deref out) 3) allocator)))
+     (result
+       m:status
+       (m:steps
+         (lexer:scan source (& items))
+         (parser:parse items)
+         (layout:format source items width (& staging)))))
+    (do
+      (m:nodes-destroy (& items))
+      (arena:destroy (& workspace))
+      (match result
+        ((ok) (do (data:destroy out) (store (deref out) staging) (m:success)))
+        (failure (do (data:destroy (& staging)) failure))))))
+
+(base:function format
+  ((source data:view) (width u64) (out (pointer data:data)) (backing allocator:backend)) m:status
+  (match (n:lt width 20)
+    (true (m:limit 0 "width must be between 20 and 240"))
+    (false
+      (match (n:gt width 240)
+        (true (m:limit 0 "width must be between 20 and 240"))
+        (false
+          (match (n:gt (field source length) 16777216)
+            (true (m:limit 0 "input limit (16 MiB) exceeded"))
+            (false
+              (match (string:validate source)
+                ((tuple false _) (m:syntax 0 "source is not valid UTF-8"))
+                (_ (perform source width out backing))))))))))
+
+(export format)

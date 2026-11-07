@@ -1,0 +1,167 @@
+(import base)
+(import testing)
+(import foundation.compat.arithmetic :as n)
+(import data)
+(import formatter.test_support :as support)
+(import allocator)
+(import system_allocator :as system)
+(import formatter)
+(import formatter.model :as m)
+
+(testing:test width-too-small
+  (let ((output data:data (data:empty (system:create))))
+    (let
+      ((result
+         testing:result
+         (testing:checks
+           (support:successful (m:from-storage (data:assign-bytes (& output) (support:view "old"))))
+           (testing:check
+             (match (formatter:format (support:view "(a)") 19 (& output) (system:create))
+               ((limit-error offset message) true)
+               (_ false)))
+           (testing:check (data:equal (data:borrow output) (support:view "old"))))))
+      (do (data:destroy (& output)) result))))
+
+(testing:test width-too-large
+  (let ((output data:data (data:empty (system:create))))
+    (let
+      ((result
+         testing:result
+         (testing:checks
+           (support:successful (m:from-storage (data:assign-bytes (& output) (support:view "old"))))
+           (testing:check
+             (match (formatter:format (support:view "(a)") 241 (& output) (system:create))
+               ((limit-error offset message) true)
+               (_ false)))
+           (testing:check (data:equal (data:borrow output) (support:view "old"))))))
+      (do (data:destroy (& output)) result))))
+
+(testing:test syntax-does-not-replace-destination
+  (let ((output data:data (data:empty (system:create))))
+    (let
+      ((result
+         testing:result
+         (testing:checks
+           (support:successful (m:from-storage (data:assign-bytes (& output) (support:view "old"))))
+           (testing:check
+             (match (formatter:format (support:view "(a") 100 (& output) (system:create))
+               ((syntax-error offset message) true)
+               (_ false)))
+           (testing:check (data:equal (data:borrow output) (support:view "old"))))))
+      (do (data:destroy (& output)) result))))
+
+(testing:test workspace-metadata-failure
+  (let ((output data:data (data:empty (system:create))))
+    (let
+      ((result
+         testing:result
+         (testing:checks
+           (support:successful (m:from-storage (data:assign-bytes (& output) (support:view "old"))))
+           (do
+             (support:limit 0)
+             (testing:checks
+               (testing:check
+                 (match (formatter:format (support:view "(a)") 100 (& output) (support:failing))
+                   ((allocation-error reason) true)
+                   (_ false)))
+               (testing:check (n:eq (support:outstanding) 0))))
+           (testing:check (data:equal (data:borrow output) (support:view "old"))))))
+      (do (data:destroy (& output)) result))))
+
+(testing:test workspace-payload-failure
+  (let ((output data:data (data:empty (system:create))))
+    (let
+      ((result
+         testing:result
+         (testing:checks
+           (support:successful (m:from-storage (data:assign-bytes (& output) (support:view "old"))))
+           (do
+             (support:limit 1)
+             (testing:checks
+               (testing:check
+                 (match (formatter:format (support:view "(a)") 100 (& output) (support:failing))
+                   ((allocation-error reason) true)
+                   (_ false)))
+               (testing:check (n:eq (support:outstanding) 0))))
+           (testing:check (data:equal (data:borrow output) (support:view "old"))))))
+      (do (data:destroy (& output)) result))))
+
+(testing:test output-allocation-failure-preserves-owner
+  (do
+    (support:limit 1)
+    (let ((output data:data (data:empty (support:failing))))
+      (let
+        ((result
+           testing:result
+           (testing:checks
+             (support:successful
+               (m:from-storage (data:assign-bytes (& output) (support:view "old"))))
+             (do
+               (support:limit 0)
+               (testing:check
+                 (match
+                   (formatter:format
+                     (support:view "(a long replacement)")
+                     100
+                     (& output)
+                     (system:create))
+                   ((allocation-error reason) true)
+                   (_ false))))
+             (testing:check (data:equal (data:borrow output) (support:view "old"))))))
+        (do
+          (data:destroy (& output))
+          (testing:checks result (testing:check (n:eq (support:outstanding) 0))))))))
+
+(testing:test borrowed-destination-can-be-formatted-in-place
+  (let ((output data:data (data:empty (system:create))))
+    (let
+      ((result
+         testing:result
+         (testing:checks
+           (support:successful
+             (m:from-storage (data:assign-bytes (& output) (support:view " ( a b ) "))))
+           (support:successful
+             (formatter:format (data:borrow output) 100 (& output) (system:create)))
+           (testing:check (data:equal (data:borrow output) (support:view "(a b)\n"))))))
+      (do (data:destroy (& output)) result))))
+
+(testing:test invalid-utf8
+  (let ((output data:data (data:empty (system:create))) (bad (array u8 2) (array-of 192 128)))
+    (let
+      ((result
+         testing:result
+         (testing:checks
+           (support:successful (m:from-storage (data:assign-bytes (& output) (support:view "old"))))
+           (testing:check
+             (match
+               (formatter:format (data:view (& (index bad 0)) 2) 100 (& output) (system:create))
+               ((syntax-error offset message) true)
+               (_ false)))
+           (testing:check (data:equal (data:borrow output) (support:view "old"))))))
+      (do (data:destroy (& output)) result))))
+
+(testing:test non-ascii-string-literal
+  (let ((output data:data (data:empty (system:create))) (bad (array u8 4) (array-of 34 195 169 34)))
+    (let
+      ((result
+         testing:result
+         (testing:checks
+           (support:successful (m:from-storage (data:assign-bytes (& output) (support:view "old"))))
+           (testing:check
+             (match
+               (formatter:format (data:view (& (index bad 0)) 4) 100 (& output) (system:create))
+               ((syntax-error offset message) (n:eq offset 1))
+               (_ false)))
+           (testing:check (data:equal (data:borrow output) (support:view "old"))))))
+      (do (data:destroy (& output)) result))))
+
+(export
+  width-too-small
+  width-too-large
+  syntax-does-not-replace-destination
+  workspace-metadata-failure
+  workspace-payload-failure
+  output-allocation-failure-preserves-owner
+  borrowed-destination-can-be-formatted-in-place
+  invalid-utf8
+  non-ascii-string-literal)

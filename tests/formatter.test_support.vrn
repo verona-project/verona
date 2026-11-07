@@ -1,0 +1,117 @@
+(import base)
+(import testing)
+(import allocator)
+(import foundation.compat.arithmetic :as n)
+(import data)
+(import system_allocator :as system)
+(import formatter)
+(import formatter.model)
+(import formatter.model :as m)
+(import formatter.lexer :as lexer)
+
+(base:function length-at ((text (pointer u8)) (i u64)) u64
+  (match (deref (pointer-offset text i)) (0 i) (_ (length-at text (n:add i 1)))))
+
+(base:function length ((text (pointer u8))) u64
+  (length-at text 0))
+
+(base:function view ((text (pointer u8))) data:view
+  (data:view text (length text)))
+
+(base:function successful ((status m:status)) testing:result
+  (testing:check (match status ((ok) true) (_ false))))
+
+(base:function token-equality ((left data:view) (right data:view) (a m:tape) (b m:tape) (i u64))
+  testing:result
+  (match (n:eq i (m:nodes-length a))
+    (true (testing:empty))
+    (false
+      (let ((first m:node (m:at a i)) (second m:node (m:at b i)))
+        (testing:checks
+          (testing:check (n:eq (field first kind) (field second kind)))
+          (testing:check
+            (data:equal
+              (data:view
+                (pointer-offset (field left bytes) (field first start))
+                (field first length))
+              (data:view
+                (pointer-offset (field right bytes) (field second start))
+                (field second length))))
+          (token-equality left right a b (n:add i 1)))))))
+
+(base:function preserved ((left data:view) (right data:view)) testing:result
+  (let
+    ((a m:tape (m:empty (system:create)))
+     (b m:tape (m:empty (system:create)))
+     (result
+       testing:result
+       (match (m:steps (lexer:scan left (& a)) (lexer:scan right (& b)))
+         ((ok)
+          (match (n:eq (m:nodes-length a) (m:nodes-length b))
+            (true (token-equality left right a b 0))
+            (false (testing:fail))))
+         (_ (testing:fail)))))
+    (do (m:nodes-destroy (& a)) (m:nodes-destroy (& b)) result)))
+
+; Every golden case also checks byte-for-byte lexeme preservation and idempotence.
+(base:function golden-view ((input data:view) (expected data:view) (width u64)) testing:result
+  (let
+    ((output data:data (data:empty (system:create)))
+     (second data:data (data:empty (system:create)))
+     (result
+       testing:result
+       (match (formatter:format input width (& output) (system:create))
+         ((ok)
+          (testing:checks
+            (testing:check (data:equal (data:borrow output) expected))
+            (preserved input (data:borrow output))
+            (match (formatter:format (data:borrow output) width (& second) (system:create))
+              ((ok) (testing:check (data:equal (data:borrow second) (data:borrow output))))
+              (_ (testing:fail)))))
+         (_ (testing:fail)))))
+    (do (data:destroy (& second)) (data:destroy (& output)) result)))
+
+(base:function golden ((input (pointer u8)) (expected (pointer u8)) (width u64)) testing:result
+  (golden-view (view input) (view expected) width))
+
+(base:function rejected ((input (pointer u8)) (offset u64)) testing:result
+  (let
+    ((output data:data (data:empty (system:create)))
+     (result
+       testing:result
+       (match (formatter:format (view input) 100 (& output) (system:create))
+         ((syntax-error position message) (testing:check (n:eq position offset)))
+         (_ (testing:fail)))))
+    (do (data:destroy (& output)) result)))
+
+(base:variable budget u64 0)
+
+(base:variable live u64 0)
+
+(base:function limit ((count u64)) unit
+  (do (assign budget count) unit))
+
+(base:function outstanding () u64
+  live)
+
+(base:function oom () allocator:error
+  (out-of-memory))
+
+(base:function acquire ((context (pointer void)) (size u64) (alignment u64)) allocator:result
+  (match (n:eq budget 0)
+    (true (allocator:failure (oom)))
+    (false
+      (do
+        (assign budget (n:sub budget 1))
+        (match (allocator:allocate (system:create) size alignment)
+          ((failed reason) (allocator:failure reason))
+          ((allocated bytes) (do (assign live (n:add live 1)) (allocator:success bytes))))))))
+
+(base:function release ((context (pointer void)) (bytes (pointer u8)) (size u64) (alignment u64))
+  unit
+  (do (assign live (n:sub live 1)) (allocator:deallocate (system:create) bytes size alignment)))
+
+(base:function failing () allocator:backend
+  (allocator:backend (cast (pointer void) "") acquire release))
+
+(export view successful golden-view golden preserved rejected limit outstanding failing)

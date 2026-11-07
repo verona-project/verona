@@ -118,6 +118,18 @@ paths are resolved relative to the manifest. Supported target options include
 Manifests describe individual artifacts rather than a dependency graph, so
 native dependencies must be built before the targets that link them.
 
+## Formatter
+
+The repository also builds the Verona source formatter. It reads one source file
+or standard input and writes formatted source to standard output; `--check`
+reports whether formatting would change the input.
+
+```sh
+verona-formatter src/core.cli.vrn
+verona-formatter --check src/core.cli.vrn
+verona-formatter --width 80 < input.vrn
+```
+
 ## License
 
 Verona is released under the [Unlicense](license): it is free and unencumbered
