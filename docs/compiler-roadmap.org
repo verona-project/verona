@@ -170,8 +170,9 @@ for that corpus, not proof of complete language or CLI parity.
 The inventory is projects/compiler/tests/compiler_contracts.json: 22 contract
 families with reference paths, test names, retained limits, and planned checks.
 The helper-level inventory is projects/compiler/tests/compile_time_parity.json.
-The review found missing early return and CPU/feature CLI options; these remain
-explicit gaps rather than being inferred from successful project builds.
+The review found missing early return and CPU/feature CLI options. Early return
+is a retained limitation for now by user decision on 2026-11-07; CPU/feature
+CLI options remain parity gaps.
 
 Start with core.expand.vrn and the helper inventory. Keep existing behavior covered
 while extending it. Do not classify documented reference limitations as bugs in
@@ -269,9 +270,10 @@ and caching restrictions below. Character literals deliberately remain u8 with
 explicit conversions, as selected by the user on 2026-11-06; the reference has a
 distinct char type and implicit widening. README.md and API.md record this.
 
-The review also found missing early return. Implement return only with never-type
-checking, unreachable diagnostics, terminating LLVM branches/joins, and evaluator
-frame/storage cleanup together. The inventory records the planned cases.
+Early return is retained as a documented limitation for now by user decision on
+2026-11-07. If it is implemented later, add never-type checking, unreachable
+diagnostics, terminating LLVM branches/joins, and evaluator frame/storage cleanup
+together. The inventory records the planned cases for that future work.
 
 Review against the reference before scheduling implementation:
 - Guards, nested structured patterns, and product destructuring are unsupported.
