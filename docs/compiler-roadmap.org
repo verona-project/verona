@@ -66,6 +66,27 @@ other hosts remains unverified; foreign-object checks have narrower scope.
 This documentation update records the tested revision; it was not part of that
 release archive.
 
+** Target-option and default-output checkpoint
+Root revision fa27be1aadef77bd5ab319c73417ae43c5df3bae and compiler revision
+26ef66d implement direct --cpu/--features target-machine configuration and
+source-adjacent default output paths. On arm64 Darwin with LLVM 23, the focused
+tests, 127 compiler regressions, 64 evaluator/native shared fixtures, LLVM binding
+suite, and compiler-support suite passed. A fresh A/B/C bootstrap then passed the
+same compiler suites at every stage and compared B/C exactly. Each B/C compiler
+is 993,224 bytes with SHA-256:
+
+#+begin_example
+ca44acb5de4f6ed79f63480f80858dfc66931006f3f3f3973d1c2115eecd5121
+#+end_example
+
+The selected C passed all 26 maintained project-audit targets. Evidence:
+- [[file:../build/self-hosting/run-d_6es0ns/result.json][A/B/C comparison]].
+- [[file:../build/self-hosting/run-d_6es0ns/inputs.json][Revisions, toolchain, inputs, and options]].
+- [[file:../build/self-hosted-projects/run-4nc_8e1e/REPORT.md][Project audit]].
+
+This documentation-only update follows the tested revision and does not change
+the compiler inputs validated by that checkpoint.
+
 ** Historical checkpoints
 Self-hosting has been achieved on arm64 Darwin with LLVM 23 and the existing
 64-bit C ABI. It is not an outstanding language milestone.
