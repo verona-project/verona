@@ -63,9 +63,11 @@
 
 (base:external-function layout-string "LLVMCopyStringRepOfTargetData" (t:layout-ref) (pointer u8))
 
-(base:function machine-for-triple
+(base:function machine-for-triple-with-options
   ((module t:module-ref)
    (triple (pointer u8))
+   (cpu (pointer u8))
+   (features (pointer u8))
    (optimization i32)
    (out-message (pointer (pointer u8)))) t:machine-ref
   (let ((target t:target-ref (cast t:target-ref (null-pointer))))
@@ -86,8 +88,8 @@
                (machine-create
                  target
                  triple
-                 "generic"
-                 ""
+                 cpu
+                 features
                  optimization
                  enum:reloc-pic
                  enum:code-model-default)))
@@ -106,6 +108,14 @@
                       unit))))
               machine)))
         (_ (cast t:machine-ref (null-pointer)))))))
+
+; Preserve the generic target defaults for existing binding consumers.
+(base:function machine-for-triple
+  ((module t:module-ref)
+   (triple (pointer u8))
+   (optimization i32)
+   (out-message (pointer (pointer u8)))) t:machine-ref
+  (machine-for-triple-with-options module triple "generic" "" optimization out-message))
 
 ; LLVMInitializeNativeTarget is a header inline function, not a library symbol.
 (base:function initialize-native () unit
@@ -182,6 +192,7 @@
 
 (export
   machine-for-triple
+  machine-for-triple-with-options
   pointer-size
   layout-string
   abi-size

@@ -292,8 +292,11 @@ These are follow-up decisions, not failed self-hosting criteria.
 ** TODO 8. Finish driver and workflow parity review
 Manifest builds and all four direct artifact kinds already work. Version reporting
 (--version/-V) and --output as an alias for -o are now implemented and tested.
-Direct compilation still requires an explicit output; --cpu and --features are
-missing. Target context reports generic CPU until CPU selection is implemented. Use the inventory
+Direct compilation now derives source-adjacent default names for all four artifact
+kinds. --cpu and --features configure LLVM target-machine creation, and target
+context reports the selected CPU. Focused tests cover a foreign object, option
+validation, compile-time target information, and default artifact/header paths.
+Use the inventory
 from step 3 to find actual remaining driver/CLI differences rather than rebuilding
 those features. Review option validation, search/link order, exported symbol and
 header contracts, failure cleanup, target facts, and developer tooling separately.
