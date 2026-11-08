@@ -12,6 +12,7 @@ import tempfile
 import unittest
 
 COMPILER = Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 else Path("build/verona").resolve()
+REFERENCE_COMPILER = Path(os.environ.get("VERONA_REFERENCE", "build/verona")).resolve()
 
 
 class CoreTests(unittest.TestCase):
@@ -69,7 +70,7 @@ class CoreTests(unittest.TestCase):
 
     def test_compile_time_helpers_reference_comparison(self):
         inventory = json.loads((Path(__file__).parent / "compile_time_parity.json").read_text())
-        host = Path(__file__).resolve().parents[1] / "build/verona"
+        host = REFERENCE_COMPILER
         for operation in inventory["operations"]:
             if operation["status"] != "implemented":
                 continue
@@ -170,7 +171,7 @@ class CoreTests(unittest.TestCase):
         self.assertIn("floating-point", result.stderr)
 
     def test_cli_version_and_output_alias(self):
-        host = Path(__file__).resolve().parents[1] / "build/verona"
+        host = REFERENCE_COMPILER
         reference = subprocess.run([str(host), "--version"], capture_output=True, text=True, timeout=10)
         self.assertEqual(reference.returncode, 0, reference.stderr)
         for flag in ("--version", "-V"):
@@ -2402,7 +2403,7 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_base_boolean_operations(self):
-        host = Path(__file__).resolve().parents[1] / "build/verona"
+        host = REFERENCE_COMPILER
         base = Path(__file__).resolve().parents[1] / "projects/base/src"
         source = self.root / "input.vrn"
         manifest = self.root / "verona.build"
@@ -2765,9 +2766,9 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(result.stdout.count("ret i64 11"), 1)
 
     def test_module_reference_parity(self):
-        # Same module graphs through the existing Common Lisp compiler and the
-        # Verona compiler. Only declaration spelling and the native entry ABI differ.
-        host = Path(__file__).resolve().parents[1] / "build/verona"
+        # Same module graphs through the configured reference seed and the
+        # compiler under test. Only declaration spelling and the native entry ABI differ.
+        host = REFERENCE_COMPILER
         cases = [
             ("aliases-and-diamond", {
                 "input": "(%import bridge)(%import library :as other)" + self.program("(%+-primitive-i64 (bridge:answer) (other:answer))"),

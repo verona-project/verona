@@ -66,8 +66,21 @@ python3 tests/test_core.py build/compiler/verona
 python3 tests/shared_suite.py build/compiler/verona
 #+end_src
 
-The replacement Makefile should provide concise targets for these commands
-without introducing a second implementation of build or test policy.
+The root Autotools interface keeps this invocation policy in the compiler
+rather than reimplementing it in Make. Configure with an explicit compatible
+seed (the development default is =build/verona=), then build and test:
+
+#+begin_src sh
+autoreconf -fi
+./configure --with-seed="$PWD/build/verona"
+make build
+make check
+#+end_src
+
+The rebuilt compiler is =build/compiler/verona=; formatter and project tools
+are respectively under =build/formatter/= and =build/project/=. Configuration
+requires LLVM 23, Python 3, Clang, and =llvm-ar=, and exports the selected LLVM
+library and native-tool settings to all build and test commands.
 
 * Implemented compiler capabilities
 
@@ -92,17 +105,11 @@ without introducing a second implementation of build or test policy.
 
 * Next work
 
-** 1. Restore the root build interface
+** 1. Define a reproducible seed release process
 
-Create the new Autoconf/Automake files around the self-hosted compiler. The build
-must accept an explicit seed compiler, build =verona= from the root manifest, run
-the Python and Verona test suites, and install the resulting compiler. Do not
-restore SBCL, ASDF, CL-LLVM, or the archived IDE server.
-
-Define how a fresh checkout obtains a compatible seed compiler. A local ignored
-=build/verona= is sufficient for development but not for a reproducible source
-release. The release process should either accept an explicit seed path or fetch
-a versioned compiler artifact with a recorded hash.
+The build accepts an explicit seed path, but a source release still needs a
+versioned compatible seed artifact and recorded hash. Define that publication
+and verification process without restoring the archived compiler or its tools.
 
 ** 2. Disposition retained language restrictions
 

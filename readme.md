@@ -53,6 +53,21 @@ The repository's pinned LLVM 23 environment is available through Nix:
 nix develop --offline path:.
 ```
 
+To rebuild the self-hosted compiler, supply a compatible seed compiler. A
+development checkout normally keeps that seed at `build/verona`:
+
+```sh
+autoreconf -fi
+./configure --with-seed="$PWD/build/verona"
+make build
+make check
+```
+
+`make build` writes the compiler to `build/compiler/verona` and also builds
+`verona-formatter` and `verona-project`. `make install` installs all three
+tools. For a source release, pass the recorded seed artifact explicitly with
+`--with-seed`; configuration rejects a missing seed or a non-LLVM-23 toolchain.
+
 ## Command line options
 
 ```text
