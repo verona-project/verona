@@ -838,12 +838,17 @@
       (match (field state code)
         (0
           (do
-            (match (field literal mode)
-              (0 (finish-atom c (field source length)))
-              (5 (finish-character c (field literal start) (field source length)))
-              (4 (fail c 9 (field literal start) 2))
-              (_
-                (fail c 6 (field literal start) (n:sub (field source length) (field literal start)))))
+            (match literal
+              ((normal) (finish-atom c (field source length)))
+              ((character-name start) (finish-character c start (field source length)))
+              ((character-first-byte start) (fail c 9 start 2))
+              ((splice-marker) (finish-atom c (field source length)))
+              ((data-literal start)
+               (fail c 6 start (n:sub (field source length) start)))
+              ((data-escape start)
+               (fail c 6 start (n:sub (field source length) start)))
+              ((character-prefix start)
+               (fail c 6 start (n:sub (field source length) start))))
             (match (field state code)
               (0
                 (match (frames-length stack)

@@ -2911,7 +2911,7 @@ class CoreTests(unittest.TestCase):
             (self.program("9223372036854775808"), "out of range"),
             (self.program("-9223372036854775809"), "out of range"),
             (self.program("12x"), "invalid decimal"), (self.program("missing"), "unknown local"),
-            (self.program("(missing)"), "unknown function"),
+            (self.program("(missing)"), "unknown function: missing"),
             (self.program("(%+-primitive-i64 1 true)"), "type mismatch"),
             (self.program("(%+-primitive-i64 1)"), "primitive requires"),
             (self.program("(if 1 2 3)"), "type mismatch"),
@@ -3613,6 +3613,7 @@ int main(void) {{
             self.assertIn(location, result.stderr)
         for source, message in (('"-', "unterminated data literal"),
                                 ("'", "reader prefix requires an operand"),
+                                (",@", "reader prefix requires an operand"),
                                 ("(,)", "reader prefix requires an operand")):
             result = self.run_core("read", source)
             self.assertEqual(result.returncode, 2, result.stderr)
