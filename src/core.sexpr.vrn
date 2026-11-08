@@ -111,6 +111,11 @@
     (character-name u64)
     (splice-marker)))
 
+(base:type feature-polarity (sum (feature-present) (feature-absent)))
+
+(base:type feature-directive
+  (sum (no-feature-operator) (feature-condition feature-polarity)))
+
 (base:type feature (product (name (pointer u8)) (next (pointer void))))
 
 (base:type features
@@ -527,11 +532,15 @@
          (false false)))
       (true false))))
 
-(base:function feature-operator ((c context) (start u64) (end u64)) u64
+(base:function feature-operator ((c context) (start u64) (end u64)) feature-directive
   (base:cond
-    ((n:lt (n:sub end start) 2) 0)
-    ((n:eq (byte c start) 35) (match (byte c (n:add start 1)) (43 43) (45 45) (_ 0)))
-    (true 0)))
+    ((n:lt (n:sub end start) 2) (no-feature-operator))
+    ((n:eq (byte c start) 35)
+     (match (byte c (n:add start 1))
+       (43 (feature-condition (feature-present)))
+       (45 (feature-condition (feature-absent)))
+       (_ (no-feature-operator))))
+    (true (no-feature-operator))))
 
 (base:function feature-enabled ((target features) (bytes (pointer u8)) (length u64)) bool
   (base:cond
@@ -561,7 +570,7 @@
 (base:function address ((p (pointer void))) u64
   (deref (cast (pointer u64) (cast (pointer void) (& p)))))
 
-(base:function finish-feature ((c context) (operator u64) (start u64) (end u64)) unit
+(base:function finish-feature ((c context) (operator feature-polarity) (start u64) (end u64)) unit
   (let
     ((first u64 (n:add start 2))
      (length u64 (n:sub end first))
@@ -574,7 +583,10 @@
           ((available bool (feature-enabled target bytes length))
            (kind
              u64
-             (match (match operator (43 available) (_ (match available (true false) (false true))))
+             (match
+               (match operator
+                 ((feature-present) available)
+                 ((feature-absent) (match available (true false) (false true))))
                (true 11)
                (false 12))))
           (consume c (token kind (span:span (field c file) start (n:sub end start) 0))))))))
@@ -587,8 +599,8 @@
         (do
           (set-active c false)
           (match (feature-operator c (field v start) end)
-            (0 (finish-ordinary-atom c v end))
-            (operator (finish-feature c operator (field v start) end))))))))
+            ((no-feature-operator) (finish-ordinary-atom c v end))
+            ((feature-condition operator) (finish-feature c operator (field v start) end))))))))
 
 (base:function finish-ordinary-atom ((c context) (v scan) (end u64)) unit
   (match (field v bad)
