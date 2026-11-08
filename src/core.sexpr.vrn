@@ -99,8 +99,17 @@
 ; Borrowed working set for one read: source/file identity, output arrays,
 ; pending-child/open-list stacks, name interner/arena, and scan state.
 ; Pointers refer to caller-owned storage and do not escape the read.
-; Modes: normal=0, data=1, data escape=2, character prefix=3, first byte=4, name=5, splice marker=6.
-(base:type literal-scan (product (mode u64) (start u64)))
+; Literal state carries a start offset only while an unfinished literal needs
+; it. The sum prevents unrelated mode/start combinations.
+(base:type literal-scan
+  (sum
+    (normal)
+    (data-literal u64)
+    (data-escape u64)
+    (character-prefix u64)
+    (character-first-byte u64)
+    (character-name u64)
+    (splice-marker)))
 
 (base:type feature (product (name (pointer u8)) (next (pointer void))))
 
@@ -643,12 +652,12 @@
     ((named-byte bytes length "return") 13)
     (true 128)))
 
-(base:function literal-state ((c context) (mode u64) (start u64)) unit
-  (do (store (deref (field c literal)) (literal-scan mode start)) unit))
+(base:function literal-state ((c context) (state literal-scan)) unit
+  (do (store (deref (field c literal)) state) unit))
 
 (base:function finish-literal ((c context) (kind u64) (start u64) (end u64)) unit
   (do
-    (literal-state c 0 0)
+    (literal-state c (normal))
     (consume c (token kind (span:span (field c file) start (n:sub end start) 0)))))
 
 (base:function finish-character ((c context) (start u64) (end u64)) unit
@@ -666,10 +675,7 @@
 
 (base:function step ((c context) (i u64)) unit
   (let
-    ((b u64 (byte c i))
-     (v literal-scan (deref (field c literal)))
-     (start u64 (field v start))
-     (end u64 (n:add i 1)))
+    ((b u64 (byte c i)) (v literal-scan (deref (field c literal))) (end u64 (n:add i 1)))
     (do
       (match b
         (10 (storage c (ids-append (field c lines) end)))
@@ -680,23 +686,25 @@
             ((n:eq (byte c end) 10) unit)
             (true (storage c (ids-append (field c lines) end)))))
         (_ unit))
-      (match (field v mode)
-        (1
+      (match v
+        ((data-literal start)
           (base:cond
             ((n:eq b 34) (finish-literal c 4 start end))
-            ((n:eq b 92) (literal-state c 2 start))
+            ((n:eq b 92) (literal-state c (data-escape start)))
             ((n:eq b 0) (fail c 8 i 1))
             ((n:gt b 127) (fail c 8 i 1))
             (true unit)))
-        (2 (match (escape-byte b) (0 (fail c 7 i 1)) (_ (literal-state c 1 start))))
-        (3 (literal-state c 4 start))
-        (4 (match b (0 (fail c 9 i 1)) (_ (literal-state c 5 start))))
-        (5
+        ((data-escape start)
+         (match (escape-byte b) (0 (fail c 7 i 1)) (_ (literal-state c (data-literal start)))))
+        ((character-prefix start) (literal-state c (character-first-byte start)))
+        ((character-first-byte start)
+         (match b (0 (fail c 9 i 1)) (_ (literal-state c (character-name start)))))
+        ((character-name start)
           (match (character-delimiter b)
             (true (do (finish-character c start i) (step-atom c i b)))
             (false unit)))
-        (6 (literal-state c 0 0))
-        (_ (step-atom c i b))))))
+        ((splice-marker) (literal-state c (normal)))
+        ((normal) (step-atom c i b))))))
 
 (base:function step-atom ((c context) (i u64) (b u64)) unit
   (base:cond
@@ -707,17 +715,17 @@
        ((space b) (match b (10 (set-comment c false)) (13 (set-comment c false)) (_ unit)))
        ((n:lt b 32) (fail c 3 i 1))
        (true unit)))
-    ((n:eq b 34) (finish-atom c i) (literal-state c 1 i))
+    ((n:eq b 34) (finish-atom c i) (literal-state c (data-literal i)))
     ((n:eq b 39) (prefix c i 6 1))
     ((n:eq b 96) (prefix c i 7 1))
     ((n:eq b 44)
      (match (n:lt (n:add i 1) (field (field c source) length))
        (true
          (match (byte c (n:add i 1))
-           (64 (do (prefix c i 9 2) (literal-state c 6 i)))
+           (64 (do (prefix c i 9 2) (literal-state c (splice-marker))))
            (_ (prefix c i 8 1))))
        (false (prefix c i 8 1))))
-    ((character-start c i b) (literal-state c 3 i))
+    ((character-start c i b) (literal-state c (character-prefix i)))
     ((valid b) (step-valid-atom c i b))
     (true (fail c 3 i 1))))
 
@@ -795,7 +803,7 @@
      (lexemes tokens-array (tokens-new backing))
      (lines ids-array (ids-new backing))
      (state scan (scan 0 false false false false 0 0 0 (error:success)))
-     (literal literal-scan (literal-scan 0 0))
+     (literal literal-scan (normal))
      (c
        context
        (context
