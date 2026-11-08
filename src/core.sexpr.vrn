@@ -559,7 +559,7 @@
     (true (extra-enabled (field target extra) bytes length))))
 
 (base:function extra-enabled ((head (pointer void)) (bytes (pointer u8)) (length u64)) bool
-  (match (is-null head)
+  (match (base:is-null head)
     (true false)
     (false
       (let ((value feature (deref (cast (pointer feature) head))))

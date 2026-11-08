@@ -23,10 +23,10 @@
        t:machine-ref
        (backend-target:configured-machine p (field owner module) enum:codegen-default (& message))))
     (do
-      (match (is-null machine)
+      (match (base:is-null machine)
         (true (m:fatal "cannot create native C ABI data layout"))
         (false unit))
-      (match (is-null message)
+      (match (base:is-null message)
         (true unit)
         (false (ir:message-dispose message)))
       (let ((data t:layout-ref (target:machine-layout machine)))
@@ -767,7 +767,7 @@
     ((owner llvm:session (field c owner))
      (existing t:value-ref (ir:function-get (field owner module) name))
      (function t:value-ref
-       (match (is-null existing)
+       (match (base:is-null existing)
          (true (ir:function-add (field owner module) name signature))
          (false
            (do

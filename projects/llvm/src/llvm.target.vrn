@@ -94,7 +94,7 @@
                  enum:reloc-pic
                  enum:code-model-default)))
             (do
-              (match (is-null machine)
+              (match (base:is-null machine)
                 (true
                   (store
                     (deref out-message)
@@ -139,7 +139,7 @@
      (target t:target-ref (cast t:target-ref (null-pointer))))
     (do
       (initialize-native)
-      (match (is-null triple)
+      (match (base:is-null triple)
         (true
           (do
             (store
@@ -162,7 +162,7 @@
                        enum:reloc-pic
                        enum:code-model-default)))
                   (do
-                    (match (is-null machine)
+                    (match (base:is-null machine)
                       (true
                         (store
                           (deref out-message)

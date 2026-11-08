@@ -417,7 +417,7 @@
 
 (base:function save-manifest-version ((node (pointer library-record)) (value (pointer u8))) bool
   (let ((storage (pointer void) (memory:malloc (add-size (text:strlen value) 1))))
-    (match (is-null storage)
+    (match (base:is-null storage)
       (true false)
       (false
         (do
@@ -434,12 +434,12 @@
 
 (base:function read-manifest-version ((node (pointer library-record)) (path (pointer u8))) bool
   (let ((file (pointer types:file-stream) (stdio:fopen path "rb")))
-    (match (is-null file)
+    (match (base:is-null file)
       (true (match (deref (errno:errno-pointer)) (2 true) (_ false)))
       (false
         ;; A bounded metadata read avoids unbounded allocation on arbitrary files.
         (let ((storage (pointer void) (memory:calloc 1 1048577)))
-          (match (is-null storage)
+          (match (base:is-null storage)
             (true (do (stdio:fclose file) false))
             (false
               (let
@@ -477,7 +477,7 @@
       (let
         ((length usize (text:strlen directory))
          (storage (pointer void) (memory:malloc (add-size (text:strlen directory) 14))))
-        (match (is-null storage)
+        (match (base:is-null storage)
           (true false)
           (false
             (let ((path (pointer u8) (cast (pointer u8) storage)))
@@ -516,7 +516,7 @@
 (base:function insert-record ((previous (pointer library-record)) (node (pointer library-record)))
   bool
   (let ((next (pointer void) (field (deref previous) next)))
-    (match (is-null next)
+    (match (base:is-null next)
       (true (do (set-next previous (cast (pointer void) node)) true))
       (false
         (let ((following (pointer library-record) (cast (pointer library-record) next)))
@@ -526,7 +526,7 @@
 
 (base:function collect-library ((head (pointer library-record)) (name (pointer u8))) bool
   (let ((storage (pointer void) (memory:calloc 1 (add-size (text:strlen name) 41))))
-    (match (is-null storage)
+    (match (base:is-null storage)
       (true false)
       (false
         (let
@@ -549,7 +549,7 @@
 
 (base:function print-records
   ((next (pointer void)) (previous (pointer u8)) (previous-version (pointer u8))) bool
-  (match (is-null next)
+  (match (base:is-null next)
     (true (match (deref previous) (0 true) (_ (emit 1 "\n"))))
     (false
       (let ((node library-record (deref (cast (pointer library-record) next))))
@@ -576,7 +576,7 @@
               (print-records (field node next) (field node name) (field node version)))))))))
 
 (base:function free-records ((next (pointer void))) bool
-  (match (is-null next)
+  (match (base:is-null next)
     (true true)
     (false
       (let ((following (pointer void) (field (deref (cast (pointer library-record) next)) next)))
@@ -593,7 +593,7 @@
         (0 true)
         (_
           (let ((child (pointer types:directory-stream) (open-directory name)))
-            (match (is-null child)
+            (match (base:is-null child)
               (true
                 (match (deref (errno:errno-pointer))
                   (20 true) ;; ENOTDIR: ordinary file
@@ -608,13 +608,13 @@
   (do
     (store (deref (errno:errno-pointer)) 0)
     (let ((entry (pointer u8) (read-entry directory)))
-    (match (is-null entry)
+    (match (base:is-null entry)
       (true (int-eq (deref (errno:errno-pointer)) 0))
       (false (steps (list-entry head (entry-name entry)) (list-entries directory head)))))))
 
 (base:function list-libraries () exit-code
   (let ((root (pointer u8) (process:getenv "VERONA_SOURCE_DIR")))
-    (match (is-null root)
+    (match (base:is-null root)
       (true (fail "VERONA_SOURCE_DIR must name an absolute directory"))
       (false
         (match (deref root)
@@ -622,11 +622,11 @@
             (match (chdir root)
               (0
                 (let ((directory (pointer types:directory-stream) (open-directory ".")))
-                  (match (is-null directory)
+                  (match (base:is-null directory)
                     (true (fail "cannot open VERONA_SOURCE_DIR"))
                     (false
                       (let ((storage (pointer void) (memory:calloc 1 40)))
-                        (match (is-null storage)
+                        (match (base:is-null storage)
                           (true (do (fs:closedir directory) (fail "cannot allocate library listing")))
                           (false
                             (let
