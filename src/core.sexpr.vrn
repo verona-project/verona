@@ -559,16 +559,13 @@
     (true (extra-enabled (field target extra) bytes length))))
 
 (base:function extra-enabled ((head (pointer void)) (bytes (pointer u8)) (length u64)) bool
-  (match (n:eq (address head) 0)
+  (match (is-null head)
     (true false)
     (false
       (let ((value feature (deref (cast (pointer feature) head))))
         (base:or-else
           (named-byte bytes length (field value name))
           (extra-enabled (field value next) bytes length))))))
-
-(base:function address ((p (pointer void))) u64
-  (deref (cast (pointer u64) (cast (pointer void) (& p)))))
 
 (base:function finish-feature ((c context) (operator feature-polarity) (start u64) (end u64)) unit
   (let

@@ -2152,10 +2152,9 @@ class CoreTests(unittest.TestCase):
 (%external-function absent "absent" () (pointer u8))
 (%external-function present "present" () (pointer u8))
 (%function main () i64
-  (if (== (absent) (absent))
-    (if (!= (present) (absent))
-      (if (== (present) (present))
-        (if (== (cast (pointer void) (absent)) (cast (pointer void) (absent))) 42 0) 0) 0) 0))
+  (if (%is-null-primitive-pointer (absent))
+    (if (%is-null-primitive-pointer (present)) 0 42)
+    0))
 """
         for level in ("-O0", "-O2"):
             binary = self.root / "null pointer executable"
@@ -2165,6 +2164,22 @@ class CoreTests(unittest.TestCase):
             native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
             self.assertEqual(native.returncode, 0, native.stderr)
             self.assertEqual(native.stdout, "i64:42\n")
+
+        emitted = self.run_core("emit-llvm", """
+(%function absent ((value (pointer u8))) bool (%is-null-primitive-pointer value))
+(%function main () i64 42)
+""")
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertRegex(emitted.stdout, r"icmp eq ptr %0, null")
+
+        for source, message in (
+            ("(%function main () bool (%is-null-primitive-pointer))", "primitive requires one argument"),
+            ("(%function main () bool (%is-null-primitive-pointer 0))", "pointer null check requires a pointer"),
+        ):
+            with self.subTest(source=source):
+                checked = self.run_core("check", source)
+                self.assertEqual(checked.returncode, 2, checked.stderr)
+                self.assertIn(message, checked.stderr)
 
     def test_general_pointer_types_and_casts(self):
         source = """

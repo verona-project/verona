@@ -104,7 +104,7 @@
 
 ; Release a transferred LLVM diagnostic/text message if nonnull, including success messages.
 (base:function dispose-message ((message (pointer u8))) unit
-  (match (target:is-null (cast (pointer void) message))
+  (match (is-null message)
     (true unit)
     (false (do (ir:message-dispose message) unit))))
 
@@ -112,7 +112,7 @@
 (base:function llvm-error ((message (pointer u8))) unit
   (do
     (m:text 2 "LLVM: ")
-    (match (target:is-null (cast (pointer void) message))
+    (match (is-null message)
       (true (m:text 2 "operation failed"))
       (false (m:text 2 message)))
     (m:text 2 "\n")
@@ -207,7 +207,7 @@
          (field owner module)
          (optimization-level optimization)
          (& message))))
-    (match (target:is-null (cast (pointer void) machine))
+    (match (is-null machine)
       (true (do (llvm-error message) 2))
       (false
         (do

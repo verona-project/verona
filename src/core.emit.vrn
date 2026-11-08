@@ -744,6 +744,17 @@
               (16 (numeric-conversion (field b owner) ty (field v ty) left))
               (17
                 (ir:build-xor (field (field b owner) builder) left (integer (field b owner) 1) ""))
+              (20
+                (ir:build-zext
+                  (field (field b owner) builder)
+                  (ir:build-icmp
+                    (field (field b owner) builder)
+                    enum:int-eq
+                    left
+                    (ir:const-null (layout:value-type c (field b owner) ty))
+                    "")
+                  (layout:integer-type (field b owner))
+                  ""))
               (_
                 (let ((right t:value-ref (expression c b (m:next c args))))
                   (match (num:float-type ty)

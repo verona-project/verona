@@ -3,9 +3,7 @@
 (import libc.stdio :as stdio)
 
 (base:function environment-variable-defined ((name (pointer u8))) bool
-  ;; An empty name cannot name an environment variable, so getenv("") is the
-  ;; null pointer used to distinguish an undefined name from a defined one.
-  (match (== (process:getenv name) (process:getenv "")) (true false) (false true)))
+  (match (is-null (process:getenv name)) (true false) (false true)))
 
 (base:function print-source-directory-status ((defined bool)) unit
   (match defined

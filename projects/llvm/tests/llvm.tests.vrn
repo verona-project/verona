@@ -8,7 +8,7 @@
 (base:external-function puts "puts" ((pointer u8)) i32)
 
 (base:function release ((message (pointer u8))) unit
-  (match (target:is-null (cast (pointer void) message))
+  (match (is-null message)
     (true unit)
     (false (do (ir:message-dispose message) unit))))
 
@@ -31,7 +31,7 @@
          (result i32 (llvm:verify owner (& message)))
          (has-message
            bool
-           (match (target:is-null (cast (pointer void) message)) (true false) (false true))))
+           (match (is-null message) (true false) (false true))))
         (do (release message) (llvm:destroy owner) (match result (0 false) (_ has-message)))))))
 
 (base:function invalid-triple () bool
@@ -41,7 +41,7 @@
      (result i32 (target:from-triple "not-a-real-architecture-unknown-none" (& out) (& message)))
      (has-message
        bool
-       (match (target:is-null (cast (pointer void) message)) (true false) (false true))))
+       (match (is-null message) (true false) (false true))))
     (do (release message) (match result (0 false) (_ has-message)))))
 
 (base:function program () llvm:session
@@ -101,7 +101,7 @@
      (machine t:machine-ref (target:native-machine (field owner module) (& message))))
     (do
       (release message)
-      (match (target:is-null (cast (pointer void) machine))
+      (match (is-null machine)
         (true false)
         (false
           (let
@@ -116,7 +116,7 @@
                  (& bad-message)))
              (diagnostic
                bool
-               (match (target:is-null (cast (pointer void) bad-message)) (true false) (false true)))
+               (match (is-null bad-message) (true false) (false true)))
              (good-message (pointer u8) (cast (pointer u8) (target:null-pointer)))
              (good
                i32

@@ -32,7 +32,8 @@
 ; boolean inversion=12, pointer cast=13, indirect call=14, array index=15,
 ; literal/binding match selection=16.
 ; sequence continuation/discard=17, address=18, load=19, store=20,
-; field address=21, array address=22, pointer offset=23, tuple match=24.
+; field address=21, array address=22, pointer offset=23, tuple match=24,
+; pointer-null check=25.
 ; zero is preparation-only. Id/a/b are action-specific
 ; tape IDs or opcodes; mark saves the argument value-stack base.
 (base:type step (product (kind u64) (id u64) (a u64) (b u64) (mark u64)))
@@ -559,6 +560,7 @@
           (match (field v target)
             (16 (do (schedule c 11 id (field v ty) 0 0) (evaluate-expression c args)))
             (17 (do (schedule c 12 id 0 0 0) (evaluate-expression c args)))
+            (20 (do (schedule c 25 id 0 0 0) (evaluate-expression c args)))
             (_
               (do
                 (schedule c 6 id (field v target) 0 0)
@@ -626,6 +628,11 @@
           (match (match (num:float-type a) (true true) (false (num:float-type (field v ty))))
             (true (push c (scalar-value a (float:convert (field v ty) a (field v scalar)))))
             (false (push-integer c a (base:convert (field v scalar)))))))
+      (25
+        (let ((v scalar-value (pop c)))
+          (do
+            (require c (check:pointer-value-type p (field v ty)) id)
+            (push c (scalar-value 2 (match (signed:eq (field v scalar) 0) (true 1) (false 0)))))))
       (6
         (let ((right scalar-value (pop c)) (left scalar-value (pop c)) (ty u64 (field left ty)))
           (match (num:float-type ty)

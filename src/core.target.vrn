@@ -58,7 +58,7 @@
              ""))
          (handle t:machine-ref (machine provisional (field owner module) level (& message))))
         (do
-          (match (target:is-null (cast (pointer void) handle))
+          (match (is-null handle)
             (true
               (do
                 (match (m:is-empty (cast (pointer void) message))

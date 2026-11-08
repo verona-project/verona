@@ -81,7 +81,7 @@ is Verona; LLVM constructs and prints the IR itself.
       (ir:build-ret builder (ir:const-int i32 42 0))
       (let ((status i32 (llvm:verify owner (& message))))
         (do
-          (match (target:is-null (cast (pointer void) message))
+(match (is-null message)
             (true unit)
             (false (do (ir:message-dispose message) unit)))
           (llvm:destroy owner)

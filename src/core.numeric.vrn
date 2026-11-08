@@ -208,6 +208,7 @@
     (base:cond
       ((n:lt length 4) (operation 0 0 0 0))
       ((n:gt length 32) (operation 0 0 0 0))
+      ((text-is value "%is-null-primitive-pointer") (operation 20 0 2 1))
       ((n:eq (base:convert (deref (field value bytes))) 37)
        (let
          ((split u64 (last-dash value length))

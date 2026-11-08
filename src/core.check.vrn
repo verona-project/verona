@@ -2074,6 +2074,14 @@
          (let ((input u64 (field primitive input)))
            (do
              (expect c args (expression-as c args env all input) input)
+             (match op
+               (20
+                 (require
+                   c
+                   args
+                   (pointer-value-type c (field (m:at c args) ty))
+                   "pointer null check requires a pointer"))
+               (_ unit))
              (match (field primitive arity)
                (1 unit)
                (_ (expect c (m:next c args) (expression-as c (m:next c args) env all input) input)))

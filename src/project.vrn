@@ -194,11 +194,6 @@
 #+linux (base:function entry-name ((entry (pointer u8))) (pointer u8)
           (pointer-offset entry 19))
 
-;; Pointer equality is not yet exposed by Base. Read the pointer representation
-;; through a pointer-sized integer on the supported native targets.
-(base:function pointer-bits ((value (pointer void))) usize
-  (deref (cast (pointer usize) (cast (pointer void) (& value)))))
-
 #+darwin #+x86_64 (base:external-function
                     open-directory
                     "opendir$INODE64"
@@ -422,9 +417,9 @@
 
 (base:function save-manifest-version ((node (pointer library-record)) (value (pointer u8))) bool
   (let ((storage (pointer void) (memory:malloc (add-size (text:strlen value) 1))))
-    (match (pointer-bits storage)
-      (0 false)
-      (_
+    (match (is-null storage)
+      (true false)
+      (false
         (do
           (text:strcpy (cast (pointer u8) storage) value)
           (store
@@ -439,14 +434,14 @@
 
 (base:function read-manifest-version ((node (pointer library-record)) (path (pointer u8))) bool
   (let ((file (pointer types:file-stream) (stdio:fopen path "rb")))
-    (match (pointer-bits (cast (pointer void) file))
-      (0 (match (deref (errno:errno-pointer)) (2 true) (_ false)))
-      (_
+    (match (is-null file)
+      (true (match (deref (errno:errno-pointer)) (2 true) (_ false)))
+      (false
         ;; A bounded metadata read avoids unbounded allocation on arbitrary files.
         (let ((storage (pointer void) (memory:calloc 1 1048577)))
-          (match (pointer-bits storage)
-            (0 (do (stdio:fclose file) false))
-            (_
+          (match (is-null storage)
+            (true (do (stdio:fclose file) false))
+            (false
               (let
                 ((count usize (stdio:fread storage 1 1048576 file))
                  (read-error i32 (stdio:ferror file))
@@ -482,9 +477,9 @@
       (let
         ((length usize (text:strlen directory))
          (storage (pointer void) (memory:malloc (add-size (text:strlen directory) 14))))
-        (match (pointer-bits storage)
-          (0 false)
-          (_
+        (match (is-null storage)
+          (true false)
+          (false
             (let ((path (pointer u8) (cast (pointer u8) storage)))
               (do
                 (text:strcpy path directory)
@@ -521,9 +516,9 @@
 (base:function insert-record ((previous (pointer library-record)) (node (pointer library-record)))
   bool
   (let ((next (pointer void) (field (deref previous) next)))
-    (match (pointer-bits next)
-      (0 (do (set-next previous (cast (pointer void) node)) true))
-      (_
+    (match (is-null next)
+      (true (do (set-next previous (cast (pointer void) node)) true))
+      (false
         (let ((following (pointer library-record) (cast (pointer library-record) next)))
           (match (record-before (deref node) (deref following))
             (true (do (set-next node next) (set-next previous (cast (pointer void) node)) true))
@@ -531,9 +526,9 @@
 
 (base:function collect-library ((head (pointer library-record)) (name (pointer u8))) bool
   (let ((storage (pointer void) (memory:calloc 1 (add-size (text:strlen name) 41))))
-    (match (pointer-bits storage)
-      (0 false)
-      (_
+    (match (is-null storage)
+      (true false)
+      (false
         (let
           ((node (pointer library-record) (cast (pointer library-record) storage))
            (copy (pointer u8) (pointer-offset (cast (pointer u8) storage) 40)))
@@ -554,9 +549,9 @@
 
 (base:function print-records
   ((next (pointer void)) (previous (pointer u8)) (previous-version (pointer u8))) bool
-  (match (pointer-bits next)
-    (0 (match (deref previous) (0 true) (_ (emit 1 "\n"))))
-    (_
+  (match (is-null next)
+    (true (match (deref previous) (0 true) (_ (emit 1 "\n"))))
+    (false
       (let ((node library-record (deref (cast (pointer library-record) next))))
         (match
           (steps
@@ -581,9 +576,9 @@
               (print-records (field node next) (field node name) (field node version)))))))))
 
 (base:function free-records ((next (pointer void))) bool
-  (match (pointer-bits next)
-    (0 true)
-    (_
+  (match (is-null next)
+    (true true)
+    (false
       (let ((following (pointer void) (field (deref (cast (pointer library-record) next)) next)))
         (do
           (memory:free (field (deref (cast (pointer library-record) next)) manifest))
@@ -598,13 +593,13 @@
         (0 true)
         (_
           (let ((child (pointer types:directory-stream) (open-directory name)))
-            (match (pointer-bits (cast (pointer void) child))
-              (0
+            (match (is-null child)
+              (true
                 (match (deref (errno:errno-pointer))
                   (20 true) ;; ENOTDIR: ordinary file
                   (2 true) ;; ENOENT: dangling link or removed entry
                   (_ false)))
-              (_
+              (false
                 (let ((closed i32 (fs:closedir child)))
                   (steps (int-eq closed 0) (collect-library head name)))))))))))
 
@@ -613,27 +608,27 @@
   (do
     (store (deref (errno:errno-pointer)) 0)
     (let ((entry (pointer u8) (read-entry directory)))
-      (match (pointer-bits (cast (pointer void) entry))
-        (0 (int-eq (deref (errno:errno-pointer)) 0))
-        (_ (steps (list-entry head (entry-name entry)) (list-entries directory head)))))))
+    (match (is-null entry)
+      (true (int-eq (deref (errno:errno-pointer)) 0))
+      (false (steps (list-entry head (entry-name entry)) (list-entries directory head)))))))
 
 (base:function list-libraries () exit-code
   (let ((root (pointer u8) (process:getenv "VERONA_SOURCE_DIR")))
-    (match (pointer-bits (cast (pointer void) root))
-      (0 (fail "VERONA_SOURCE_DIR must name an absolute directory"))
-      (_
+    (match (is-null root)
+      (true (fail "VERONA_SOURCE_DIR must name an absolute directory"))
+      (false
         (match (deref root)
           (47
             (match (chdir root)
               (0
                 (let ((directory (pointer types:directory-stream) (open-directory ".")))
-                  (match (pointer-bits (cast (pointer void) directory))
-                    (0 (fail "cannot open VERONA_SOURCE_DIR"))
-                    (_
+                  (match (is-null directory)
+                    (true (fail "cannot open VERONA_SOURCE_DIR"))
+                    (false
                       (let ((storage (pointer void) (memory:calloc 1 40)))
-                        (match (pointer-bits storage)
-                          (0 (do (fs:closedir directory) (fail "cannot allocate library listing")))
-                          (_
+                        (match (is-null storage)
+                          (true (do (fs:closedir directory) (fail "cannot allocate library listing")))
+                          (false
                             (let
                               ((head
                                  (pointer library-record)

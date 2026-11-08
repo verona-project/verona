@@ -394,10 +394,6 @@
 ; to void, or null at the end. Stack-allocated links cannot escape their scope.
 (base:type binding (product (name u64) (binder u64) (value i64) (parent (pointer void))))
 
-; Inspect pointer bits on the supported 64-bit ABI; this does not dereference the pointee.
-(base:function address ((p (pointer void))) u64
-  (deref (cast (pointer u64) (cast (pointer void) (& p)))))
-
 ; Recover the arena-owned bytes from a checked data literal.
 (base:function literal-bytes ((c context) (id u64)) (pointer u8)
   (bytes-at (field (at c id) target)))
@@ -408,7 +404,7 @@
 
 ; Test whether an environment pointer is the null chain terminator.
 (base:function is-empty ((p (pointer void))) bool
-  (n:eq (address p) 0))
+  (is-null p))
 
 ; Search lexical bindings from inner to outer scope; return a binder ID or zero if absent.
 (base:function lookup ((c context) (name u64) (env (pointer void))) u64

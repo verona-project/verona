@@ -94,7 +94,7 @@
                  enum:reloc-pic
                  enum:code-model-default)))
             (do
-              (match (is-null (cast (pointer void) machine))
+              (match (is-null machine)
                 (true
                   (store
                     (deref out-message)
@@ -139,7 +139,7 @@
      (target t:target-ref (cast t:target-ref (null-pointer))))
     (do
       (initialize-native)
-      (match (is-null (cast (pointer void) triple))
+      (match (is-null triple)
         (true
           (do
             (store
@@ -162,7 +162,7 @@
                        enum:reloc-pic
                        enum:code-model-default)))
                   (do
-                    (match (is-null (cast (pointer void) machine))
+                    (match (is-null machine)
                       (true
                         (store
                           (deref out-message)
@@ -186,10 +186,6 @@
 (base:function null-pointer () (pointer void)
   (let ((zero usize 0)) (deref (cast (pointer (pointer void)) (cast (pointer void) (& zero))))))
 
-(base:function is-null ((p (pointer void))) bool
-  (let ((bits usize (deref (cast (pointer usize) (cast (pointer void) (& p))))))
-    (match bits (0 true) (_ false))))
-
 (export
   machine-for-triple
   machine-for-triple-with-options
@@ -209,5 +205,4 @@
   initialize-native
   native-machine
   native-machine-with-optimization
-  null-pointer
-  is-null)
+  null-pointer)
