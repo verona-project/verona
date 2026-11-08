@@ -24,27 +24,31 @@
 (base:type options
   (product (libraries strings-array) (paths strings-array) (frameworks strings-array)))
 
+(base:type option-kind (sum (library) (search-path) (framework)))
+
 (base:function options-new ((backing allocator:backend)) options
   (options (strings-new backing) (strings-new backing) (strings-new backing)))
 
-(base:function add-option ((owner (pointer options)) (kind u64) (value (pointer u8))) error:status
-  (match (n:lt kind 3)
-    (false (error:invalid))
-    (true
-      (let
-        ((v options (deref owner))
-         (items
-           strings-array
-           (match kind (0 (field v libraries)) (1 (field v paths)) (_ (field v frameworks))))
-         (status error:status (strings-append (& items) value)))
-        (do
-          (store
-            (deref owner)
-            (options
-              (match kind (0 items) (_ (field v libraries)))
-              (match kind (1 items) (_ (field v paths)))
-              (match kind (2 items) (_ (field v frameworks)))))
-          status)))))
+; A caller must select one of the three owned option collections explicitly.
+; This makes an invalid numeric routing value unrepresentable.
+(base:function add-option ((owner (pointer options)) (kind option-kind) (value (pointer u8))) error:status
+  (let
+    ((v options (deref owner))
+     (items
+       strings-array
+       (match kind
+         ((library) (field v libraries))
+         ((search-path) (field v paths))
+         ((framework) (field v frameworks))))
+     (status error:status (strings-append (& items) value)))
+    (do
+      (store
+        (deref owner)
+        (options
+          (match kind ((library) items) (_ (field v libraries)))
+          (match kind ((search-path) items) (_ (field v paths)))
+          (match kind ((framework) items) (_ (field v frameworks)))))
+      status)))
 
 (base:function options-destroy ((owner (pointer options))) unit
   (let
@@ -232,6 +236,7 @@
   artifact-arguments-for
   artifact-arguments
   options
+  option-kind
   options-new
   options-destroy
   add-option

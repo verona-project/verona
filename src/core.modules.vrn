@@ -395,7 +395,7 @@
               (m:storage
                 (m:modules-append
                   (field (deref (field l session)) files)
-                  (m:module-info name path offset (n:add (data:length input) 1) 0 1 0 0)))
+                  (m:module-info name path offset (n:add (data:length input) 1) 0 (loading) 0 0)))
               (copy-nodes l local base offset 1 (n:sub (m:nodes-length items) 1))
               (let ((first u64 0) (tail u64 0))
                 (do
@@ -410,7 +410,7 @@
                         offset
                         (field v length)
                         (field v exports)
-                        2
+                        (loaded)
                         first
                         tail)))))
               id))))
@@ -418,7 +418,7 @@
         (let ((id u64 (n:sub found 1)))
           (do
             (match (field (file l id) state)
-              (1
+              ((loading)
                 (do
                   (m:location (context l) (field (m:at (context l) site) start))
                   (m:text 2 "import cycle: ")
@@ -472,7 +472,7 @@
 (base:function order ((l loader) (id u64) (tail (pointer u64)) (first (pointer u64))) unit
   (let ((v m:module-info (file l id)))
     (match (field v state)
-      (3 unit)
+      ((ordered) unit)
       (_
         (do
           (set-file
@@ -484,7 +484,7 @@
               (field v start)
               (field v length)
               (field v exports)
-              3
+              (ordered)
               (field v first)
               (field v last)))
           (order-imports l id 0 tail first)
@@ -504,7 +504,7 @@
     (false
       (do
         (match (field (file l i) state)
-          (1 (do (m:text 2 (field (file l i) name)) (m:text 2 " -> ")))
+          ((loading) (do (m:text 2 (field (file l i) name)) (m:text 2 " -> ")))
           (_ unit))
         (cycle-names l (n:add i 1) end)))))
 

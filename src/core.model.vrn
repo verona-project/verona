@@ -63,9 +63,14 @@
 ; Indices survive growth; pointers into the array do not. Index zero is absent.
 (base:type tape (tuple (pointer node) u64 u64 array:layout))
 
+; A module progresses from source loading, through declaration collection, to
+; dependency order. Keeping this as a sum makes cycle detection and ordering
+; independent of a numeric encoding.
+(base:type module-state (sum (loading) (loaded) (ordered)))
+
 ; A session owns module names, diagnostic paths, and source ranges.
 ; Identity follows the reference compiler: the full module name, not the path.
-; Exports is an optional declaration ID; state is loading=1, loaded=2, ordered=3.
+; Exports is an optional declaration ID.
 (base:type module-info
   (product
     (name (pointer u8))
@@ -73,7 +78,7 @@
     (start u64)
     (length u64)
     (exports u64)
-    (state u64)
+    (state module-state)
     (first u64)
     (last u64)))
 
@@ -427,6 +432,7 @@
 
 (export
   module-info
+  module-state
   modules-array
   modules-empty
   modules-append

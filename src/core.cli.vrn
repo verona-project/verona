@@ -588,7 +588,7 @@
              level
              links
              kind
-             0
+             (library)
              machine
              features
              memory))
@@ -603,7 +603,7 @@
              level
              links
              kind
-             1
+             (search-path)
              machine
              features
              memory))
@@ -618,7 +618,7 @@
              level
              links
              kind
-             2
+             (framework)
              machine
              features
              memory))
@@ -675,7 +675,7 @@
    (level (pointer (pointer u8)))
    (links (pointer link:options))
    (artifact (pointer (pointer u8)))
-   (kind u64)
+   (kind link:option-kind)
    (machine (pointer machine-options))
    (features (pointer (pointer void)))
    (memory (pointer arena:arena))) bool

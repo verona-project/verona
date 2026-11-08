@@ -172,7 +172,7 @@
           (field v links)))
       unit)))
 
-(base:function add-link ((out (pointer target)) (kind u64) (text (pointer u8))) unit
+(base:function add-link ((out (pointer target)) (kind link:option-kind) (text (pointer u8))) unit
   (let ((v target (deref out)) (links link:options (field v links)))
     (do
       (m:storage (link:add-option (& links) kind text))
@@ -299,9 +299,9 @@
                (set-value out 4 id)
                unit))
             ((m:is c head "module-path") (add-path out (join c directory (text c (one c id)))))
-            ((m:is c head "library-path") (add-link out 1 (join c directory (text c (one c id)))))
-            ((m:is c head "library") (add-link out 0 (text c (one c id))))
-            ((m:is c head "framework") (add-link out 2 (text c (one c id))))
+            ((m:is c head "library-path") (add-link out (search-path) (join c directory (text c (one c id)))))
+            ((m:is c head "library") (add-link out (library) (text c (one c id))))
+            ((m:is c head "framework") (add-link out (framework) (text c (one c id))))
             (true (m:error c id "unknown build option")))
           (options c (m:next c id) directory out))))))
 

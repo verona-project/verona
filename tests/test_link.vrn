@@ -28,7 +28,7 @@
   (do (assign live (n:sub live 1)) (a:deallocate (system:create) bytes size alignment) unit))
 
 (base:function option
-  ((owner (pointer link:options)) (status error:status) (kind u64) (value (pointer u8)))
+  ((owner (pointer link:options)) (status error:status) (kind link:option-kind) (value (pointer u8)))
   error:status
   (match status ((ok) (link:add-option owner kind value)) (reason reason)))
 
@@ -40,12 +40,12 @@
        (config link:options (link:options-new backing))
        (memory arena:arena (arena:create backing 4096))
        (args link:strings-array (link:strings-new backing))
-       (library error:status (link:add-option (& config) 0 "fixture"))
-       (path error:status (option (& config) library 1 "path with spaces"))
+       (library error:status (link:add-option (& config) (library) "fixture"))
+       (path error:status (option (& config) library (search-path) "path with spaces"))
        (framework
          error:status
          (match (link:frameworks-supported)
-           (true (option (& config) path 2 "Foundation"))
+           (true (option (& config) path (framework) "Foundation"))
            (false path)))
        (status
          error:status
