@@ -499,10 +499,31 @@
           (size c storage)
           (match (num:float-type ty) (true 2) (false 1)))))))
 
-; Kind is ignored=0, registers=1, indirect=2. A SysV register aggregate may
-; occupy two distinct LLVM parameters. RETURN distinguishes AArch64 coercions.
+; A SysV register aggregate may occupy two distinct LLVM parameters. The sum
+; keeps register counts and pieces out of ignored and indirect passing modes.
 (base:type passing
-  (product (kind u64) (representation t:type-ref) (pieces u64) (ints u64) (floats u64)))
+  (sum
+    (ignored t:type-ref)
+    (registers t:type-ref u64 u64 u64)
+    (indirect t:type-ref)))
+
+(base:function passing-representation ((value passing)) t:type-ref
+  (match value
+    ((ignored representation) representation)
+    ((registers representation _ _ _) representation)
+    ((indirect representation) representation)))
+
+(base:function passing-pieces ((value passing)) u64
+  (match value ((ignored _) 0) ((registers _ pieces _ _) pieces) ((indirect _) 1)))
+
+(base:function passing-ints ((value passing)) u64
+  (match value ((registers _ _ ints _) ints) (_ 0)))
+
+(base:function passing-floats ((value passing)) u64
+  (match value ((registers _ _ _ floats) floats) (_ 0)))
+
+(base:function sret ((value passing)) u64
+  (match value ((indirect _) 1) (_ 0)))
 
 (base:function aggregate ((c context) (ty u64)) bool
   (match (check:type-kind (field c program) ty) (20 true) (21 true) (49 true) (_ false)))
@@ -518,23 +539,21 @@
 (base:function passing-for ((c context) (ty u64) (return bool) (ints u64) (floats u64)) passing
   (let ((owner llvm:session (field c owner)) (storage t:type-ref (storage-type c ty)))
     (base:cond
-      ((n:eq ty 14) (passing 0 storage 0 0 0))
+      ((n:eq ty 14) (ignored storage))
       ((match (aggregate c ty) (true false) (false true))
-       (passing
-         1
+       (registers
          (match ty (2 (integer c 1)) (_ storage))
          1
          (match (num:float-type ty) (true 0) (false 1))
          (match (num:float-type ty) (true 1) (false 0))))
-      ((n:eq (size c storage) 0) (passing 0 (ir:void-type (field owner context)) 0 0 0))
+      ((n:eq (size c storage) 0) (ignored (ir:void-type (field owner context))))
       ((match (config:x86 (field c program)) (true false) (false true))
        (let ((homogeneous homogeneous (hfa c ty)) (length u64 (size c storage)))
          (base:cond
            ((match (n:gt (field homogeneous ty) 0)
               (true (n:le (field homogeneous count) 4))
               (false false))
-            (passing
-              1
+            (registers
               (match return
                 (true storage)
                 (false
@@ -542,16 +561,15 @@
               1
               0
               (field homogeneous count)))
-           ((n:gt length 16) (passing 2 storage 1 0 0))
-           ((n:gt length 8) (passing 1 (ir:array-type (integer c 64) 2) 1 2 0))
+           ((n:gt length 16) (indirect storage))
+           ((n:gt length 8) (registers (ir:array-type (integer c 64) 2) 1 2 0))
            (true
-             (passing
-               1
+             (registers
                (integer c (match return (true (base:convert (n:mul length 8))) (false 64)))
                1
                1
                0)))))
-      ((n:gt (size c storage) 16) (passing 2 storage 1 0 0))
+      ((n:gt (size c storage) 16) (indirect storage))
       (true
         (let
           ((classes (tuple u64 u64) (tuple 0 0))
@@ -569,7 +587,7 @@
                 (match (n:gt (n:add ints integer-count) 6)
                   (true true)
                   (false (n:gt (n:add floats float-count) 8)))))
-            (true (passing 2 storage 1 0 0))
+            (true (indirect storage))
             (false
               (let
                 ((members (pointer t:type-ref) (types c 2))
@@ -579,14 +597,13 @@
                 (do
                   (store (deref members) first-type)
                   (match (n:gt length 8)
-                    (false (passing 1 first-type 1 integer-count float-count))
+                    (false (registers first-type 1 integer-count float-count))
                     (true
                       (do
                         (store
                           (deref (pointer-offset members 1))
                           (chunk-type c second (n:sub length 8)))
-                        (passing
-                          1
+                        (registers
                           (ir:struct-type (field owner context) members 2 0)
                           2
                           integer-count
@@ -608,34 +625,34 @@
          (ty u64 (check:parameter-type p params))
          (pass passing (passing-for c ty false ints floats)))
         (do
-          (match (field pass kind)
-            (0 unit)
-            (2 (store (deref (pointer-offset out index)) (pointer c)))
-            (_
-              (match (field pass pieces)
+          (match pass
+            ((ignored _) unit)
+            ((indirect _) (store (deref (pointer-offset out index)) (pointer c)))
+            ((registers representation pieces _ _)
+              (match pieces
                 (2
                   (do
                     (store
                       (deref (pointer-offset out index))
-                      (ir:struct-element (field pass representation) 0))
+                      (ir:struct-element representation 0))
                     (store
                       (deref (pointer-offset out (n:add index 1)))
-                      (ir:struct-element (field pass representation) 1))
+                      (ir:struct-element representation 1))
                     unit))
-                (_ (store (deref (pointer-offset out index)) (field pass representation))))))
+                (_ (store (deref (pointer-offset out index)) representation)))))
           (function-parameters
             c
             (m:next p params)
             out
-            (n:add index (field pass pieces))
-            (count-ints ints (field pass ints))
-            (count-floats floats (field pass floats))))))))
+            (n:add index (passing-pieces pass))
+            (count-ints ints (passing-ints pass))
+            (count-floats floats (passing-floats pass))))))))
 
 (base:function function-type ((c context) (params u64) (result u64)) t:type-ref
   (let
     ((pass passing (passing-for c result true 0 0))
      (buffer (pointer t:type-ref) (types c 129))
-     (sret u64 (match (field pass kind) (2 1) (_ 0)))
+     (sret u64 (sret pass))
      (stored unit (match sret (1 (do (store (deref buffer) (pointer c)) unit)) (_ unit)))
      (count
        u32
@@ -648,9 +665,9 @@
          0))
      (return-type
        t:type-ref
-       (match (field pass kind)
-         (2 (ir:void-type (field (field c owner) context)))
-         (_ (field pass representation)))))
+       (match pass
+         ((indirect _) (ir:void-type (field (field c owner) context)))
+         (_ (passing-representation pass)))))
     (ir:function-type return-type buffer count 0)))
 
 (base:function add-attribute
@@ -693,47 +710,47 @@
          (ty u64 (check:parameter-type p params))
          (pass passing (passing-for c ty false ints floats)))
         (do
-          (match (field pass kind)
-            (2
+          (match pass
+            ((indirect representation)
               (do
                 (match (config:x86 (field c program))
                   (true
                     (add-attribute
                       value
                       (base:convert index)
-                      (typed-attribute c "byval" (field pass representation))
+                      (typed-attribute c "byval" representation)
                       call))
                   (false unit))
                 (add-attribute
                   value
                   (base:convert index)
-                  (enum-attribute c "align" (alignment c (field pass representation)))
+                  (enum-attribute c "align" (alignment c representation))
                   call)))
-            (1 (extension c value (base:convert index) ty call))
+            ((registers _ _ _ _) (extension c value (base:convert index) ty call))
             (_ unit))
           (parameter-attributes
             c
             value
             (m:next p params)
-            (n:add index (field pass pieces))
-            (count-ints ints (field pass ints))
-            (count-floats floats (field pass floats))
+            (n:add index (passing-pieces pass))
+            (count-ints ints (passing-ints pass))
+            (count-floats floats (passing-floats pass))
             call))))))
 
 (base:function attributes ((c context) (value t:value-ref) (params u64) (result u64) (call bool))
   unit
   (let
     ((pass passing (passing-for c result true 0 0))
-     (sret u64 (match (field pass kind) (2 1) (_ 0))))
+     (sret u64 (sret pass)))
     (do
       (match sret
         (1
           (do
-            (add-attribute value 1 (typed-attribute c "sret" (field pass representation)) call)
+            (add-attribute value 1 (typed-attribute c "sret" (passing-representation pass)) call)
             (add-attribute
               value
               1
-              (enum-attribute c "align" (alignment c (field pass representation)))
+              (enum-attribute c "align" (alignment c (passing-representation pass)))
               call)))
         (_ (extension c value 0 result call)))
       (parameter-attributes
@@ -786,20 +803,20 @@
          (pass passing (passing-for c ty false ints floats))
          (value t:value-ref (convert c ty (deref (pointer-offset source source-index)) true)))
         (do
-          (match (field pass kind)
-            (0 unit)
-            (2
+          (match pass
+            ((ignored _) unit)
+            ((indirect representation)
               (let
                 ((address
                    t:value-ref
-                   (ir:build-alloca builder (field pass representation) "abi.argument")))
+                   (ir:build-alloca builder representation "abi.argument")))
                 (do
                   (ir:build-store builder value address)
                   (store (deref (pointer-offset out index)) address)
                   unit)))
-            (_
-              (let ((coerced t:value-ref (repack c value (field pass representation))))
-                (match (field pass pieces)
+            ((registers representation pieces _ _)
+              (let ((coerced t:value-ref (repack c value representation)))
+                (match pieces
                   (2
                     (do
                       (store
@@ -816,9 +833,9 @@
             source
             (n:add source-index 1)
             out
-            (n:add index (field pass pieces))
-            (count-ints ints (field pass ints))
-            (count-floats floats (field pass floats))))))))
+            (n:add index (passing-pieces pass))
+            (count-ints ints (passing-ints pass))
+            (count-floats floats (passing-floats pass))))))))
 
 (base:function call
   ((c context) (function t:value-ref) (params u64) (result u64) (args (pointer t:value-ref)))
@@ -829,11 +846,11 @@
      (builder t:builder-ref (field owner builder))
      (pass passing (passing-for c result true 0 0))
      (buffer (pointer t:value-ref) (layout:values p 129))
-     (sret u64 (match (field pass kind) (2 1) (_ 0)))
+     (sret u64 (sret pass))
      (address
        t:value-ref
        (match sret
-         (1 (ir:build-alloca builder (field pass representation) "abi.result"))
+         (1 (ir:build-alloca builder (passing-representation pass) "abi.result"))
          (_ function)))
      (stored unit (match sret (1 (do (store (deref buffer) address) unit)) (_ unit)))
      (count
@@ -852,13 +869,13 @@
        (ir:build-call builder (function-type c params result) function buffer count "")))
     (do
       (attributes c value params result true)
-      (match (field pass kind)
-        (0
+      (match pass
+        ((ignored _)
           (match result
             (14 (ir:const-int (integer c 64) 0 0))
             (_ (ir:const-null (layout:value-type p owner result)))))
-        (2 (convert c result (ir:build-load builder (field pass representation) address "") false))
-        (_ (convert c result (repack c value (storage-type c result)) false))))))
+        ((indirect representation) (convert c result (ir:build-load builder representation address "") false))
+        ((registers _ _ _ _) (convert c result (repack c value (storage-type c result)) false))))))
 
 (base:function adapter-arguments
   ((c context)
@@ -879,25 +896,25 @@
          (pass passing (passing-for c ty false ints floats))
          (value
            t:value-ref
-           (match (field pass kind)
-             (0 (ir:const-null (storage-type c ty)))
-             (2
+           (match pass
+             ((ignored _) (ir:const-null (storage-type c ty)))
+             ((indirect representation)
                (ir:build-load
                  builder
-                 (field pass representation)
+                 representation
                  (ir:function-param function (base:convert source-index))
                  ""))
-             (_
+             ((registers representation pieces _ _)
                (let
                  ((native
                     t:value-ref
-                    (match (field pass pieces)
+                    (match pieces
                       (2
                         (ir:build-insert
                           builder
                           (ir:build-insert
                             builder
-                            (ir:const-null (field pass representation))
+                            (ir:const-null representation)
                             (ir:function-param function (base:convert source-index))
                             0
                             "")
@@ -913,10 +930,10 @@
             function
             (m:next p params)
             out
-            (n:add source-index (field pass pieces))
+            (n:add source-index (passing-pieces pass))
             (n:add index 1)
-            (count-ints ints (field pass ints))
-            (count-floats floats (field pass floats))))))))
+            (count-ints ints (passing-ints pass))
+            (count-floats floats (passing-floats pass))))))))
 
 (base:function adapter
   ((c context) (name (pointer u8)) (internal t:value-ref) (params u64) (result u64)) t:value-ref
@@ -926,7 +943,7 @@
      (function t:value-ref (native-function c name (function-type c params result)))
      (entry t:block-ref (ir:block-append (field owner context) function "entry"))
      (pass passing (passing-for c result true 0 0))
-     (sret u64 (match (field pass kind) (2 1) (_ 0)))
+     (sret u64 (sret pass))
      (args (pointer t:value-ref) (layout:values (field c program) 64)))
     (do
       (ir:linkage-set function enum:linkage-internal)
@@ -947,18 +964,18 @@
          (value
            t:value-ref
            (ir:build-call builder (ir:function-type-of internal) internal args count "")))
-        (match (field pass kind)
-          (0 (do (ir:build-ret-void builder) unit))
-          (2
+        (match pass
+          ((ignored _) (do (ir:build-ret-void builder) unit))
+          ((indirect _)
             (do
               (ir:build-store builder (convert c result value true) (ir:function-param function 0))
               (ir:build-ret-void builder)
               unit))
-          (_
+          ((registers representation _ _ _)
             (do
               (ir:build-ret
                 builder
-                (repack c (convert c result value true) (field pass representation)))
+                (repack c (convert c result value true) representation))
               unit))))
       function)))
 
