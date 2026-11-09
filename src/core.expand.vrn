@@ -47,7 +47,7 @@
               ((bytes (pointer u8) (field (field c source) bytes))
                (target
                  u64
-                 (match (m:is-empty (field c session))
+                 (match (base:is-null (field c session))
                    (true 0)
                    (false
                      (check:import-target
@@ -93,7 +93,7 @@
       (let ((id u64 (attach c root head 0)))
         (do
           (m:typed c id 27 0 0 0)
-          (match (m:is-empty (field c session))
+          (match (base:is-null (field c session))
             (true unit)
             (false
               (let
@@ -887,7 +887,7 @@
           (m:require
             c
             site
-            (base:not (m:is-empty (field c session)))
+            (base:not (base:is-null (field c session)))
             "compiler context operation requires an active compilation session")
           (let
             ((session
@@ -1816,7 +1816,7 @@
 
 (base:function feature-extras
   ((c m:context) (site u64) (head (pointer void)) (items u64) (config evaluation)) u64
-  (match (m:is-empty head)
+  (match (base:is-null head)
     (true items)
     (false
       (let
@@ -1869,7 +1869,7 @@
 
 (base:function target-values ((c m:context) (site u64) (config evaluation)) u64
   (let ((pointer (pointer void) (info:from-context c)) (absent u64 (list-value c site 0)))
-    (match (m:is-empty pointer)
+    (match (base:is-null pointer)
       (true
         (list-value
           c
@@ -1942,7 +1942,7 @@
     (m:require
       c
       site
-      (base:not (m:is-empty (field c session)))
+      (base:not (base:is-null (field c session)))
       "compiler context operation requires an active compilation session")
     (m:require
       c
@@ -2807,7 +2807,7 @@
     (match
       (match (== (field site kind) 1)
         (true
-          (match (m:is-empty (field c session))
+          (match (base:is-null (field c session))
             (true false)
             (false (> (lookup c (field site child)) 0))))
         (false false))

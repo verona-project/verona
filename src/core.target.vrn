@@ -61,13 +61,13 @@
           (match (base:is-null handle)
             (true
               (do
-                (match (m:is-empty (cast (pointer void) message))
+                (match (base:is-null (cast (pointer void) message))
                   (true unit)
                   (false (do (m:text constants:STDERR-FILENO message) (ir:message-dispose message))))
                 (llvm:destroy owner)
                 (m:fatal "cannot resolve compilation target")))
             (false unit))
-          (match (m:is-empty (cast (pointer void) message))
+          (match (base:is-null (cast (pointer void) message))
             (true unit)
             (false (ir:message-dispose message)))
           (let
@@ -99,7 +99,7 @@
 (base:function configured-machine
   ((p m:context) (module t:module-ref) (level i32) (message (pointer (pointer u8)))) t:machine-ref
   (let ((config (pointer void) (info:from-context p)))
-    (match (m:is-empty config)
+    (match (base:is-null config)
       (true (target:native-machine-with-optimization module level message))
       (false (machine (deref (cast (pointer info:configuration) config)) module level message)))))
 

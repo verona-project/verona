@@ -77,9 +77,9 @@
          (match (equal kind "static-library") (true "VERONA_AR") (false "VERONA_LINKER"))))
      (tool
        (pointer u8)
-       (match (m:is-empty (cast (pointer void) configured))
+       (match (base:is-null (cast (pointer void) configured))
          (true
-           (match (m:is-empty (cast (pointer void) fallback))
+           (match (base:is-null (cast (pointer void) fallback))
              (true (match (equal kind "static-library") (true "ar") (false "clang")))
              (false fallback)))
          (false configured)))
@@ -267,7 +267,7 @@
      (items m:tape (m:empty (arena:allocator (& memory))))
      (file (pointer types:file-stream) (stdio:fopen path "rb")))
     (do
-      (match (m:is-empty (cast (pointer void) file))
+      (match (base:is-null (cast (pointer void) file))
         (true (m:fatal "cannot open source file"))
         (false unit))
       (match (source:read-open file (& input))
@@ -360,7 +360,7 @@
         ((memory arena:arena (arena:create (system:create) constants:initial-arena-bytes))
          (configuration
            config:configuration
-           (match (m:is-empty selected)
+           (match (base:is-null selected)
              (true
                (backend-target:resolve
                  (& memory)

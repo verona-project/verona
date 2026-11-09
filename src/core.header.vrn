@@ -65,7 +65,7 @@
   (let ((p m:context (field c program)) (id u64 (- ty num:descriptor-base)))
     (do
       (text c "__verona_")
-      (match (m:is-empty (field p session))
+      (match (base:is-null (field p session))
         (true unit)
         (false
           (let ((name (pointer u8) (field (m:file-info p (m:owner p id)) name)))
@@ -384,7 +384,7 @@
       (format:append (& path) ".h")
       (m:storage (data:append (& path) 0))
       (let ((file (pointer types:file-stream) (stdio:fopen (data:bytes path) "wb")))
-        (match (m:is-empty (cast (pointer void) file))
+        (match (base:is-null (cast (pointer void) file))
           (true (do (m:text constants:STDERR-FILENO "cannot create library header\n") false))
           (false
             (let

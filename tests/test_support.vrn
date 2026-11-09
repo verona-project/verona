@@ -126,7 +126,7 @@
 
 (base:function write-fixture ((bytes data:view)) bool
   (let ((file (pointer types:file-stream) (io:fopen path "wb")))
-    (match (m:is-empty (cast (pointer void) file))
+    (match (base:is-null (cast (pointer void) file))
       (true false)
       (false
         (let

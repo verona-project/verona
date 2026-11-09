@@ -59,18 +59,18 @@
         (_ (m:fatal "cannot allocate reader feature"))))))
 
 (base:function append-feature ((head (pointer (pointer void))) (link (pointer void))) unit
-  (match (m:is-empty (deref head))
+  (match (base:is-null (deref head))
     (true (do (store (deref head) link) unit))
     (false (append-after (cast (pointer syntax:feature) (deref head)) link))))
 
 (base:function append-after ((current (pointer syntax:feature)) (link (pointer void))) unit
   (let ((v syntax:feature (deref current)))
-    (match (m:is-empty (field v next))
+    (match (base:is-null (field v next))
       (true (do (store (deref current) (syntax:feature (field v name) link)) unit))
       (false (append-after (cast (pointer syntax:feature) (field v next)) link)))))
 
 (base:function has ((text (pointer u8)) (part (pointer u8))) bool
-  (base:not (m:is-empty (cast (pointer void) (cstring:strstr text part)))))
+  (base:not (base:is-null (cast (pointer void) (cstring:strstr text part)))))
 
 (base:function architecture ((triple (pointer u8))) (pointer u8)
   (base:cond
@@ -91,13 +91,13 @@
     (true (do (m:fatal "unsupported target platform: expected Darwin or Linux") ""))))
 
 (base:function from-context ((p m:context)) (pointer void)
-  (match (m:is-empty (field p session))
+  (match (base:is-null (field p session))
     (true (m:empty-env))
     (false (field (deref (cast (pointer m:module-session) (field p session))) configuration))))
 
 (base:function reader-features ((p m:context)) syntax:features
   (let ((config (pointer void) (from-context p)))
-    (match (m:is-empty config)
+    (match (base:is-null config)
       (true (syntax:features (syntax:native-platform) (syntax:native-architecture) (m:empty-env)))
       (false (field (deref (cast (pointer configuration) config)) features)))))
 

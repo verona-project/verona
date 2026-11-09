@@ -89,8 +89,7 @@
                          (0 true)
                          (_ false)))))
                  (testing:check
-                   (m:is-empty
-                     (cast
+                   (base:is-null (cast
                        (pointer void)
                        (link:strings-at args (- (link:strings-length args) 1)))))))
              (_ (testing:empty))))))

@@ -151,7 +151,7 @@
 
 ; Keep C object validation separate from the private core value representation.
 (base:function c-seen ((ty u64) (seen (pointer void))) bool
-  (match (m:is-empty seen)
+  (match (base:is-null seen)
     (true false)
     (false
       (let ((v m:binding (deref (cast (pointer m:binding) seen))))
@@ -459,7 +459,7 @@
 ; Match resolve-qualified-name's distinction between an unknown qualifier and
 ; a loaded module that the current module has not imported.
 (base:function known-module ((c m:context) (name data:view) (i u64)) bool
-  (match (m:is-empty (field c session))
+  (match (base:is-null (field c session))
     (true false)
     (false
       (let ((session m:module-session (deref (cast (pointer m:module-session) (field c session)))))
@@ -619,7 +619,7 @@
     (match (== split end)
       (true (match (find c all name) (0 (default-generic c name)) (found found)))
       (false
-        (match (m:is-empty (field c session))
+        (match (base:is-null (field c session))
           (true (do (m:report c name "unknown module alias (missing import)") 0))
           (false
             (let
@@ -689,7 +689,7 @@
           (export-names c all owner (m:next c names)))))))
 
 (base:function exports ((c m:context) (all u64) (i u64)) unit
-  (match (m:is-empty (field c session))
+  (match (base:is-null (field c session))
     (true unit)
     (false
       (let ((session m:module-session (deref (cast (pointer m:module-session) (field c session)))))
@@ -2600,7 +2600,7 @@
     (match (== split end)
       (true (type-in c (m:owner c name) (m:spelling c name) 1))
       (false
-        (match (m:is-empty (field c session))
+        (match (base:is-null (field c session))
           (true 0)
           (false
             (let
@@ -2637,7 +2637,7 @@
           ((qualifier
              data:view
              (data:view (field (m:spelling c name) bytes) (- split (field v start)))))
-          (match (m:is-empty (field c session))
+          (match (base:is-null (field c session))
             (true (missing-qualifier c name qualifier))
             (false
               (let ((target u64 (import-target c (m:owner c name) qualifier 0)))
@@ -3375,7 +3375,7 @@
       (true (m:report c id "expected boolean, integer, character, binding, or wildcard pattern")))))
 
 (base:function literal-covered ((value i64) (seen (pointer void))) bool
-  (match (m:is-empty seen)
+  (match (base:is-null seen)
     (true false)
     (false
       (let ((v m:binding (deref (cast (pointer m:binding) seen))))

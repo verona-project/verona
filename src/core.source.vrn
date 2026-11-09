@@ -39,7 +39,7 @@
 
 (base:function read ((path (pointer u8)) (out (pointer data:data))) error:status
   (let ((file (pointer types:file-stream) (io:fopen path "rb")))
-    (match (m:is-empty (cast (pointer void) file))
+    (match (base:is-null (cast (pointer void) file))
       (true (error:invalid))
       (false (read-open file out)))))
 

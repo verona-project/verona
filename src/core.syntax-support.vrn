@@ -71,7 +71,7 @@
           (found found))))))
 
 (base:function macro-in ((c m:context) (owner u64) (name data:view)) u64
-  (match (m:is-empty (field c session))
+  (match (base:is-null (field c session))
     (true (macro-range c owner name 1 (- (m:nodes-length (deref (field c items))) 1)))
     (false
       (macro-entry

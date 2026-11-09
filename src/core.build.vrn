@@ -106,7 +106,7 @@
   (do
     (m:storage (data:resize out capacity))
     (let ((raw (pointer u8) (getcwd (data:bytes (deref out)) capacity)))
-      (match (m:is-empty (cast (pointer void) raw))
+      (match (base:is-null (cast (pointer void) raw))
         (false raw)
         (true
           (match (== (deref (errno:errno-pointer)) (cast i32 34))
@@ -204,8 +204,8 @@
 (base:function single-line ((value (pointer u8))) bool
   (base:and-then
     (> (cstring:strlen value) 0)
-    (m:is-empty (cast (pointer void) (cstring:strchr value 10)))
-    (m:is-empty (cast (pointer void) (cstring:strchr value 13)))))
+    (base:is-null (cast (pointer void) (cstring:strchr value 10)))
+    (base:is-null (cast (pointer void) (cstring:strchr value 13)))))
 
 (base:function feature-names ((c m:context) (id u64)) unit
   (match id (0 unit) (_ (do (name c id) (feature-names c (m:next c id))))))
@@ -377,7 +377,7 @@
 
 (base:function feature-copy ((c m:context) (head (pointer void)) (out (pointer (pointer void))))
   unit
-  (match (m:is-empty head)
+  (match (base:is-null head)
     (true unit)
     (false
       (let ((v syntax:feature (deref (cast (pointer syntax:feature) head))))
@@ -416,7 +416,7 @@
                 (_
                   (let ((dir (pointer types:directory-stream) (fs:opendir prefix)))
                     (do
-                      (match (m:is-empty (cast (pointer void) dir))
+                      (match (base:is-null (cast (pointer void) dir))
                         (true (m:fatal "cannot create output directory"))
                         (_ unit))
                       (fs:closedir dir)
@@ -440,7 +440,7 @@
      (manifest (pointer u8) (join c directory "verona.build"))
      (stream (pointer types:file-stream) (stdio:fopen manifest "rb")))
     (do
-      (match (m:is-empty (cast (pointer void) stream))
+      (match (base:is-null (cast (pointer void) stream))
         (true (m:fatal "cannot find verona.build in current directory"))
         (_ unit))
       (match (source:read-open stream (& input))

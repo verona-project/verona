@@ -1050,7 +1050,7 @@
               (do
                 ; LLVMExternalLinkage keeps only this explicit C entry visible.
                 (ir:linkage-set adapter 0)
-                (match (m:is-empty (cast (pointer void) (get b slot)))
+                (match (base:is-null (cast (pointer void) (get b slot)))
                   (true (do (put b slot adapter) unit))
                   (_ unit)))))
           (_ unit))
@@ -1060,7 +1060,7 @@
 ; direct calls retain their existing representation, including tuple callbacks.
 (base:function callback-adapter ((c m:context) (b backend) (function u64) (site u64)) t:value-ref
   (let ((slot u64 (m:next c (m:child c function))) (cached t:value-ref (get b slot)))
-    (match (m:is-empty (cast (pointer void) cached))
+    (match (base:is-null (cast (pointer void) cached))
       (false cached)
       (true
         (let ((name data:data (data:empty (arena:allocator (field c memory)))))

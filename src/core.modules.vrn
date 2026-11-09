@@ -72,7 +72,7 @@
   (let ((out data:data (data:empty (arena:allocator (field l memory)))))
     (do
       (m:storage (data:resize (& out) constants:module-path-capacity))
-      (match (m:is-empty (cast (pointer void) (realpath path (data:bytes out))))
+      (match (base:is-null (cast (pointer void) (realpath path (data:bytes out))))
         (true (m:error (context l) site "cannot open source file: cannot resolve module path"))
         (false unit))
       (data:bytes out))))
@@ -121,7 +121,7 @@
     ((out data:data (data:empty (arena:allocator (field l memory))))
      (stream (pointer types:file-stream) (stdio:fopen path "rb")))
     (do
-      (match (m:is-empty (cast (pointer void) stream))
+      (match (base:is-null (cast (pointer void) stream))
         (true (m:error (context l) site "cannot open module source file"))
         (false unit))
       (match (source:read-open stream (& out))
