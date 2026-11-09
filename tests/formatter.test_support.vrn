@@ -1,7 +1,6 @@
 (import base)
 (import testing)
 (import allocator)
-(import foundation.compat.arithmetic :as n)
 (import data)
 (import system_allocator :as system)
 (import formatter)
@@ -10,7 +9,7 @@
 (import formatter.lexer :as lexer)
 
 (base:function length-at ((text (pointer u8)) (i u64)) u64
-  (match (deref (pointer-offset text i)) (0 i) (_ (length-at text (n:add i 1)))))
+  (match (deref (pointer-offset text i)) (0 i) (_ (length-at text (+ i 1)))))
 
 (base:function length ((text (pointer u8))) u64
   (length-at text 0))
@@ -23,12 +22,12 @@
 
 (base:function token-equality ((left data:view) (right data:view) (a m:tape) (b m:tape) (i u64))
   testing:result
-  (match (n:eq i (m:nodes-length a))
+  (match (= i (m:nodes-length a))
     (true (testing:empty))
     (false
       (let ((first m:node (m:at a i)) (second m:node (m:at b i)))
         (testing:checks
-          (testing:check (n:eq (field first kind) (field second kind)))
+          (testing:check (= (field first kind) (field second kind)))
           (testing:check
             (data:equal
               (data:view
@@ -37,7 +36,7 @@
               (data:view
                 (pointer-offset (field right bytes) (field second start))
                 (field second length))))
-          (token-equality left right a b (n:add i 1)))))))
+          (token-equality left right a b (+ i 1)))))))
 
 (base:function preserved ((left data:view) (right data:view)) testing:result
   (let
@@ -47,7 +46,7 @@
        testing:result
        (match (m:steps (lexer:scan left (& a)) (lexer:scan right (& b)))
          ((ok)
-          (match (n:eq (m:nodes-length a) (m:nodes-length b))
+          (match (= (m:nodes-length a) (m:nodes-length b))
             (true (token-equality left right a b 0))
             (false (testing:fail))))
          (_ (testing:fail)))))
@@ -80,7 +79,7 @@
      (result
        testing:result
        (match (formatter:format (view input) 100 (& output) (system:create))
-         ((syntax-error position message) (testing:check (n:eq position offset)))
+         ((syntax-error position message) (testing:check (= position offset)))
          (_ (testing:fail)))))
     (do (data:destroy (& output)) result)))
 
@@ -98,18 +97,18 @@
   (out-of-memory))
 
 (base:function acquire ((context (pointer void)) (size u64) (alignment u64)) allocator:result
-  (match (n:eq budget 0)
+  (match (= budget 0)
     (true (allocator:failure (oom)))
     (false
       (do
-        (assign budget (n:sub budget 1))
+        (assign budget (- budget 1))
         (match (allocator:allocate (system:create) size alignment)
           ((failed reason) (allocator:failure reason))
-          ((allocated bytes) (do (assign live (n:add live 1)) (allocator:success bytes))))))))
+          ((allocated bytes) (do (assign live (+ live 1)) (allocator:success bytes))))))))
 
 (base:function release ((context (pointer void)) (bytes (pointer u8)) (size u64) (alignment u64))
   unit
-  (do (assign live (n:sub live 1)) (allocator:deallocate (system:create) bytes size alignment)))
+  (do (assign live (- live 1)) (allocator:deallocate (system:create) bytes size alignment)))
 
 (base:function failing () allocator:backend
   (allocator:backend (cast (pointer void) "") acquire release))

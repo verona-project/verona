@@ -9,7 +9,6 @@
 (import llvm.types :as t)
 (import llvm.target :as target)
 (import libc.string :as cstring)
-(import foundation.compat.arithmetic :as n)
 
 (base:function machine
   ((config info:configuration) (module t:module-ref) (level i32) (message (pointer (pointer u8))))
@@ -82,7 +81,7 @@
               (target:layout-dispose layout)
               (target:machine-dispose handle)
               (llvm:destroy owner)
-              (match (base:and (n:eq (base:convert width) 8) (n:eq (base:convert (deref text)) 101))
+              (match (base:and (== width (cast u32 8)) (== (deref text) (cast u8 101)))
                 (true unit)
                 (false
                   (m:fatal "unsupported target layout: requires 64-bit little-endian pointers")))

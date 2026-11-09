@@ -2,7 +2,6 @@
 (import core.model :as m)
 (import data)
 (import libc.string :as cstring)
-(import foundation.compat.arithmetic :as n)
 
 ; Scalar identities are disjoint from nominal and structural descriptors.
 (base:constant descriptor-base u64 16)
@@ -10,13 +9,13 @@
 (base:type operation (product (code u64) (input u64) (result u64) (arity u64)))
 
 (base:function integer-type ((ty u64)) bool
-  (match (n:ge ty 3) (true (n:le ty 10)) (false false)))
+  (match (>= ty 3) (true (<= ty 10)) (false false)))
 
 (base:function float-type ((ty u64)) bool
   (match ty (12 true) (13 true) (_ false)))
 
 (base:function signed-type ((ty u64)) bool
-  (match (n:ge ty 3) (true (n:le ty 6)) (false false)))
+  (match (>= ty 3) (true (<= ty 6)) (false false)))
 
 (base:function width ((ty u64)) u64
   (match ty (4 8) (5 16) (6 32) (7 8) (8 16) (9 32) (12 32) (_ 64)))
@@ -56,19 +55,19 @@
   (match exponent
     (0 1)
     (_
-      (let ((half u64 (pow2 (n:div exponent 2))) (square u64 (n:mul half half)))
-        (match (n:eq (n:mul (n:div exponent 2) 2) exponent) (true square) (false (n:mul square 2)))))))
+      (let ((half u64 (pow2 (/ exponent 2))) (square u64 (* half half)))
+        (match (== (* (/ exponent 2) 2) exponent) (true square) (false (* square 2)))))))
 
 (base:function modulus ((ty u64)) u64
   (pow2 (width ty)))
 
 (base:function sign-bit ((ty u64)) u64
-  (pow2 (n:sub (width ty) 1)))
+  (pow2 (- (width ty) 1)))
 
 (base:function narrow ((ty u64) (bits u64)) u64
   (match (width ty)
     (64 bits)
-    (_ (let ((limit u64 (modulus ty))) (n:sub bits (n:mul (n:div bits limit) limit))))))
+    (_ (let ((limit u64 (modulus ty))) (- bits (* (/ bits limit) limit))))))
 
 ; Canonical evaluator payload: signed values sign extend, unsigned values zero
 ; extend. u64 retains all its bits in the existing i64 payload field.
@@ -77,13 +76,13 @@
     (base:convert
       (match (signed-type ty)
         (false low)
-        (true (match (n:ge low (sign-bit ty)) (false low) (true (n:sub low (modulus ty)))))))))
+        (true (match (>= low (sign-bit ty)) (false low) (true (- low (modulus ty)))))))))
 
 (base:function remainder ((value u64) (divisor u64)) u64
-  (n:sub value (n:mul (n:div value divisor) divisor)))
+  (- value (* (/ value divisor) divisor)))
 
 (base:function bitwise ((code u64) (a u64) (b u64)) u64
-  (match (match a (0 (n:eq b 0)) (_ false))
+  (match (match a (0 (== b 0)) (_ false))
     (true 0)
     (false
       (let
@@ -92,23 +91,23 @@
          (bit
            u64
            (match code
-             (11 (n:mul x y))
-             (12 (n:sub (n:add x y) (n:mul x y)))
-             (_ (remainder (n:add x y) 2)))))
-        (n:add bit (n:mul 2 (bitwise code (n:div a 2) (n:div b 2))))))))
+             (11 (* x y))
+             (12 (- (+ x y) (* x y)))
+             (_ (remainder (+ x y) 2)))))
+        (+ bit (* 2 (bitwise code (/ a 2) (/ b 2))))))))
 
 (base:function text-is ((value data:view) (text (pointer u8))) bool
   (data:equal value (data:view text (cstring:strlen text))))
 
 (base:function slice ((value data:view) (start u64) (end u64)) data:view
-  (data:view (pointer-offset (field value bytes) start) (n:sub end start)))
+  (data:view (pointer-offset (field value bytes) start) (- end start)))
 
 ; The longest concrete integer primitive name is under 32 bytes.
 (base:function last-dash ((value data:view) (end u64)) u64
   (match end
     (0 0)
     (_
-      (let ((index u64 (n:sub end 1)))
+      (let ((index u64 (- end 1)))
         (match (deref (pointer-offset (field value bytes) index))
           (45 index)
           (_ (last-dash value index)))))))
@@ -165,7 +164,7 @@
   (base:or (integer-type ty) (float-type ty)))
 
 (base:function default-result ((code u64) (input u64)) u64
-  (match (n:lt code 5) (true input) (false 2)))
+  (match (< code 5) (true input) (false 2)))
 
 (base:function conversion-prefix ((from u64) (to u64)) (pointer u8)
   (base:cond
@@ -176,19 +175,19 @@
        (true "%fptoui-primitive")))
     ((float-type to)
      (match (signed-type from) (true "%sitofp-primitive") (false "%uitofp-primitive")))
-    ((n:gt (width from) (width to)) "%trunc-primitive")
-    ((n:eq (width from) (width to)) "%reinterpret-primitive")
+    ((> (width from) (width to)) "%trunc-primitive")
+    ((== (width from) (width to)) "%reinterpret-primitive")
     ((signed-type from) "%sext-primitive")
     (true "%zext-primitive")))
 
 (base:function conversion ((value data:view) (split u64) (to u64)) operation
   (let
     ((earlier u64 (last-dash value split))
-     (from u64 (numeric-suffix (slice value (n:add earlier 1) split))))
+     (from u64 (numeric-suffix (slice value (+ earlier 1) split))))
     (base:cond
-      ((n:eq earlier 0) (operation 0 0 0 0))
-      ((n:eq from 0) (operation 0 0 0 0))
-      ((n:eq from to) (operation 0 0 0 0))
+      ((== earlier 0) (operation 0 0 0 0))
+      ((== from 0) (operation 0 0 0 0))
+      ((== from to) (operation 0 0 0 0))
       ((text-is (slice value 0 earlier) (conversion-prefix from to)) (operation 16 from to 1))
       (true (operation 0 0 0 0)))))
 
@@ -206,25 +205,26 @@
 (base:function primitive ((c m:context) (id u64)) operation
   (let ((value data:view (m:spelling c id)) (length u64 (field value length)))
     (base:cond
-      ((n:lt length 4) (operation 0 0 0 0))
-      ((n:gt length 32) (operation 0 0 0 0))
+      ((< length 4) (operation 0 0 0 0))
+      ((> length 32) (operation 0 0 0 0))
       ((text-is value "%is-null-primitive-pointer") (operation 20 0 2 1))
-      ((n:eq (base:convert (deref (field value bytes))) 37)
+      ((let ((first u64 (base:convert (deref (field value bytes)))))
+         (== first (cast u64 37)))
        (let
          ((split u64 (last-dash value length))
-          (ty u64 (numeric-suffix (slice value (n:add split 1) length)))
+          (ty u64 (numeric-suffix (slice value (+ split 1) length)))
           (code u64 (binary-code (slice value 0 split))))
          (base:cond
-           ((text-is (slice value (n:add split 1) length) "bool")
+           ((text-is (slice value (+ split 1) length) "bool")
             (boolean-primitive (slice value 0 split)))
-           ((n:eq ty 0) (operation 0 0 0 0))
-           ((n:eq code 0) (conversion value split ty))
-           ((match (float-type ty) (true (n:gt code 10)) (false false)) (operation 0 0 0 0))
+           ((== ty 0) (operation 0 0 0 0))
+           ((== code 0) (conversion value split ty))
+           ((match (float-type ty) (true (> code 10)) (false false)) (operation 0 0 0 0))
            (true
              (operation
                code
                ty
-               (match (n:ge code 5) (false ty) (true (match (n:le code 10) (true 2) (false ty))))
+               (match (>= code 5) (false ty) (true (match (<= code 10) (true 2) (false ty))))
                2)))))
       (true (operation 0 0 0 0)))))
 

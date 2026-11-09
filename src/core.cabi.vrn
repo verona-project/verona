@@ -11,7 +11,6 @@
 (import llvm.enums :as enum)
 (import llvm.target :as target)
 (import libc.string :as cstring)
-(import foundation.compat.arithmetic :as n)
 
 ; Native data layout is owned here; the LLVM module and checked tape are borrowed.
 (base:type context (product (program m:context) (owner llvm:session) (data t:layout-ref)))
@@ -42,10 +41,10 @@
   (ir:pointer-type (field (field c owner) context) 0))
 
 (base:function minimum ((a u64) (b u64)) u64
-  (match (n:lt a b) (true a) (false b)))
+  (match (< a b) (true a) (false b)))
 
 (base:function maximum ((a u64) (b u64)) u64
-  (match (n:gt a b) (true a) (false b)))
+  (match (> a b) (true a) (false b)))
 
 (base:function size ((c context) (ty t:type-ref)) u64
   (target:abi-size (field c data) ty))
@@ -64,7 +63,7 @@
         (store
           (deref (pointer-offset out index))
           (storage-type c (check:parameter-type (field c program) id)))
-        (components c (m:next (field c program) id) out (n:add index 1))))))
+        (components c (m:next (field c program) id) out (+ index 1))))))
 
 (base:function record-type ((c context) (id u64)) t:type-ref
   (let
@@ -85,7 +84,7 @@
          (align u64 (alignment c ty))
          (next
            union-layout
-           (match (n:gt align (field best alignment))
+           (match (> align (field best alignment))
              (true (union-layout ty length (maximum length (field best size)) align))
              (false
                (union-layout
@@ -102,17 +101,17 @@
 (base:function storage-type ((c context) (ty u64)) t:type-ref
   (let ((p m:context (field c program)) (owner llvm:session (field c owner)))
     (base:cond
-      ((n:eq ty 2) (integer c 8))
-      ((n:eq ty 14) (ir:void-type (field owner context)))
+      ((== ty 2) (integer c 8))
+      ((== ty 14) (ir:void-type (field owner context)))
       ((match (check:type-kind p ty) (20 true) (22 true) (_ false))
        (record-type c (check:type-components p ty)))
-      ((n:eq (check:type-kind p ty) 49)
+      ((== (check:type-kind p ty) 49)
        (let
          ((array
             t:type-ref
             (ir:array-type (storage-type c (check:array-element p ty)) (check:array-length p ty))))
          (ir:struct-type (field owner context) (& array) 1 0)))
-      ((n:eq (check:type-kind p ty) 21)
+      ((== (check:type-kind p ty) 21)
        (let ((union union-layout (sum-layout c ty)) (buffer (pointer t:type-ref) (types c 2)))
          (do
            (store (deref buffer) (integer c 32))
@@ -121,7 +120,7 @@
              (_
                (let
                  ((members (pointer t:type-ref) (types c 2))
-                  (tail u64 (n:sub (field union size) (field union anchor-size))))
+                  (tail u64 (- (field union size) (field union anchor-size))))
                  (do
                    (store (deref members) (field union anchor))
                    (store (deref (pointer-offset members 1)) (ir:array-type (integer c 8) tail))
@@ -132,7 +131,7 @@
       (true (layout:value-type p owner ty)))))
 
 (base:function same-type ((a t:type-ref) (b t:type-ref)) bool
-  (n:eq (m:address (cast (pointer void) a)) (m:address (cast (pointer void) b))))
+  (== (m:address (cast (pointer void) a)) (m:address (cast (pointer void) b))))
 
 ; Allocate padded, zeroed storage when register coercions exceed an object's size.
 (base:function repack ((c context) (value t:value-ref) (to t:type-ref)) t:value-ref
@@ -142,7 +141,7 @@
       (let
         ((builder t:builder-ref (field (field c owner) builder))
          (length u64 (maximum (size c (ir:value-type value)) (size c to)))
-         (buffer t:type-ref (ir:array-type (integer c 64) (n:div (n:add length 7) 8)))
+         (buffer t:type-ref (ir:array-type (integer c 64) (/ (+ length 7) 8)))
          (address t:value-ref (ir:build-alloca builder buffer "abi.storage")))
         (do
           (ir:build-store builder (ir:const-null buffer) address)
@@ -171,7 +170,7 @@
           (m:next p fields)
           source
           next
-          (base:convert (n:add (base:convert index) 1))
+          (+ index (cast u32 1))
           to-c)))))
 
 (base:function convert-array ((c context) (ty u64) (value t:value-ref) (to-c bool)) t:value-ref
@@ -266,7 +265,7 @@
             yes
             no)
           (ir:builder-position builder yes)
-          (match (n:gt (size c payload) 0)
+          (match (> (size c payload) 0)
             (false unit)
             (true
               (match to-c
@@ -274,7 +273,7 @@
                   (let
                     ((value
                        t:value-ref
-                       (ir:build-extract builder source (base:convert (n:add index 1)) ""))
+                       (ir:build-extract builder source (base:convert (+ index 1)) ""))
                      (converted
                        t:value-ref
                        (convert-components c fields value (ir:const-null payload) 0 true))
@@ -299,7 +298,7 @@
                          builder
                          (ir:build-load builder whole out "")
                          converted
-                         (base:convert (n:add index 1))
+                         (base:convert (+ index 1))
                          "")))
                     (do (ir:build-store builder result out) unit))))))
           (ir:build-br builder end)
@@ -386,22 +385,22 @@
     (0 best)
     (_
       (let ((p m:context (field c program)) (part homogeneous (hfa c (check:parameter-type p id))))
-        (match (n:eq (size c (storage-type c (check:parameter-type p id))) 0)
+        (match (== (size c (storage-type c (check:parameter-type p id))) 0)
           (true (hfa-fields c (m:next p id) best))
           (false
             (match
-              (match (n:eq (field part ty) 0)
+              (match (== (field part ty) 0)
                 (true true)
                 (false
                   (match (field best count)
                     (0 false)
-                    (_ (match (n:eq (field best ty) (field part ty)) (true false) (false true))))))
+                    (_ (match (== (field best ty) (field part ty)) (true false) (false true))))))
               (true (homogeneous 0 0))
               (false
                 (hfa-fields
                   c
                   (m:next p id)
-                  (homogeneous (field part ty) (n:add (field best count) (field part count))))))))))))
+                  (homogeneous (field part ty) (+ (field best count) (field part count))))))))))))
 
 (base:function hfa ((c context) (ty u64)) homogeneous
   (let ((p m:context (field c program)))
@@ -415,7 +414,7 @@
             (let ((element homogeneous (hfa c (check:array-element p ty))))
               (homogeneous
                 (field element ty)
-                (n:mul (field element count) (check:array-length p ty)))))
+                (* (field element count) (check:array-length p ty)))))
           (_ (homogeneous 0 0)))))))
 
 ; SysV merges every eightbyte touched by an integer/pointer field into INTEGER;
@@ -424,11 +423,11 @@
   (match length
     (0 unit)
     (_
-      (let ((index u64 (n:div offset 8)) (old u64 (deref (pointer-offset classes index))))
+      (let ((index u64 (/ offset 8)) (old u64 (deref (pointer-offset classes index))))
         (do
           (store (deref (pointer-offset classes index)) (match old (1 1) (_ kind)))
-          (match (n:gt (n:add (num:remainder offset 8) length) 8)
-            (true (store (deref (pointer-offset classes (n:add index 1))) kind))
+          (match (> (+ (num:remainder offset 8) length) 8)
+            (true (store (deref (pointer-offset classes (+ index 1))) kind))
             (false unit))
           unit)))))
 
@@ -439,7 +438,7 @@
     (_
       (let
         ((p m:context (field c program))
-         (position u64 (n:add offset (target:element-offset (field c data) ty index))))
+         (position u64 (+ offset (target:element-offset (field c data) ty index))))
         (do
           (classify c (check:parameter-type p fields) position classes)
           (classify-fields
@@ -447,7 +446,7 @@
             (m:next p fields)
             ty
             offset
-            (base:convert (n:add (base:convert index) 1))
+            (+ index (cast u32 1))
             classes))))))
 
 (base:function classify-elements
@@ -457,7 +456,7 @@
     (_
       (do
         (classify c ty offset classes)
-        (classify-elements c ty (n:add offset stride) (n:sub length 1) stride classes)))))
+        (classify-elements c ty (+ offset stride) (- length 1) stride classes)))))
 
 (base:function classify-cases ((c context) (id u64) (offset u64) (classes (pointer u64))) unit
   (match id
@@ -481,7 +480,7 @@
               (classify-cases
                 c
                 (check:type-components p ty)
-                (n:add offset (target:element-offset (field c data) storage 1))
+                (+ offset (target:element-offset (field c data) storage 1))
                 classes)))))
       (49
         (let ((element u64 (check:array-element p ty)))
@@ -531,27 +530,27 @@
 (base:function chunk-type ((c context) (kind u64) (length u64)) t:type-ref
   (match kind
     (2
-      (match (n:le length 4)
+      (match (<= length 4)
         (true (ir:float-type (field (field c owner) context)))
         (false (ir:double-type (field (field c owner) context)))))
-    (_ (integer c (base:convert (n:mul length 8))))))
+    (_ (integer c (base:convert (* length 8))))))
 
 (base:function passing-for ((c context) (ty u64) (return bool) (ints u64) (floats u64)) passing
   (let ((owner llvm:session (field c owner)) (storage t:type-ref (storage-type c ty)))
     (base:cond
-      ((n:eq ty 14) (ignored storage))
+      ((== ty 14) (ignored storage))
       ((match (aggregate c ty) (true false) (false true))
        (registers
          (match ty (2 (integer c 1)) (_ storage))
          1
          (match (num:float-type ty) (true 0) (false 1))
          (match (num:float-type ty) (true 1) (false 0))))
-      ((n:eq (size c storage) 0) (ignored (ir:void-type (field owner context))))
+      ((== (size c storage) 0) (ignored (ir:void-type (field owner context))))
       ((match (config:x86 (field c program)) (true false) (false true))
        (let ((homogeneous homogeneous (hfa c ty)) (length u64 (size c storage)))
          (base:cond
-           ((match (n:gt (field homogeneous ty) 0)
-              (true (n:le (field homogeneous count) 4))
+           ((match (> (field homogeneous ty) 0)
+              (true (<= (field homogeneous count) 4))
               (false false))
             (registers
               (match return
@@ -561,15 +560,15 @@
               1
               0
               (field homogeneous count)))
-           ((n:gt length 16) (indirect storage))
-           ((n:gt length 8) (registers (ir:array-type (integer c 64) 2) 1 2 0))
+           ((> length 16) (indirect storage))
+           ((> length 8) (registers (ir:array-type (integer c 64) 2) 1 2 0))
            (true
              (registers
-               (integer c (match return (true (base:convert (n:mul length 8))) (false 64)))
+               (integer c (match return (true (base:convert (* length 8))) (false 64)))
                1
                1
                0)))))
-      ((n:gt (size c storage) 16) (indirect storage))
+      ((> (size c storage) 16) (indirect storage))
       (true
         (let
           ((classes (tuple u64 u64) (tuple 0 0))
@@ -578,31 +577,31 @@
            (classified unit (classify c ty 0 buffer))
            (first u64 (tuple-get classes 0))
            (second u64 (tuple-get classes 1))
-           (integer-count u64 (n:add (match first (1 1) (_ 0)) (match second (1 1) (_ 0))))
-           (float-count u64 (n:add (match first (2 1) (_ 0)) (match second (2 1) (_ 0)))))
+           (integer-count u64 (+ (match first (1 (cast u64 1)) (_ (cast u64 0))) (match second (1 (cast u64 1)) (_ (cast u64 0)))))
+           (float-count u64 (+ (match first (2 (cast u64 1)) (_ (cast u64 0))) (match second (2 (cast u64 1)) (_ (cast u64 0))))))
           (match
             (match return
               (true false)
               (false
-                (match (n:gt (n:add ints integer-count) 6)
+                (match (> (+ ints integer-count) 6)
                   (true true)
-                  (false (n:gt (n:add floats float-count) 8)))))
+                  (false (> (+ floats float-count) 8)))))
             (true (indirect storage))
             (false
               (let
                 ((members (pointer t:type-ref) (types c 2))
                  (first-type
                    t:type-ref
-                   (chunk-type c first (match (n:gt length 8) (true 8) (false length)))))
+                   (chunk-type c first (match (> length 8) (true 8) (false length)))))
                 (do
                   (store (deref members) first-type)
-                  (match (n:gt length 8)
+                  (match (> length 8)
                     (false (registers first-type 1 integer-count float-count))
                     (true
                       (do
                         (store
                           (deref (pointer-offset members 1))
-                          (chunk-type c second (n:sub length 8)))
+                          (chunk-type c second (- length 8)))
                         (registers
                           (ir:struct-type (field owner context) members 2 0)
                           2
@@ -610,10 +609,10 @@
                           float-count)))))))))))))
 
 (base:function count-ints ((old u64) (add u64)) u64
-  (minimum (n:add old add) 6))
+  (minimum (+ old add) 6))
 
 (base:function count-floats ((old u64) (add u64)) u64
-  (minimum (n:add old add) 8))
+  (minimum (+ old add) 8))
 
 (base:function function-parameters
   ((c context) (params u64) (out (pointer t:type-ref)) (index u64) (ints u64) (floats u64)) u32
@@ -636,7 +635,7 @@
                       (deref (pointer-offset out index))
                       (ir:struct-element representation 0))
                     (store
-                      (deref (pointer-offset out (n:add index 1)))
+                      (deref (pointer-offset out (+ index 1)))
                       (ir:struct-element representation 1))
                     unit))
                 (_ (store (deref (pointer-offset out index)) representation)))))
@@ -644,7 +643,7 @@
             c
             (m:next p params)
             out
-            (n:add index (passing-pieces pass))
+            (+ index (passing-pieces pass))
             (count-ints ints (passing-ints pass))
             (count-floats floats (passing-floats pass))))))))
 
@@ -690,8 +689,8 @@
 
 (base:function extension ((c context) (value t:value-ref) (index u32) (ty u64) (call bool)) unit
   (base:cond
-    ((n:eq ty 2) (add-attribute value index (enum-attribute c "zeroext" 0) call))
-    ((match (num:integer-type ty) (true (n:lt (num:width ty) 32)) (false false))
+    ((== ty 2) (add-attribute value index (enum-attribute c "zeroext" 0) call))
+    ((match (num:integer-type ty) (true (< (num:width ty) 32)) (false false))
      (add-attribute
        value
        index
@@ -732,7 +731,7 @@
             c
             value
             (m:next p params)
-            (n:add index (passing-pieces pass))
+            (+ index (passing-pieces pass))
             (count-ints ints (passing-ints pass))
             (count-floats floats (passing-floats pass))
             call))))))
@@ -757,7 +756,7 @@
         c
         value
         params
-        (n:add sret 1)
+        (+ sret 1)
         (match (config:x86 (field c program)) (true sret) (false 0))
         0
         call))))
@@ -823,7 +822,7 @@
                         (deref (pointer-offset out index))
                         (ir:build-extract builder coerced 0 ""))
                       (store
-                        (deref (pointer-offset out (n:add index 1)))
+                        (deref (pointer-offset out (+ index 1)))
                         (ir:build-extract builder coerced 1 ""))
                       unit))
                   (_ (do (store (deref (pointer-offset out index)) coerced) unit))))))
@@ -831,9 +830,9 @@
             c
             (m:next p params)
             source
-            (n:add source-index 1)
+            (+ source-index 1)
             out
-            (n:add index (passing-pieces pass))
+            (+ index (passing-pieces pass))
             (count-ints ints (passing-ints pass))
             (count-floats floats (passing-floats pass))))))))
 
@@ -918,7 +917,7 @@
                             (ir:function-param function (base:convert source-index))
                             0
                             "")
-                          (ir:function-param function (base:convert (n:add source-index 1)))
+                          (ir:function-param function (base:convert (+ source-index 1)))
                           1
                           ""))
                       (_ (ir:function-param function (base:convert source-index))))))
@@ -930,8 +929,8 @@
             function
             (m:next p params)
             out
-            (n:add source-index (passing-pieces pass))
-            (n:add index 1)
+            (+ source-index (passing-pieces pass))
+            (+ index 1)
             (count-ints ints (passing-ints pass))
             (count-floats floats (passing-floats pass))))))))
 

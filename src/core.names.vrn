@@ -5,17 +5,17 @@
 (import error)
 (import data)
 (import arena)
-(import foundation.compat.arithmetic)
-(import foundation.compat.arithmetic :as n)
 
 ; Polynomial byte hash, wrapping at u64. Split traversal bounds host stack depth.
 (base:function hash-range ((key data:view) (start u64) (count u64) (hash u64)) u64
   (match count
     (0 hash)
-    (1 (n:add (n:mul hash 31) (base:convert (deref (pointer-offset (field key bytes) start)))))
+    (1
+      (let ((byte u64 (base:convert (deref (pointer-offset (field key bytes) start)))))
+        (+ (* hash (cast u64 31)) byte)))
     (_
-      (let ((half u64 (n:div count 2)))
-        (hash-range key (n:add start half) (n:sub count half) (hash-range key start half hash))))))
+      (let ((half u64 (/ count 2)))
+        (hash-range key (+ start half) (- count half) (hash-range key start half hash))))))
 
 (base:function hash ((key data:view)) u64
   (hash-range key 0 (field key length) 0))
@@ -40,7 +40,7 @@
            (result error:status (data:assign-bytes (& copy) key)))
           (match result
             ((ok)
-             (let ((fresh u64 (n:add (names-count (deref table)) 1)))
+             (let ((fresh u64 (+ (names-count (deref table)) 1)))
                (tuple (names-insert table (data:borrow copy) fresh) fresh)))
             (reason (tuple reason 0))))))))
 

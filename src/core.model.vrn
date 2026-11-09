@@ -5,9 +5,6 @@
 (import error)
 (import data)
 (import arena)
-(import foundation.compat.arithmetic)
-(import foundation.compat.arithmetic :as n)
-(import foundation.compat.signed_arithmetic :as signed)
 (import libc.descriptor :as fd)
 (import libc.process :as process)
 (import libc.string :as cstring)
@@ -132,18 +129,18 @@
     (true 0)
     (false
       (let ((s module-session (deref (cast (pointer module-session) (field c session)))))
-        (match (n:ge index (modules-length (deref (field s files))))
+        (match (>= index (modules-length (deref (field s files))))
           (true 0)
           (false
             (let
               ((v module-info (deref (pointer-offset (tuple-get (deref (field s files)) 0) index))))
-              (match (n:lt offset (n:add (field v start) (field v length)))
+              (match (< offset (+ (field v start) (field v length)))
                 (true index)
-                (false (module-at c offset (n:add index 1)))))))))))
+                (false (module-at c offset (+ index 1)))))))))))
 
 (base:function owner ((c context) (id u64)) u64
   (let ((v node (at c id)))
-    (match (field v lookup-module) (0 (module-at c (field v start) 0)) (module (n:sub module 1)))))
+    (match (field v lookup-module) (0 (module-at c (field v start) 0)) (module (- module 1)))))
 
 (base:function file-info ((c context) (index u64)) module-info
   (let ((s module-session (deref (cast (pointer module-session) (field c session)))))
@@ -154,7 +151,7 @@
     (true false)
     (false
       (let ((s module-session (deref (cast (pointer module-session) (field c session)))))
-        (n:gt (modules-length (deref (field s files))) 0)))))
+        (> (modules-length (deref (field s files))) 0)))))
 
 (base:function source-start ((c context) (offset u64)) u64
   (match (has-files c) (false 0) (true (field (file-info c (module-at c offset 0)) start))))
@@ -170,12 +167,12 @@
 
 ; Write the entire byte view, handling partial writes; exit on error or no progress.
 (base:function write ((out i32) (value data:view)) unit
-  (match (n:eq (field value length) 0)
+  (match (== (field value length) 0)
     (true unit)
     (false
       (let
         ((count i64 (fd:write out (cast (pointer void) (field value bytes)) (field value length))))
-        (match (signed:gt count 0)
+        (match (> count 0)
           (false (do (process:exit 2) unit))
           (true
             (let ((size u64 (base:convert count)))
@@ -183,13 +180,13 @@
                 out
                 (data:view
                   (pointer-offset (field value bytes) size)
-                  (n:sub (field value length) size))))))))))
+                  (- (field value length) size))))))))))
 
 ; Write an unsigned decimal integer without a sign, padding, or newline.
 (base:function number ((out i32) (value u64)) unit
-  (let ((digit u8 (base:convert (n:add 48 (n:sub value (n:mul (n:div value 10) 10))))))
+  (let ((digit u8 (base:convert (+ (cast u64 48) (- value (* (/ value 10) 10))))))
     (do
-      (match (n:ge value 10) (true (number out (n:div value 10))) (false unit))
+      (match (>= value 10) (true (number out (/ value 10))) (false unit))
       (write out (data:view (& digit) 1)))))
 
 ; Print a diagnostic to stderr and terminate with compiler-error status 2.
@@ -297,7 +294,7 @@
 
 ; Read a source byte as u64; return the zero sentinel at or beyond the source end.
 (base:function byte ((c context) (i u64)) u64
-  (match (n:lt i (field (field c source) length))
+  (match (< i (field (field c source) length))
     (true (base:convert (deref (pointer-offset (field (field c source) bytes) i))))
     (false 0)))
 
@@ -341,23 +338,23 @@
           (store
             (deref pos)
             (match b
-              (13 (position (n:add (field v line) 1) 1 true))
+              (13 (position (+ (field v line) 1) 1 true))
               (10
                 (position
-                  (match (field v cr) (true (field v line)) (false (n:add (field v line) 1)))
+                  (match (field v cr) (true (field v line)) (false (+ (field v line) 1)))
                   1
                   false))
-              (_ (position (field v line) (n:add (field v column) 1) false))))
+              (_ (position (field v line) (+ (field v column) 1) false))))
           unit)))
     (_
-      (let ((half u64 (n:div count 2)))
-        (do (locate c start half pos) (locate c (n:add start half) (n:sub count half) pos))))))
+      (let ((half u64 (/ count 2)))
+        (do (locate c start half pos) (locate c (+ start half) (- count half) pos))))))
 
 ; Print FILE:LINE:COLUMN followed by a colon and space to stderr for a byte offset.
 (base:function location ((c context) (offset u64)) unit
   (let ((pos position (position 1 1 false)))
     (do
-      (locate c (source-start c offset) (n:sub offset (source-start c offset)) (& pos))
+      (locate c (source-start c offset) (- offset (source-start c offset)) (& pos))
       (text 2 (source-path c offset))
       (text 2 ":")
       (number 2 (field pos line))
@@ -380,7 +377,7 @@
     (location c (field (at c id) start))
     (text 2 message)
     (text 2 "\n")
-    (store (deref (field c errors)) (n:add (deref (field c errors)) 1))
+    (store (deref (field c errors)) (+ (deref (field c errors)) 1))
     unit))
 
 ; Enforce an analysis invariant or report the supplied diagnostic at the node.
@@ -393,6 +390,10 @@
 ; Borrowed lexical environment link. Parent is another binding pointer erased
 ; to void, or null at the end. Stack-allocated links cannot escape their scope.
 (base:type binding (product (name u64) (binder u64) (value i64) (parent (pointer void))))
+
+; Inspect pointer bits on the supported 64-bit ABI; this does not dereference the pointee.
+(base:function address ((p (pointer void))) u64
+  (deref (cast (pointer u64) (cast (pointer void) (& p)))))
 
 ; Recover the arena-owned bytes from a checked data literal.
 (base:function literal-bytes ((c context) (id u64)) (pointer u8)
@@ -422,7 +423,7 @@
     (true (do (fatal "internal error: missing resolved binding") (let ((zero i64 0)) zero)))
     (false
       (let ((b binding (deref (cast (pointer binding) env))))
-        (match (n:eq binder (field b binder))
+        (match (== binder (field b binder))
           (true (field b value))
           (false (value binder (field b parent))))))))
 

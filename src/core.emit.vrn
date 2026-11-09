@@ -17,7 +17,6 @@
 (import core.layout :as layout)
 (import core.cabi :as cabi)
 (import core.format :as format)
-(import foundation.compat.arithmetic :as n)
 
 ; Every checked node/binder/function has a unique syntax index. Its LLVM value
 ; lives in the matching slot, so lexical shadowing requires no textual names.
@@ -145,7 +144,7 @@
         ((next
            t:value-ref
            (ir:build-insert (field (field b owner) builder) value (expression c b args) index ""))
-         (i u32 (base:convert (n:add (base:convert index) 1))))
+         (i u32 (+ index (cast u32 1))))
         (construct c b (m:next c args) next i)))))
 
 ; Create an LLVM integer constant from i64, converting to unsigned bits at the C API boundary.
@@ -257,12 +256,12 @@
    (exit t:value-ref)
    (strlen t:value-ref)
    (ty u64)) unit
-  (match (n:gt ty 10)
+  (match (> ty 10)
     (true unit)
     (false
       (do
         (store (deref (pointer-offset helpers ty)) (division-helper owner write exit strlen ty))
-        (division-helpers owner helpers write exit strlen (n:add ty 1))))))
+        (division-helpers owner helpers write exit strlen (+ ty 1))))))
 
 (base:function division-helper
   ((owner llvm:session) (write t:value-ref) (exit t:value-ref) (strlen t:value-ref) (ty u64))
@@ -333,7 +332,7 @@
         (store
           (deref (pointer-offset out count))
           (layout:value-type c owner (field (m:at c (m:child c param)) ty)))
-        (parameter-types c owner (m:next c param) out (n:add count 1))))))
+        (parameter-types c owner (m:next c param) out (+ count 1))))))
 
 ; Declare every checked function before lowering bodies and store its LLVM handle.
 ; Use numeric names with internal linkage so source names cannot alter native symbols.
@@ -377,7 +376,7 @@
     (_
       (do
         (store (deref (pointer-offset out index)) (expression c b arg))
-        (arguments c b (m:next c arg) out (n:add index 1))))))
+        (arguments c b (m:next c arg) out (+ index 1))))))
 
 ; Lower each expression in order and return the final value.
 (base:function sequence ((c m:context) (b backend) (id u64)) t:value-ref
@@ -437,8 +436,8 @@
 ; Append source-location digits without resetting the existing string.
 (base:function append-number ((out (pointer data:data)) (v u64)) unit
   (do
-    (match (n:ge v 10) (true (append-number out (n:div v 10))) (false unit))
-    (m:storage (data:append out (base:convert (n:add 48 (n:sub v (n:mul (n:div v 10) 10))))))))
+    (match (>= v 10) (true (append-number out (/ v 10))) (false unit))
+    (m:storage (data:append out (base:convert (+ 48 (- v (* (/ v 10) 10))))))))
 
 ; LLVM owns the copied source-location string, including any filename punctuation.
 (base:function source-location ((c m:context) (b backend) (id u64)) t:value-ref
@@ -447,7 +446,7 @@
      (pos m:position (m:position 1 1 false)))
     (do
       (let ((offset u64 (field (m:at c id) start)) (start u64 (m:source-start c offset)))
-        (m:locate c start (n:sub offset start) (& pos)))
+        (m:locate c start (- offset start) (& pos)))
       (m:storage
         (data:assign-bytes
           (& out)
@@ -469,8 +468,8 @@
     ((builder t:builder-ref (field owner builder))
      (target t:type-ref (layout:scalar-type owner to)))
     (base:cond
-      ((n:eq (num:width from) (num:width to)) value)
-      ((n:gt (num:width from) (num:width to)) (ir:build-trunc builder value target ""))
+      ((== (num:width from) (num:width to)) value)
+      ((> (num:width from) (num:width to)) (ir:build-trunc builder value target ""))
       ((num:signed-type from) (ir:build-sext builder value target ""))
       (true (ir:build-zext builder value target "")))))
 
@@ -482,8 +481,8 @@
     (base:cond
       ((num:float-type from)
        (base:cond
-         ((n:eq to 12) (ir:build-fptrunc builder value target ""))
-         ((n:eq to 13) (ir:build-fpext builder value target ""))
+         ((== to 12) (ir:build-fptrunc builder value target ""))
+         ((== to 13) (ir:build-fpext builder value target ""))
          ((num:signed-type to) (ir:build-fptosi builder value target ""))
          (true (ir:build-fptoui builder value target ""))))
       ((num:float-type to)
@@ -783,7 +782,7 @@
          (pointer t:type-ref)
          (cast
            (pointer void)
-           (layout:values c (n:add 1 (check:chain-length c (m:next c (field case child))))))))
+           (layout:values c (+ 1 (check:chain-length c (m:next c (field case child))))))))
      (count u32 (layout:component-types c owner (m:next c (field case child)) buffer 0))
      (payload
        t:value-ref
@@ -796,7 +795,7 @@
          (ir:const-int (layout:integer-type owner) (field case target) 0)
          0
          "")))
-    (ir:build-insert builder tagged payload (base:convert (n:add (field case target) 1)) "")))
+    (ir:build-insert builder tagged payload (base:convert (+ (field case target) 1)) "")))
 
 (base:function payload-bindings
   ((c m:context) (b backend) (names u64) (payload t:value-ref) (index u32)) unit
@@ -813,7 +812,7 @@
                   (put b names (ir:build-extract (field (field b owner) builder) payload index ""))
                   unit))))
           (_ unit))
-        (let ((next u32 (base:convert (n:add (base:convert index) 1))))
+        (let ((next u32 (+ index (cast u32 1))))
           (payload-bindings c b (m:next c names) payload next))))))
 
 ; Test literals in order; bind names only after the entire pattern succeeds.
@@ -857,7 +856,7 @@
             b
             (m:next c names)
             payload
-            (base:convert (n:add (base:convert index) 1))
+            (+ index (cast u32 1))
             yes
             no))))))
 
@@ -891,7 +890,7 @@
                       ((constant
                          t:value-ref
                          (match sum
-                           (true (ir:const-int (layout:integer-type owner) (n:sub target 1) 0))
+                           (true (ir:const-int (layout:integer-type owner) (- target 1) 0))
                            (false
                              (word
                                owner
@@ -957,7 +956,7 @@
     ((owner llvm:session (field b owner))
      (builder t:builder-ref (field owner builder))
      (value t:value-ref (expression c b args))
-     (tuple bool (n:eq (check:type-kind c (field (m:at c args) ty)) 22))
+     (tuple bool (== (check:type-kind c (field (m:at c args) ty)) 22))
      (tag t:value-ref (match sum (true (ir:build-extract builder value 0 "")) (false value)))
      (start t:block-ref (ir:builder-block builder))
      (function t:value-ref (ir:block-parent start))
@@ -982,7 +981,7 @@
     (_
       (do
         (bind-binder c b (m:child c param) (ir:function-param function index))
-        (let ((next u32 (base:convert (n:add (base:convert index) 1))))
+        (let ((next u32 (+ index (cast u32 1))))
           (parameters c b function (m:next c param) next))))))
 
 ; Create each function's entry block, bind its parameters, and return its lowered body value.
@@ -1095,10 +1094,10 @@
                 (true (do (put b start (callback-adapter c b target start)) unit)))))
           (_ unit))))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (callback-addresses c b start half)
-          (callback-addresses c b (n:add start half) (n:sub count half)))))))
+          (callback-addresses c b (+ start half) (- count half)))))))
 
 ; Data initializers need a module-owned byte array before any function block exists.
 (base:function constant-value ((c m:context) (b backend) (id u64)) t:value-ref
@@ -1112,7 +1111,7 @@
            t:value-ref
            (ir:global-add
              (field owner module)
-             (ir:array-type (ir:int-type (field owner context) 8) (n:add (cstring:strlen bytes) 1))
+             (ir:array-type (ir:int-type (field owner context) 8) (+ (cstring:strlen bytes) 1))
              "data")))
         (do
           (ir:linkage-set global enum:linkage-internal)
@@ -1213,7 +1212,7 @@
           print
           (field (m:at c fields) ty)
           (ir:build-extract (field (field b owner) builder) value index ""))
-        (let ((next u32 (base:convert (n:add (base:convert index) 1))))
+        (let ((next u32 (+ index (cast u32 1))))
           (report-components c b print (m:next c fields) value next))))))
 
 (base:function report-cases
@@ -1253,7 +1252,7 @@
               b
               print
               (m:next c (m:child c case))
-              (ir:build-extract builder value (base:convert (n:add index 1)) "")
+              (ir:build-extract builder value (base:convert (+ index 1)) "")
               0)
             (report-text b print ")")
             (ir:build-br builder end)
@@ -1408,7 +1407,7 @@
       (declarations c b all)
       (constants c b all)
       (native-exports c b all)
-      (callback-addresses c b 1 (n:sub (m:nodes-length (deref (field c items))) 1))
+      (callback-addresses c b 1 (- (m:nodes-length (deref (field c items))) 1))
       (bodies c b all)
       (match main
         (0 unit)

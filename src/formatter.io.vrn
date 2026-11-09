@@ -1,8 +1,5 @@
 (import base)
 (import allocator)
-(import foundation.compat.arithmetic)
-(import foundation.compat.arithmetic :as n)
-(import foundation.compat.signed_arithmetic :as signed)
 (import data)
 (import libc.descriptor :as native)
 (import libc.constants :as constants)
@@ -12,20 +9,20 @@
 (import formatter.model :as m)
 
 (base:function interrupted () bool
-  (signed:eq (base:convert (deref (errno:errno-pointer))) (base:convert constants:EINTR)))
+  (== (deref (errno:errno-pointer)) constants:EINTR))
 
 (base:function read-loop ((fd i32) (input (pointer data:data)) (scratch data:data)) m:status
   (let
     ((count i64 (native:read fd (cast (pointer void) (data:bytes scratch)) (data:length scratch))))
-    (match (signed:lt count 0)
+    (match (< count 0)
       (true
         (match (interrupted) (true (read-loop fd input scratch)) (false (m:io "cannot read input"))))
       (false
-        (match (signed:eq count 0)
+        (match (== count 0)
           (true (m:success))
           (false
             (let ((size u64 (base:convert count)) (old u64 (data:length (deref input))))
-              (match (n:gt size (n:sub 16777216 old))
+              (match (> size (- 16777216 old))
                 (true (m:limit old "input limit (16 MiB) exceeded"))
                 (false
                   (m:steps
@@ -33,13 +30,13 @@
                     (m:from-storage
                       (data:reserve
                         input
-                        (match (n:le (n:add old size) (tuple-get (deref input) 2))
+                        (match (<= (+ old size) (tuple-get (deref input) 2))
                           (true (tuple-get (deref input) 2))
                           (false
-                            (match (n:eq (tuple-get (deref input) 2) 0)
+                            (match (== (tuple-get (deref input) 2) 0)
                               (true 8192)
-                              (false (n:mul (tuple-get (deref input) 2) 2)))))))
-                    (m:from-storage (data:resize input (n:add old size)))
+                              (false (* (tuple-get (deref input) 2) 2)))))))
+                    (m:from-storage (data:resize input (+ old size)))
                     (do
                       (allocator:copy-bytes
                         (pointer-offset (data:bytes (deref input)) old)
@@ -70,15 +67,15 @@
                 (failure failure)))))))))
 
 (base:function write ((fd i32) (view data:view)) m:status
-  (match (n:eq (field view length) 0)
+  (match (== (field view length) 0)
     (true (m:success))
     (false
       (let
         ((count i64 (native:write fd (cast (pointer void) (field view bytes)) (field view length))))
-        (match (signed:lt count 0)
+        (match (< count 0)
           (true (match (interrupted) (true (write fd view)) (false (m:io "cannot write output"))))
           (false
-            (match (signed:eq count 0)
+            (match (== count 0)
               (true (m:io "output made no progress"))
               (false
                 (let ((size u64 (base:convert count)))
@@ -86,15 +83,15 @@
                     fd
                     (data:view
                       (pointer-offset (field view bytes) size)
-                      (n:sub (field view length) size))))))))))))
+                      (- (field view length) size))))))))))))
 
 (base:function text ((fd i32) (value (pointer u8))) m:status
   (write fd (data:view value (cstring:strlen value))))
 
 (base:function number ((fd i32) (value u64)) m:status
-  (let ((digit u8 (base:convert (n:add 48 (n:sub value (n:mul (n:div value 10) 10))))))
+  (let ((digit u8 (base:convert (+ 48 (- value (* (/ value 10) 10))))))
     (m:steps
-      (match (n:ge value 10) (true (number fd (n:div value 10))) (false (m:success)))
+      (match (>= value 10) (true (number fd (/ value 10))) (false (m:success)))
       (write fd (data:view (& digit) 1)))))
 
 (export load write text number)

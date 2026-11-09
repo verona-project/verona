@@ -4,7 +4,6 @@
 (import arena)
 (import data)
 (import libc.string :as cstring)
-(import foundation.compat.arithmetic :as n)
 
 ; Strings and feature links belong to the invocation arena. Configurations
 ; are immutable while borrowed by a compilation session; LLVM machines are
@@ -34,14 +33,14 @@
   (match count
     (0 unit)
     (_
-      (let ((b u8 (deref bytes)))
+      (let ((b u8 (deref bytes)) (code u64 (base:convert (deref bytes))))
         (do
           (store
             (deref bytes)
-            (match (base:and (n:ge (base:convert b) 65) (n:le (base:convert b) 90))
-              (true (base:convert (n:add (base:convert b) 32)))
+            (match (base:and (>= code (cast u64 65)) (<= code (cast u64 90)))
+              (true (base:convert (+ code (cast u64 32))))
               (false b)))
-          (lower (pointer-offset bytes 1) (n:sub count 1)))))))
+          (lower (pointer-offset bytes 1) (- count 1)))))))
 
 (base:function add-feature
   ((memory (pointer arena:arena)) (head (pointer (pointer void))) (name (pointer u8))) unit
@@ -76,13 +75,13 @@
 (base:function architecture ((triple (pointer u8))) (pointer u8)
   (base:cond
     ((base:or
-       (n:eq (base:convert (cstring:strncmp triple "aarch64-" 8)) 0)
-       (n:eq (base:convert (cstring:strncmp triple "arm64-" 6)) 0))
-     "aarch64")
+       (== (cstring:strncmp triple "aarch64-" 8) (cast i32 0))
+       (== (cstring:strncmp triple "arm64-" 6) (cast i32 0)))
+      "aarch64")
     ((base:or
-       (n:eq (base:convert (cstring:strncmp triple "x86_64-" 7)) 0)
-       (n:eq (base:convert (cstring:strncmp triple "amd64-" 6)) 0))
-     "x86_64")
+       (== (cstring:strncmp triple "x86_64-" 7) (cast i32 0))
+       (== (cstring:strncmp triple "amd64-" 6) (cast i32 0)))
+      "x86_64")
     (true (do (m:fatal "unsupported target architecture: expected 64-bit AArch64 or x86-64") ""))))
 
 (base:function platform ((triple (pointer u8))) (pointer u8)

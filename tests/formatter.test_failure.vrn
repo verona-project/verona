@@ -1,6 +1,5 @@
 (import base)
 (import testing)
-(import foundation.compat.arithmetic :as n)
 (import data)
 (import formatter.test_support :as support)
 (import allocator)
@@ -64,7 +63,7 @@
                  (match (formatter:format (support:view "(a)") 100 (& output) (support:failing))
                    ((allocation-error reason) true)
                    (_ false)))
-               (testing:check (n:eq (support:outstanding) 0))))
+               (testing:check (= (support:outstanding) 0))))
            (testing:check (data:equal (data:borrow output) (support:view "old"))))))
       (do (data:destroy (& output)) result))))
 
@@ -82,7 +81,7 @@
                  (match (formatter:format (support:view "(a)") 100 (& output) (support:failing))
                    ((allocation-error reason) true)
                    (_ false)))
-               (testing:check (n:eq (support:outstanding) 0))))
+               (testing:check (= (support:outstanding) 0))))
            (testing:check (data:equal (data:borrow output) (support:view "old"))))))
       (do (data:destroy (& output)) result))))
 
@@ -110,7 +109,7 @@
              (testing:check (data:equal (data:borrow output) (support:view "old"))))))
         (do
           (data:destroy (& output))
-          (testing:checks result (testing:check (n:eq (support:outstanding) 0))))))))
+          (testing:checks result (testing:check (= (support:outstanding) 0))))))))
 
 (testing:test borrowed-destination-can-be-formatted-in-place
   (let ((output data:data (data:empty (system:create))))
@@ -150,7 +149,7 @@
            (testing:check
              (match
                (formatter:format (data:view (& (index bad 0)) 4) 100 (& output) (system:create))
-               ((syntax-error offset message) (n:eq offset 1))
+               ((syntax-error offset message) (= offset 1))
                (_ false)))
            (testing:check (data:equal (data:borrow output) (support:view "old"))))))
       (do (data:destroy (& output)) result))))

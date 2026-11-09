@@ -11,8 +11,6 @@
 (import libc.string :as cstring)
 (import libc.stdio :as stdio)
 (import libc.types :as types)
-(import foundation.compat.arithmetic)
-(import foundation.compat.arithmetic :as n)
 
 ; All construction storage belongs to the compilation arena. No LLVM handles
 ; are needed: headers describe checked C object layouts, not private values.
@@ -39,31 +37,31 @@
     (0 unit)
     (_
       (do
-        (hex c (n:div value 16) (n:sub places 1))
-        (hex-digit c (n:sub value (n:mul (n:div value 16) 16)))))))
+        (hex c (/ value 16) (- places 1))
+        (hex-digit c (- value (* (/ value 16) 16)))))))
 
 (base:function mangled ((c context) (value data:view) (index u64)) unit
-  (match (n:eq index (field value length))
+  (match (== index (field value length))
     (true unit)
     (false
       (do
         (hex c (base:convert (deref (pointer-offset (field value bytes) index))) 6)
-        (mangled c value (n:add index 1))))))
+        (mangled c value (+ index 1))))))
 
 (base:function identifier ((c context) (value data:view) (index u64)) unit
-  (match (n:eq index (field value length))
+  (match (== index (field value length))
     (true unit)
     (false
       (let ((b u64 (base:convert (deref (pointer-offset (field value bytes) index)))))
         (do
-          (match (base:or (check:letter b) (check:digit b) (n:eq b 95))
+          (match (base:or (check:letter b) (check:digit b) (== b 95))
             (true (bytes c (data:view (pointer-offset (field value bytes) index) 1)))
             (false (do (text c "_") (hex c b 2))))
-          (identifier c value (n:add index 1)))))))
+          (identifier c value (+ index 1)))))))
 
 ; Nominal names match the reference's module/declaration hex mangling.
 (base:function nominal ((c context) (ty u64)) unit
-  (let ((p m:context (field c program)) (id u64 (n:sub ty num:descriptor-base)))
+  (let ((p m:context (field c program)) (id u64 (- ty num:descriptor-base)))
     (do
       (text c "__verona_")
       (match (m:is-empty (field p session))
@@ -81,17 +79,17 @@
          (text c (match (num:signed-type ty) (true "i") (false "u")))
          (digits c (base:convert (num:width ty)))))
       ((num:float-type ty) (do (text c "f") (digits c (base:convert (num:width ty)))))
-      ((n:eq ty 2) (text c "bool"))
-      ((n:eq ty 14) (text c "void"))
+      ((== ty 2) (text c "bool"))
+      ((== ty 14) (text c "void"))
       ((check:pointer-value-type p ty) (do (text c "p_") (mangle c (check:pointer-pointee p ty))))
-      ((n:eq (check:type-kind p ty) 49)
+      ((== (check:type-kind p ty) 49)
        (do
          (text c "a")
          (digits c (check:array-length p ty))
          (text c "_")
          (mangle c (check:array-element p ty))))
-      ((n:eq (check:type-kind p ty) 46)
-       (let ((v m:node (m:at p (n:sub ty num:descriptor-base))))
+      ((== (check:type-kind p ty) 46)
+       (let ((v m:node (m:at p (- ty num:descriptor-base))))
          (do
            (text c "fn_")
            (mangle-parameters c (field v child))
@@ -121,10 +119,10 @@
        (text c (match (num:signed-type ty) (true "int") (false "uint")))
        (digits c (base:convert (num:width ty)))
        (text c "_t")))
-    ((n:eq ty 2) (text c "_Bool"))
-    ((n:eq ty 12) (text c "float"))
-    ((n:eq ty 13) (text c "double"))
-    ((n:eq ty 14) (text c "void"))
+    ((== ty 2) (text c "_Bool"))
+    ((== ty 12) (text c "float"))
+    ((== ty 13) (text c "double"))
+    ((== ty 14) (text c "void"))
     (true (do (text c "struct ") (aggregate-name c ty)))))
 
 ; Recursively build the declarator inward, so pointer chains and callbacks
@@ -140,9 +138,9 @@
            (nested context (context p (& out)))
            (pointee u64 (check:pointer-pointee p ty)))
           (do
-            (match (n:eq (check:type-kind p pointee) 46)
+            (match (== (check:type-kind p pointee) 46)
               (true
-                (let ((v m:node (m:at p (n:sub pointee num:descriptor-base))))
+                (let ((v m:node (m:at p (- pointee num:descriptor-base))))
                   (do
                     (text nested "(*")
                     (bytes nested name)
@@ -164,15 +162,15 @@
           (match index (0 unit) (_ (text c ", ")))
           (match named (true (do (text name "arg") (digits name index))) (_ unit))
           (declarator c (check:parameter-type (field c program) id) (data:borrow out))
-          (parameters c (m:next (field c program) id) (n:add index 1) named))))))
+          (parameters c (m:next (field c program) id) (+ index 1) named))))))
 
 ; Visit each descriptor once, including through recursive pointers. Children
 ; precede their by-value parents; forward declarations cover pointer cycles.
 (base:function visit ((c context) (ty u64) (seen (pointer u8)) (ordered (pointer ids-array))) unit
-  (match (n:gt ty num:descriptor-base)
+  (match (> ty num:descriptor-base)
     (false unit)
     (true
-      (let ((id u64 (n:sub ty num:descriptor-base)) (p m:context (field c program)))
+      (let ((id u64 (- ty num:descriptor-base)) (p m:context (field c program)))
         (match (deref (pointer-offset seen id))
           (1 unit)
           (_
@@ -230,7 +228,7 @@
 
 (base:function zero-size ((p m:context) (ty u64)) bool
   (match (check:type-kind p ty)
-    (49 (n:eq (check:array-length p ty) 0))
+    (49 (== (check:array-length p ty) 0))
     (20 (zero-components p (check:type-components p ty)))
     (_ false)))
 
@@ -254,7 +252,7 @@
           (text c "  ")
           (declarator c (check:parameter-type p id) (data:borrow out))
           (text c ";\n")
-          (fields c (m:next p id) (n:add index 1) named))))))
+          (fields c (m:next p id) (+ index 1) named))))))
 
 (base:function has-payload ((p m:context) (id u64)) bool
   (match id
@@ -314,7 +312,7 @@
         (_ (m:fatal "internal error: invalid C header aggregate"))))))
 
 (base:function declarations ((c context) (ordered ids-array) (index u64) (forward bool)) unit
-  (match (n:eq index (ids-length ordered))
+  (match (== index (ids-length ordered))
     (true unit)
     (false
       (let ((ty u64 (deref (pointer-offset (tuple-get ordered 0) index))))
@@ -322,7 +320,7 @@
           (match forward
             (true (do (text c "struct ") (aggregate-name c ty) (text c ";\n")))
             (false (definition c ty)))
-          (declarations c ordered (n:add index 1) forward))))))
+          (declarations c ordered (+ index 1) forward))))))
 
 (base:function exports ((c context) (id u64)) unit
   (match id
@@ -349,12 +347,12 @@
 ; Replace the artifact's final extension, without treating directory dots as
 ; extensions. Library output paths are explicit until manifest builds arrive.
 (base:function extension ((path (pointer u8)) (index u64) (end u64) (last u64)) u64
-  (match (n:eq index end)
+  (match (== index end)
     (true last)
     (false
       (extension
         path
-        (n:add index 1)
+        (+ index 1)
         end
         (match (deref (pointer-offset path index)) (47 end) (46 index) (_ last))))))
 
@@ -393,7 +391,7 @@
                  u64
                  (stdio:fwrite (cast (pointer void) (data:bytes out)) 1 (data:length out) file))
                (closed i32 (stdio:fclose file)))
-              (match (base:and (n:eq count (data:length out)) (match closed (0 true) (_ false)))
+              (match (base:and (== count (data:length out)) (match closed (0 true) (_ false)))
                 (true true)
                 (false (do (m:text 2 "cannot write library header\n") false))))))))))
 

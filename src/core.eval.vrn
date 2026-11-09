@@ -10,9 +10,6 @@
 (import allocator)
 (import array)
 (import error)
-(import foundation.compat.arithmetic)
-(import foundation.compat.arithmetic :as n)
-(import foundation.compat.signed_arithmetic :as signed)
 
 ; Runtime values are distinct from syntax, tagged with checked type IDs.
 ; Runtime payload tagged with checked type IDs: unit=1, bool=2, i64=3.
@@ -183,15 +180,15 @@
         (next (do (schedule c 17 id next 0 0) (evaluate-expression c id)))))))
 
 (base:function current ((c machine)) frame
-  (frames-at (deref (field c frames)) (n:sub (frames-length (deref (field c frames))) 1)))
+  (frames-at (deref (field c frames)) (- (frames-length (deref (field c frames))) 1)))
 
 (base:function pop ((c machine)) scalar-value
   (let ((count u64 (values-length (deref (field c values)))))
     (match count
       (0 (do (fail c 6 0) (scalar-value 0 0)))
       (_
-        (let ((v scalar-value (values-at (deref (field c values)) (n:sub count 1))))
-          (do (values-trim (field c values) (n:sub count 1)) v))))))
+        (let ((v scalar-value (values-at (deref (field c values)) (- count 1))))
+          (do (values-trim (field c values) (- count 1)) v))))))
 
 ; Preparation walks each declaration's syntax by stable IDs, assigning compact slots.
 ; A typed kind-zero atom is a binder. Reuse the pending array for this traversal;
@@ -199,15 +196,15 @@
 (base:function prepare-one ((c machine) (size (pointer u64))) unit
   (let
     ((count u64 (steps-length (deref (field c pending))))
-     (id u64 (field (steps-at (deref (field c pending)) (n:sub count 1)) id))
+     (id u64 (field (steps-at (deref (field c pending)) (- count 1)) id))
      (v m:node (m:at (field c program) id)))
     (do
-      (steps-trim (field c pending) (n:sub count 1))
-      (match (match (n:eq (field v kind) 0) (true (n:gt (field v ty) 0)) (false false))
+      (steps-trim (field c pending) (- count 1))
+      (match (match (== (field v kind) 0) (true (> (field v ty) 0)) (false false))
         (true
           (do
             (storage c (ids-replace (deref (field c slots)) id (deref size)))
-            (store (deref size) (n:add (deref size) 1))
+            (store (deref size) (+ (deref size) 1))
             unit))
         (false unit))
       (match (field v next) (0 unit) (_ (schedule c 0 (field v next) 0 0 0)))
@@ -223,8 +220,8 @@
             (0 unit)
             (1 (prepare-one c size))
             (_
-              (let ((half u64 (n:div count 2)))
-                (do (prepare-walk c size half) (prepare-walk c size (n:sub count half)))))))))
+              (let ((half u64 (/ count 2)))
+                (do (prepare-walk c size half) (prepare-walk c size (- count half)))))))))
     (_ unit)))
 
 (base:function prepare ((c machine) (start u64) (count u64)) unit
@@ -242,8 +239,8 @@
                   (prepare-walk c (& size) (base:maxBound))
                   (storage c (ids-replace (deref (field c sizes)) start size)))))))
         (_
-          (let ((half u64 (n:div count 2)))
-            (do (prepare c start half) (prepare c (n:add start half) (n:sub count half)))))))
+          (let ((half u64 (/ count 2)))
+            (do (prepare c start half) (prepare c (+ start half) (- count half)))))))
     (_ unit)))
 
 (base:function initialize ((c machine) (count u64)) unit
@@ -251,7 +248,7 @@
     (0 unit)
     (1 (do (storage c (ids-append (field c slots) 0)) (storage c (ids-append (field c sizes) 0))))
     (_
-      (let ((half u64 (n:div count 2))) (do (initialize c half) (initialize c (n:sub count half)))))))
+      (let ((half u64 (/ count 2))) (do (initialize c half) (initialize c (- count half)))))))
 
 (base:function allocate-slots ((c machine) (count u64)) unit
   (match (field (deref (field c status)) code)
@@ -260,16 +257,16 @@
         (0 unit)
         (1 (storage c (values-append (field c locals) (scalar-value 0 0))))
         (_
-          (let ((half u64 (n:div count 2)))
-            (do (allocate-slots c half) (allocate-slots c (n:sub count half)))))))
+          (let ((half u64 (/ count 2)))
+            (do (allocate-slots c half) (allocate-slots c (- count half)))))))
     (_ unit)))
 
 (base:function slot ((c machine) (binder u64)) u64
-  (n:add (field (current c) slots) (ids-at (deref (field c slots)) binder)))
+  (+ (field (current c) slots) (ids-at (deref (field c slots)) binder)))
 
 (base:function install ((c machine) (binder u64) (v scalar-value)) unit
   (do
-    (require c (n:eq (field v ty) (field (m:at (field c program) binder) ty)) binder)
+    (require c (== (field v ty) (field (m:at (field c program) binder) ty)) binder)
     (match (check:stored-binder (field c program) binder)
       (false (storage c (values-replace (deref (field c locals)) (slot c binder) v)))
       (true
@@ -293,14 +290,14 @@
 ; Parameter lists are bounded by analysis; balanced index traversal handles entry argument copying.
 (base:function parameters ((c machine) (param u64) (index u64) (end u64)) unit
   (match param
-    (0 (require c (n:eq index end) 0))
+    (0 (require c (== index end) 0))
     (_
-      (match (n:lt index end)
+      (match (< index end)
         (false (fail c 6 param))
         (true
           (do
             (install c (m:child (field c program) param) (values-at (deref (field c values)) index))
-            (parameters c (m:next (field c program) param) (n:add index 1) end)))))))
+            (parameters c (m:next (field c program) param) (+ index 1) end)))))))
 
 (base:function invoke ((c machine) (fn u64) (site u64) (mark u64)) unit
   (match (field (m:at (field c program) fn) kind)
@@ -311,7 +308,7 @@
   (let
     ((depth u64 (frames-length (deref (field c frames))))
      (limit u64 (field (field c config) depth)))
-    (match (match (n:eq limit 0) (true false) (false (n:ge depth limit)))
+    (match (match (== limit 0) (true false) (false (>= depth limit)))
       (true (fail c 4 site))
       (false
         (let
@@ -349,66 +346,70 @@
 
 (base:function integer-divide ((c machine) (id u64) (ty u64) (a i64) (b i64)) unit
   (base:cond
-    ((signed:eq b 0) (fail c 1 id))
+    ((== b 0) (fail c 1 id))
     ((num:signed-type ty)
      (match
-       (match (signed:eq b -1)
+       (match (== b -1)
          (false false)
-         (true (signed:eq a (num:normalize ty (num:sign-bit ty)))))
+         (true (== a (num:normalize ty (num:sign-bit ty)))))
        (true (fail c 2 id))
        (false (push c (scalar-value ty (/ a b))))))
-    (true (push-integer c ty (n:div (base:convert a) (base:convert b))))))
+    (true
+      (let ((left u64 (base:convert a)) (right u64 (base:convert b)))
+        (push-integer c ty (/ left right))))))
 
 (base:function less ((ty u64) (a i64) (b i64)) bool
   (match (num:signed-type ty)
-    (true (signed:lt a b))
-    (false (n:lt (base:convert a) (base:convert b)))))
+    (true (< a b))
+    (false
+      (let ((left u64 (base:convert a)) (right u64 (base:convert b)))
+        (< left right)))))
 
 (base:function compare ((op u64) (ty u64) (a i64) (b i64)) bool
   (match op
-    (5 (signed:eq a b))
+    (5 (== a b))
     (6 (less ty a b))
     (7 (match (less ty b a) (true false) (false true)))
     (8 (less ty b a))
     (9 (match (less ty a b) (true false) (false true)))
-    (_ (match (signed:eq a b) (true false) (false true)))))
+    (_ (match (== a b) (true false) (false true)))))
 
 (base:function shift-right ((ty u64) (a i64) (divisor u64)) u64
   (let ((bits u64 (base:convert a)))
-    (match (match (num:signed-type ty) (true (signed:lt a 0)) (false false))
-      (false (n:div bits divisor))
-      (true (n:sub 0 (n:add 1 (n:div (n:sub (n:sub 0 bits) 1) divisor)))))))
+    (match (match (num:signed-type ty) (true (< a 0)) (false false))
+      (false (/ bits divisor))
+      (true (- 0 (+ 1 (/ (- (- 0 bits) 1) divisor)))))))
 
 (base:function pointer-address ((c machine) (bits u64) (site u64)) (tuple u64 u64 u64)
   (let ((p m:context (field c program)) (length u64 (values-length (deref (field c aggregates)))))
-    (match (n:lt bits pointer-tag)
+    (match (< bits pointer-tag)
       (true
         (match
-          (match (base:and (n:gt bits 0) (n:lt bits (m:nodes-length (deref (field p items)))))
-            (true (n:eq (field (m:at p bits) kind) 17))
+          (match (base:and (> bits 0) (< bits (m:nodes-length (deref (field p items)))))
+            (true (== (field (m:at p bits) kind) 17))
             (false false))
           (true (tuple 2 bits 0))
           (false
             (match
-              (match (base:and (n:gt bits 0) (n:lt bits (m:nodes-length (deref (field p items)))))
-                (true (n:eq (field (m:at p bits) kind) 53))
+              (match (base:and (> bits 0) (< bits (m:nodes-length (deref (field p items)))))
+                (true (== (field (m:at p bits) kind) 53))
                 (false false))
               (true (tuple 3 bits 0))
               (false (tuple 0 bits 0))))))
       (false
-        (let ((index u64 (n:sub bits pointer-tag)))
-          (match (match (n:lt index length) (true (n:lt (n:add index 1) length)) (false false))
+        (let ((index u64 (- bits pointer-tag)))
+          (match (match (< index length) (true (< (+ index 1) length)) (false false))
             (false (do (memory-check c false site) (tuple 0 0 0)))
             (true
               (let
                 ((address scalar-value (heap-at c index))
                  (region u64 (base:convert (field address scalar)))
-                 (offset u64 (base:convert (field (heap-at c (n:add index 1)) scalar))))
+                 (offset u64 (base:convert (field (heap-at c (+ index 1)) scalar))))
                 (match
-                  (match (n:eq (field address ty) address-tag)
+                  (match (== (field address ty) address-tag)
                     (true
-                      (match (n:lt region length)
-                        (true (n:lt (n:add region 1) length))
+                      (match (< region length)
+                        (true (< (+ region 1) length))
                         (false false)))
                     (false false))
                   (false (do (memory-check c false site) (tuple 0 0 0)))
@@ -416,28 +417,28 @@
                     (let
                       ((header scalar-value (heap-at c region))
                        (size u64 (base:convert (field header scalar)))
-                       (origin u64 (field (heap-at c (n:add region 1)) ty)))
+                       (origin u64 (field (heap-at c (+ region 1)) ty)))
                       (do
-                        (memory-check c (n:eq (field header ty) region-tag) site)
-                        (memory-check c (n:le size (n:sub length (n:add region 2))) site)
-                        (memory-check c (n:le offset size) site)
+                        (memory-check c (== (field header ty) region-tag) site)
+                        (memory-check c (<= size (- length (+ region 2))) site)
+                        (memory-check c (<= offset size) site)
                         ; Equality does not access bytes, check alignment, or
                         ; require the represented storage to remain live.
-                        (match (n:ge origin pointer-tag)
-                          (true (tuple 2 (n:sub origin pointer-tag) offset))
+                        (match (>= origin pointer-tag)
+                          (true (tuple 2 (- origin pointer-tag) offset))
                           (false (tuple 1 region offset)))))))))))))))
 
 (base:function pointer-compare
   ((c machine) (id u64) (op u64) (left scalar-value) (right scalar-value)) unit
   (do
     (require c (check:pointer-value-type (field c program) (field left ty)) id)
-    (require c (n:eq (field left ty) (field right ty)) id)
+    (require c (== (field left ty) (field right ty)) id)
     (let
       ((a (tuple u64 u64 u64) (pointer-address c (base:convert (field left scalar)) id))
        (b (tuple u64 u64 u64) (pointer-address c (base:convert (field right scalar)) id))
        (same
          bool
-         (match (n:eq (tuple-get a 0) (tuple-get b 0))
+         (match (== (tuple-get a 0) (tuple-get b 0))
            (false false)
            (true
              (match (tuple-get a 0)
@@ -450,8 +451,8 @@
                    (_ false)))
                (_
                  (base:and
-                   (n:eq (tuple-get a 1) (tuple-get b 1))
-                   (n:eq (tuple-get a 2) (tuple-get b 2)))))))))
+                   (== (tuple-get a 1) (tuple-get b 1))
+                   (== (tuple-get a 2) (tuple-get b 2)))))))))
       (push c (scalar-value 2 (match (match op (18 same) (_ (base:not same))) (true 1) (false 0)))))))
 
 (base:function primitive ((c machine) (id u64) (op u64) (x scalar-value) (y scalar-value)) unit
@@ -470,27 +471,27 @@
      (right u64 (base:convert b)))
     (do
       (require c (match ty (2 true) (_ (num:integer-type ty))) id)
-      (require c (n:eq ty (field y ty)) id)
+      (require c (== ty (field y ty)) id)
       (match op
-        (1 (push-integer c ty (n:add left right)))
-        (2 (push-integer c ty (n:sub left right)))
-        (3 (push-integer c ty (n:mul left right)))
+        (1 (push-integer c ty (+ left right)))
+        (2 (push-integer c ty (- left right)))
+        (3 (push-integer c ty (* left right)))
         (4 (integer-divide c id ty a b))
         (11 (push-integer c ty (num:bitwise op left right)))
         (12 (push-integer c ty (num:bitwise op left right)))
         (13 (push-integer c ty (num:bitwise op left right)))
-        (14 (push-integer c ty (n:mul left (num:pow2 (num:remainder right (num:width ty))))))
+        (14 (push-integer c ty (* left (num:pow2 (num:remainder right (num:width ty))))))
         (15 (push-integer c ty (shift-right ty a (num:pow2 (num:remainder right (num:width ty))))))
         (_
           (do
-            (require c (match (n:ge op 5) (true (n:le op 10)) (false false)) id)
+            (require c (match (>= op 5) (true (<= op 10)) (false false)) id)
             (push c (scalar-value 2 (match (compare op ty a b) (true 1) (false 0))))))))))
 
 (base:function expression-inner ((c machine) (id u64)) unit
   (let
     ((p m:context (field c program)) (v m:node (m:at p id)) (args u64 (m:next p (field v child))))
     (do
-      (require c (n:gt (field v ty) 0) id)
+      (require c (> (field v ty) 0) id)
       (match (field v kind)
         (57 (do (schedule c 18 id (field v ty) 0 0) (evaluate-place c args)))
         (58 (do (schedule c 19 id (field v ty) 0 0) (evaluate-place c id)))
@@ -525,14 +526,14 @@
             (push c (scalar-value (field v ty) (field v value)))))
         (3
           (do
-            (require c (n:eq (field v ty) 2) id)
+            (require c (== (field v ty) 2) id)
             (require c (match (field v value) (0 true) (1 true) (_ false)) id)
             (push c (scalar-value 2 (field v value)))))
-        (4 (do (require c (n:eq (field v ty) 1) id) (push c (scalar-value 1 0))))
+        (4 (do (require c (== (field v ty) 1) id) (push c (scalar-value 1 0))))
         (5
           (let ((local scalar-value (values-at (deref (field c locals)) (slot c (field v target)))))
             (do
-              (require c (n:eq (field local ty) (field v ty)) id)
+              (require c (== (field local ty) (field v ty)) id)
               (push
                 c
                 (match (check:stored-binder p (field v target))
@@ -571,9 +572,9 @@
 ; Reject unchecked/error expressions before scheduling any of their children.
 (base:function expression ((c machine) (id u64)) unit
   (base:cond
-    ((n:eq id 0) (fail c 6 0))
-    ((n:ge id (m:nodes-length (deref (field (field c program) items)))) (fail c 6 0))
-    ((n:eq (field (m:at (field c program) id) ty) 0) (fail c 6 id))
+    ((== id 0) (fail c 6 0))
+    ((>= id (m:nodes-length (deref (field (field c program) items)))) (fail c 6 0))
+    ((== (field (m:at (field c program) id) ty) 0) (fail c 6 id))
     (true (expression-inner c id))))
 
 (base:function dispatch ((c machine) (s step)) unit
@@ -584,7 +585,7 @@
       (2
         (let ((condition scalar-value (pop c)))
           (do
-            (require c (n:eq (field condition ty) 2) id)
+            (require c (== (field condition ty) 2) id)
             (evaluate-expression
               c
               (match (field condition scalar) (0 (m:next p (m:next p a))) (_ (m:next p a)))))))
@@ -607,9 +608,9 @@
            (value scalar-value (pop c))
            (index u64 (base:convert (field offset scalar))))
           (do
-            (require c (n:eq (field offset ty) 10) id)
-            (require c (n:eq (field value ty) a) id)
-            (match (n:lt index (check:array-length p a))
+            (require c (== (field offset ty) 10) id)
+            (require c (== (field value ty) a) id)
+            (match (< index (check:array-length p a))
               (true (push c (component c value index id)))
               (false (fail c 7 id))))))
       (14
@@ -621,7 +622,7 @@
       (12
         (let ((v scalar-value (pop c)))
           (do
-            (require c (n:eq (field v ty) 2) id)
+            (require c (== (field v ty) 2) id)
             (push c (scalar-value 2 (match (field v scalar) (0 1) (_ 0)))))))
       (11
         (let ((v scalar-value (pop c)))
@@ -632,14 +633,14 @@
         (let ((v scalar-value (pop c)))
           (do
             (require c (check:pointer-value-type p (field v ty)) id)
-            (push c (scalar-value 2 (match (signed:eq (field v scalar) 0) (true 1) (false 0)))))))
+            (push c (scalar-value 2 (match (== (field v scalar) 0) (true 1) (false 0)))))))
       (6
         (let ((right scalar-value (pop c)) (left scalar-value (pop c)) (ty u64 (field left ty)))
           (match (num:float-type ty)
             (true
               (do
-                (require c (n:eq ty (field right ty)) id)
-                (match (n:le a 4)
+                (require c (== ty (field right ty)) id)
+                (match (<= a 4)
                   (true
                     (push
                       c
@@ -660,29 +661,30 @@
           (do
             (require
               c
-              (n:eq (values-length (deref (field c values))) (n:add (field f values) 1))
+              (== (values-length (deref (field c values))) (+ (field f values) 1))
               id)
-            (require c (n:eq (steps-length (deref (field c pending))) (field f pending)) id)
+            (require c (== (steps-length (deref (field c pending))) (field f pending)) id)
             (require
               c
-              (n:eq
+              (==
                 (field (values-at (deref (field c values)) (field f values)) ty)
                 (field (m:at p id) ty))
               id)
             (expire-memory
               c
               (field f memory)
-              (n:sub (values-length (deref (field c aggregates))) (field f memory)))
+              (- (values-length (deref (field c aggregates))) (field f memory)))
             (values-trim (field c locals) (field f slots))
-            (frames-trim (field c frames) (n:sub (frames-length (deref (field c frames))) 1)))))
+            (frames-trim (field c frames) (- (frames-length (deref (field c frames))) 1)))))
       (8
         (match a
           (0 (aggregate c id (field s mark)))
           (_ (do (schedule c 8 id (m:next p a) 0 (field s mark)) (evaluate-expression c a)))))
       (9 (let ((v scalar-value (pop c))) (push c (component c v a id))))
       (10
-        (let ((v scalar-value (pop c)) (tag scalar-value (component c v 0 id)))
-          (select-arm c a (n:add (base:convert (field tag scalar)) 1) v false)))
+        (let ((v scalar-value (pop c)) (tag scalar-value (component c v 0 id))
+              (code u64 (base:convert (field tag scalar))))
+          (select-arm c a (+ code (cast u64 1)) v false)))
       (24 (select-arm c a 1 (pop c) true))
       (16 (select-scalar-arm c a (pop c)))
       (17 (do (pop c) (evaluate-sequence c a)))
@@ -707,7 +709,7 @@
           ((index scalar-value (pop c))
            (pointer scalar-value (pop c))
            (offset u64 (base:convert (field index scalar))))
-          (match (n:lt offset (check:array-length p a))
+          (match (< offset (check:array-length p a))
             (false (fail c 7 id))
             (true
               (push
@@ -719,7 +721,7 @@
                       c
                       (base:convert (field pointer scalar))
                       false
-                      (n:mul offset (field (mem:of p b) size))
+                      (* offset (field (mem:of p b) size))
                       id))))))))
       (23
         (let ((index scalar-value (pop c)) (pointer scalar-value (pop c)))
@@ -737,13 +739,13 @@
     ((s state (deref (field c status)))
      (limit u64 (field (field c config) steps))
      (count u64 (steps-length (deref (field c pending))))
-     (next step (steps-at (deref (field c pending)) (n:sub count 1))))
-    (match (match (n:eq limit 0) (true false) (false (n:ge (field s ticks) limit)))
+     (next step (steps-at (deref (field c pending)) (- count 1))))
+    (match (match (== limit 0) (true false) (false (>= (field s ticks) limit)))
       (true (fail c 3 (field next id)))
       (false
         (do
-          (store (deref (field c status)) (state 0 0 (field s storage) (n:add (field s ticks) 1)))
-          (steps-trim (field c pending) (n:sub count 1))
+          (store (deref (field c status)) (state 0 0 (field s storage) (+ (field s ticks) 1)))
+          (steps-trim (field c pending) (- count 1))
           (dispatch c next))))))
 
 (base:function pump ((c machine) (count u64)) unit
@@ -755,7 +757,7 @@
           (match count
             (0 unit)
             (1 (advance c))
-            (_ (let ((half u64 (n:div count 2))) (do (pump c half) (pump c (n:sub count half)))))))))
+            (_ (let ((half u64 (/ count 2))) (do (pump c half) (pump c (- count half)))))))))
     (_ unit)))
 
 ; Aggregate handles are one-based indices into outcome-owned immutable storage.
@@ -765,16 +767,16 @@
     (0 unit)
     (1 (storage c (values-append (field c aggregates) (values-at (deref (field c values)) start))))
     (_
-      (let ((half u64 (n:div count 2)))
-        (do (aggregate-copy c start half) (aggregate-copy c (n:add start half) (n:sub count half)))))))
+      (let ((half u64 (/ count 2)))
+        (do (aggregate-copy c start half) (aggregate-copy c (+ start half) (- count half)))))))
 
 (base:function aggregate ((c machine) (id u64) (mark u64)) unit
   (assemble c (field (m:at (field c program) id) ty) mark))
 
 (base:function assemble ((c machine) (ty u64) (mark u64)) unit
   (let
-    ((handle u64 (n:add (values-length (deref (field c aggregates))) 1))
-     (count u64 (n:sub (values-length (deref (field c values))) mark)))
+    ((handle u64 (+ (values-length (deref (field c aggregates))) 1))
+     (count u64 (- (values-length (deref (field c values))) mark)))
     (do
       (storage c (values-append (field c aggregates) (scalar-value ty (base:convert count))))
       (aggregate-copy c mark count)
@@ -785,19 +787,19 @@
   (let
     ((handle u64 (base:convert (field v scalar)))
      (length u64 (values-length (deref (field c aggregates)))))
-    (match (match (n:gt handle 0) (true (n:le handle length)) (false false))
+    (match (match (> handle 0) (true (<= handle length)) (false false))
       (false (do (fail c 6 site) (scalar-value 0 0)))
       (true
         (let
-          ((header scalar-value (values-at (deref (field c aggregates)) (n:sub handle 1)))
+          ((header scalar-value (values-at (deref (field c aggregates)) (- handle 1)))
            (count u64 (base:convert (field header scalar))))
           (match
-            (match (n:eq (field header ty) (field v ty))
+            (match (== (field header ty) (field v ty))
               (true
-                (match (n:lt index count) (true (n:lt (n:add handle index) length)) (false false)))
+                (match (< index count) (true (< (+ handle index) length)) (false false)))
               (false false))
             (false (do (fail c 6 site) (scalar-value 0 0)))
-            (true (values-at (deref (field c aggregates)) (n:add handle index)))))))))
+            (true (values-at (deref (field c aggregates)) (+ handle index)))))))))
 
 (base:function payload-install ((c machine) (names u64) (v scalar-value) (index u64)) unit
   (match names
@@ -810,7 +812,7 @@
               (0 unit)
               (_ (install c names (component c v index names)))))
           (_ unit))
-        (payload-install c (m:next (field c program) names) v (n:add index 1))))))
+        (payload-install c (m:next (field c program) names) v (+ index 1))))))
 
 (base:function pattern-components-match ((c machine) (names u64) (v scalar-value) (index u64)) bool
   (match names
@@ -821,11 +823,9 @@
           (match (field pattern kind)
             (0 true)
             (_
-              (n:eq
-                (base:convert (field pattern value))
-                (base:convert (field (component c v index names) scalar)))))
+              (== (field pattern value) (field (component c v index names) scalar))))
           (false false)
-          (true (pattern-components-match c (m:next p names) v (n:add index 1))))))))
+          (true (pattern-components-match c (m:next p names) v (+ index 1))))))))
 
 (base:function select-arm ((c machine) (arm u64) (tag u64) (v scalar-value) (tuple bool)) unit
   (match arm
@@ -840,7 +840,7 @@
           (match target
             (0 true)
             (_
-              (match (n:eq target tag)
+              (match (== target tag)
                 (false false)
                 (true (pattern-components-match c names v index)))))
           (false (select-arm c (m:next p arm) tag v tuple))
@@ -862,7 +862,7 @@
         (match
           (match (field v target)
             (0 true)
-            (_ (n:eq (base:convert (field v value)) (base:convert (field value scalar)))))
+            (_ (== (field v value) (field value scalar))))
           (false (select-scalar-arm c (field v next) value))
           (true
             (do
@@ -905,8 +905,8 @@
          (& aggregates)))
      (count u64 (m:nodes-length (deref (field p items)))))
     (do
-      (require c (n:eq (deref (field p errors)) 0) entry)
-      (require c (match (n:lt entry count) (true (n:gt entry 0)) (false false)) 0)
+      (require c (== (deref (field p errors)) 0) entry)
+      (require c (match (< entry count) (true (> entry 0)) (false false)) 0)
       (initialize c count)
       (match (field status code)
         (0
@@ -920,7 +920,7 @@
               (0
                 (do
                   (require c (check:callable-shape p entry) entry)
-                  (require c (n:gt (field (m:at p entry) ty) 0) entry)
+                  (require c (> (field (m:at p entry) ty) 0) entry)
                   (match (field status code)
                     (0 (do (invoke c entry entry 0) (pump c (base:maxBound))))
                     (_ unit))))
@@ -929,8 +929,8 @@
       (match (field status code)
         (0
           (do
-            (require c (n:eq (values-length values) 1) entry)
-            (require c (n:eq (frames-length frames) 0) entry)))
+            (require c (== (values-length values) 1) entry)
+            (require c (== (frames-length frames) 0) entry)))
         (_ unit))
       (expire-memory c 0 (values-length aggregates))
       (match (field status code) (0 (validate-output c (values-at values 0) entry)) (_ unit))
@@ -966,14 +966,14 @@
     (_
       (let ((v scalar-value (values-at (deref (field c aggregates)) start)))
         (do
-          (require c (n:eq (field v ty) (field (m:at (field c program) fields) ty)) 0)
+          (require c (== (field v ty) (field (m:at (field c program) fields) ty)) 0)
           (validate-value c v parent)
-          (validate-components c (m:next (field c program) fields) (n:add start 1) parent))))))
+          (validate-components c (m:next (field c program) fields) (+ start 1) parent))))))
 
 (base:function valid-callback ((p m:context) (signature u64) (fn u64)) bool
   (base:cond
-    ((n:eq fn 0) false)
-    ((n:ge fn (m:nodes-length (deref (field p items)))) false)
+    ((== fn 0) false)
+    ((>= fn (m:nodes-length (deref (field p items)))) false)
     (true (check:callback-matches p signature fn))))
 
 (base:function validate-array-items ((c machine) (element u64) (start u64) (count u64) (parent u64))
@@ -982,12 +982,12 @@
     (0 unit)
     (1
       (let ((value scalar-value (values-at (deref (field c aggregates)) start)))
-        (do (require c (n:eq (field value ty) element) 0) (validate-value c value parent))))
+        (do (require c (== (field value ty) element) 0) (validate-value c value parent))))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (validate-array-items c element start half parent)
-          (validate-array-items c element (n:add start half) (n:sub count half) parent))))))
+          (validate-array-items c element (+ start half) (- count half) parent))))))
 
 (base:function validate-value ((c machine) (v scalar-value) (parent u64)) unit
   (let
@@ -997,51 +997,51 @@
      (length u64 (values-length (deref (field c aggregates)))))
     (match ty
       (0 (fail c 6 0))
-      (1 (require c (n:eq bits 0) 0))
-      (2 (require c (n:le bits 1) 0))
+      (1 (require c (== bits 0) 0))
+      (2 (require c (<= bits 1) 0))
       (3 unit)
-      (12 (require c (n:le bits 4294967295) 0))
+      (12 (require c (<= bits 4294967295) 0))
       (13 unit)
       (11
         (base:cond
-          ((n:ge bits pointer-tag) (validate-output c v 0))
-          ((n:eq bits 0) (fail c 6 0))
-          ((n:ge bits (m:nodes-length (deref (field p items)))) (fail c 6 0))
-          (true (require c (n:eq (field (m:at p bits) kind) 17) 0))))
+          ((>= bits pointer-tag) (validate-output c v 0))
+          ((== bits 0) (fail c 6 0))
+          ((>= bits (m:nodes-length (deref (field p items)))) (fail c 6 0))
+          (true (require c (== (field (m:at p bits) kind) 17) 0))))
       (_
         (base:cond
-          ((num:integer-type ty) (require c (signed:eq (field v scalar) (num:normalize ty bits)) 0))
-          ((n:le ty num:descriptor-base) (fail c 6 0))
-          ((n:ge (n:sub ty num:descriptor-base) (m:nodes-length (deref (field p items))))
+          ((num:integer-type ty) (require c (== (field v scalar) (num:normalize ty bits)) 0))
+          ((<= ty num:descriptor-base) (fail c 6 0))
+          ((>= (- ty num:descriptor-base) (m:nodes-length (deref (field p items))))
            (fail c 6 0))
-          ((n:eq (check:type-kind p ty) 34)
+          ((== (check:type-kind p ty) 34)
            (let ((signature u64 (check:callback-signature p ty)))
              (match signature
                (0
-                 (match (n:ge bits pointer-tag)
+                 (match (>= bits pointer-tag)
                    (true (do (resolve-pointer c bits 0) unit))
                    (false unit)))
                (_ (require c (valid-callback p signature bits) 0)))))
-          ((n:eq bits 0) (fail c 6 0))
-          ((n:gt bits length) (fail c 6 0))
-          ((n:ge bits parent) (fail c 6 0))
+          ((== bits 0) (fail c 6 0))
+          ((> bits length) (fail c 6 0))
+          ((>= bits parent) (fail c 6 0))
           (true
             (let
-              ((header scalar-value (values-at (deref (field c aggregates)) (n:sub bits 1)))
+              ((header scalar-value (values-at (deref (field c aggregates)) (- bits 1)))
                (count u64 (base:convert (field header scalar)))
                (kind u64 (check:type-kind p ty)))
               (do
-                (require c (n:eq (field header ty) ty) 0)
-                (match (n:le count (n:sub length bits))
+                (require c (== (field header ty) ty) 0)
+                (match (<= count (- length bits))
                   (false (fail c 6 0))
                   (true
                     (match kind
                       (49
-                        (match (n:eq count (check:array-length p ty))
+                        (match (== count (check:array-length p ty))
                           (true (validate-array-items c (check:array-element p ty) bits count bits))
                           (false (fail c 6 0))))
                       (21
-                        (match (n:gt count 0)
+                        (match (> count 0)
                           (false (fail c 6 0))
                           (true
                             (let
@@ -1053,20 +1053,20 @@
                                    (check:type-components p ty)
                                    (base:convert (field tag scalar)))))
                               (do
-                                (require c (n:eq (field tag ty) 3) 0)
-                                (require c (n:gt case 0) 0)
+                                (require c (== (field tag ty) 3) 0)
+                                (require c (> case 0) 0)
                                 (require
                                   c
-                                  (n:eq
+                                  (==
                                     count
-                                    (n:add (check:chain-length p (m:next p (m:child p case))) 1))
+                                    (+ (check:chain-length p (m:next p (m:child p case))) 1))
                                   0)
                                 (match (field (deref (field c status)) code)
                                   (0
                                     (validate-components
                                       c
                                       (m:next p (m:child p case))
-                                      (n:add bits 1)
+                                      (+ bits 1)
                                       bits))
                                   (_ unit)))))))
                       (_
@@ -1074,7 +1074,7 @@
                           (require c (match kind (20 true) (22 true) (_ false)) 0)
                           (require
                             c
-                            (n:eq count (check:chain-length p (check:type-components p ty)))
+                            (== count (check:chain-length p (check:type-components p ty)))
                             0)
                           (match (field (deref (field c status)) code)
                             (0 (validate-components c (check:type-components p ty) bits bits))
@@ -1087,10 +1087,10 @@
         (0 unit)
         (1 (validate-value c (values-at args start) (base:maxBound)))
         (_
-          (let ((half u64 (n:div count 2)))
+          (let ((half u64 (/ count 2)))
             (do
               (validate-arguments c args start half)
-              (validate-arguments c args (n:add start half) (n:sub count half)))))))
+              (validate-arguments c args (+ start half) (- count half)))))))
     (_ unit)))
 
 (base:function destroy ((owner (pointer outcome))) unit
@@ -1132,9 +1132,9 @@
           (m:location p (field (m:at p (field f site)) start))
           (m:text 2 "\n"))))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
-          (trace-range p frames (n:add start half) (n:sub count half))
+          (trace-range p frames (+ start half) (- count half))
           (trace-range p frames start half))))))
 
 (base:function report ((p m:context) (result outcome)) unit
@@ -1146,19 +1146,19 @@
 
 (base:function signed-number ((value i64)) unit
   (let ((bits u64 (base:convert value)))
-    (match (signed:lt value 0)
-      (true (do (m:text 1 "-") (m:number 1 (n:sub 0 bits))))
+    (match (< value 0)
+      (true (do (m:text 1 "-") (m:number 1 (- 0 bits))))
       (false (m:number 1 bits)))))
 
 (base:function write-components
   ((p m:context) (items values-array) (start u64) (count u64) (index u64)) unit
-  (match (n:eq index count)
+  (match (== index count)
     (true unit)
     (false
       (do
         (match index (0 unit) (_ (m:text 1 ",")))
-        (write-value p items (values-at items (n:add start index)))
-        (write-components p items start count (n:add index 1))))))
+        (write-value p items (values-at items (+ start index)))
+        (write-components p items start count (+ index 1))))))
 
 (base:function write-float ((v scalar-value)) unit
   (do
@@ -1189,8 +1189,8 @@
             (_
               (let
                 ((handle u64 (base:convert (field v scalar)))
-                 (count u64 (base:convert (field (values-at items (n:sub handle 1)) scalar)))
-                 (sum bool (n:eq (check:type-kind p (field v ty)) 21))
+                 (count u64 (base:convert (field (values-at items (- handle 1)) scalar)))
+                 (sum bool (== (check:type-kind p (field v ty)) 21))
                  (case
                    u64
                    (match sum
@@ -1206,8 +1206,8 @@
                   (write-components
                     p
                     items
-                    (match sum (false handle) (true (n:add handle 1)))
-                    (match sum (false count) (true (n:sub count 1)))
+                    (match sum (false handle) (true (+ handle 1)))
+                    (match sum (false count) (true (- count 1)))
                     0)
                   (m:text 1 ")"))))))))))
 
@@ -1239,7 +1239,7 @@
 (base:constant address-tag u64 18446744073709551614)
 
 (base:function memory-ok ((c machine)) bool
-  (n:eq (field (deref (field c status)) code) 0))
+  (== (field (deref (field c status)) code) 0))
 
 (base:function memory-check ((c machine) (valid bool) (site u64)) unit
   (match valid (true unit) (false (fail c 9 site))))
@@ -1258,15 +1258,15 @@
         (0 unit)
         (1 (heap-add c (scalar-value 0 0)))
         (_
-          (let ((half u64 (n:div count 2)))
-            (do (zero-bytes c half) (zero-bytes c (n:sub count half)))))))))
+          (let ((half u64 (/ count 2)))
+            (do (zero-bytes c half) (zero-bytes c (- count half)))))))))
 
 (base:function new-pointer ((c machine) (region u64) (offset u64)) u64
   (let ((id u64 (values-length (deref (field c aggregates)))))
     (do
       (heap-add c (scalar-value address-tag (base:convert region)))
       (heap-add c (scalar-value 0 (base:convert offset)))
-      (match (memory-ok c) (false 0) (true (n:add pointer-tag id))))))
+      (match (memory-ok c) (false 0) (true (+ pointer-tag id))))))
 
 (base:function new-region ((c machine) (ty u64) (length u64) (flags u64)) u64
   (let ((id u64 (values-length (deref (field c aggregates)))))
@@ -1312,13 +1312,13 @@
                           init))))))
               (_ unit))))
         (_
-          (let ((half u64 (n:div count 2)))
+          (let ((half u64 (/ count 2)))
             (do
               (initialize-globals c start half)
-              (initialize-globals c (n:add start half) (n:sub count half)))))))))
+              (initialize-globals c (+ start half) (- count half)))))))))
 
 (base:function region-byte ((c machine) (region u64) (offset u64)) u64
-  (base:convert (field (heap-at c (n:add (n:add region 2) offset)) scalar)))
+  (base:convert (field (heap-at c (+ (+ region 2) offset)) scalar)))
 
 (base:function byte-store ((c machine) (region u64) (offset u64) (value u64)) unit
   (match (memory-ok c)
@@ -1328,7 +1328,7 @@
         c
         (values-replace
           (deref (field c aggregates))
-          (n:add (n:add region 2) offset)
+          (+ (+ region 2) offset)
           (scalar-value 0 (base:convert value)))))))
 
 (base:function copy-data ((c machine) (region u64) (bytes (pointer u8)) (start u64) (count u64))
@@ -1340,41 +1340,41 @@
         (0 unit)
         (1 (byte-store c region start (base:convert (deref (pointer-offset bytes start)))))
         (_
-          (let ((half u64 (n:div count 2)))
+          (let ((half u64 (/ count 2)))
             (do
               (copy-data c region bytes start half)
-              (copy-data c region bytes (n:add start half) (n:sub count half)))))))))
+              (copy-data c region bytes (+ start half) (- count half)))))))))
 
 (base:function resolve-pointer ((c machine) (bits u64) (site u64)) (tuple u64 u64)
   (let ((p m:context (field c program)) (length u64 (values-length (deref (field c aggregates)))))
     (base:cond
-      ((match (n:gt bits 0)
-         (true (n:lt bits (m:nodes-length (deref (field p items)))))
+      ((match (> bits 0)
+         (true (< bits (m:nodes-length (deref (field p items)))))
          (false false))
        (match (field (m:at p bits) kind)
          (17
            (let
              ((bytes (pointer u8) (m:literal-bytes p bits))
-              (length u64 (n:add (cstring:strlen bytes) 1))
+              (length u64 (+ (cstring:strlen bytes) 1))
               ; Literal-origin metadata makes raw and offset handles share identity.
-              (region u64 (new-region c (n:add pointer-tag bits) length 5)))
+              (region u64 (new-region c (+ pointer-tag bits) length 5)))
              (do (copy-data c region bytes 0 length) (tuple region 0))))
          (_ (do (memory-check c false site) (tuple 0 0)))))
-      ((n:lt bits pointer-tag) (do (memory-check c false site) (tuple 0 0)))
+      ((< bits pointer-tag) (do (memory-check c false site) (tuple 0 0)))
       (true
-        (let ((id u64 (n:sub bits pointer-tag)))
-          (match (match (n:lt id length) (true (n:lt (n:add id 1) length)) (false false))
+        (let ((id u64 (- bits pointer-tag)))
+          (match (match (< id length) (true (< (+ id 1) length)) (false false))
             (false (do (memory-check c false site) (tuple 0 0)))
             (true
               (let
                 ((pointer scalar-value (heap-at c id))
                  (region u64 (base:convert (field pointer scalar)))
-                 (offset u64 (base:convert (field (heap-at c (n:add id 1)) scalar))))
+                 (offset u64 (base:convert (field (heap-at c (+ id 1)) scalar))))
                 (match
-                  (match (n:eq (field pointer ty) address-tag)
+                  (match (== (field pointer ty) address-tag)
                     (true
-                      (match (n:lt region length)
-                        (true (n:lt (n:add region 1) length))
+                      (match (< region length)
+                        (true (< (+ region 1) length))
                         (false false)))
                     (false false))
                   (false (do (memory-check c false site) (tuple 0 0)))
@@ -1382,12 +1382,12 @@
                     (let
                       ((header scalar-value (heap-at c region))
                        (size u64 (base:convert (field header scalar)))
-                       (flags u64 (base:convert (field (heap-at c (n:add region 1)) scalar))))
+                       (flags u64 (base:convert (field (heap-at c (+ region 1)) scalar))))
                       (do
-                        (memory-check c (n:eq (field header ty) region-tag) site)
-                        (memory-check c (n:le size (n:sub length (n:add region 2))) site)
-                        (memory-check c (n:le offset size) site)
-                        (match (n:eq (num:remainder flags 2) 1)
+                        (memory-check c (== (field header ty) region-tag) site)
+                        (memory-check c (<= size (- length (+ region 2))) site)
+                        (memory-check c (<= offset size) site)
+                        (match (== (num:remainder flags 2) 1)
                           (true unit)
                           (false (fail c 10 site)))
                         (tuple region offset)))))))))))))
@@ -1404,11 +1404,11 @@
              (offset u64 (tuple-get location 1))
              (size u64 (base:convert (field (heap-at c region) scalar)))
              (layout mem:layout (mem:of (field c program) ty))
-             (flags u64 (base:convert (field (heap-at c (n:add region 1)) scalar))))
+             (flags u64 (base:convert (field (heap-at c (+ region 1)) scalar))))
             (do
-              (memory-check c (n:le (field layout size) (n:sub size offset)) site)
-              (memory-check c (n:eq (num:remainder offset (field layout alignment)) 0) site)
-              (match (match write (false false) (true (n:lt (num:remainder flags 4) 2)))
+              (memory-check c (<= (field layout size) (- size offset)) site)
+              (memory-check c (== (num:remainder offset (field layout alignment)) 0) site)
+              (match (match write (false false) (true (< (num:remainder flags 4) 2)))
                 (true (fail c 11 site))
                 (false unit))))))
       location)))
@@ -1424,13 +1424,13 @@
            (size u64 (base:convert (field (heap-at c region) scalar)))
            (valid
              bool
-             (match negative (true (n:le amount offset)) (false (n:le amount (n:sub size offset))))))
+             (match negative (true (<= amount offset)) (false (<= amount (- size offset))))))
           (do
             (memory-check c valid site)
             (new-pointer
               c
               region
-              (match negative (true (n:sub offset amount)) (false (n:add offset amount))))))))))
+              (match negative (true (- offset amount)) (false (+ offset amount))))))))))
 
 (base:function offset-pointer ((c machine) (bits u64) (value scalar-value) (element u64) (site u64))
   u64
@@ -1438,34 +1438,35 @@
     ((negative
        bool
        (match (num:signed-type (field value ty))
-         (true (signed:lt (field value scalar) 0))
+         (true (< (field value scalar) 0))
          (false false)))
+       (bits u64 (base:convert (field value scalar)))
      (magnitude
        u64
        (match negative
-         (true (n:sub 0 (base:convert (field value scalar))))
-         (false (base:convert (field value scalar)))))
+         (true (- (cast u64 0) bits))
+         (false bits)))
      (stride u64 (field (mem:of (field c program) element) size)))
     (do
       (match stride
         (0 unit)
-        (_ (memory-check c (n:le magnitude (n:div (base:maxBound) stride)) site)))
-      (shift-pointer c bits negative (n:mul magnitude stride) site))))
+        (_ (memory-check c (<= magnitude (/ (cast u64 18446744073709551615) stride)) site)))
+      (shift-pointer c bits negative (* magnitude stride) site))))
 
 (base:function expire-memory ((c machine) (start u64) (count u64)) unit
   (match count
     (0 unit)
     (1
       (match
-        (match (n:eq (field (heap-at c start) ty) region-tag)
-          (true (n:lt (n:add start 1) (values-length (deref (field c aggregates)))))
+        (match (== (field (heap-at c start) ty) region-tag)
+          (true (< (+ start 1) (values-length (deref (field c aggregates)))))
           (false false))
         (false unit)
         (true
           (let
-            ((meta scalar-value (heap-at c (n:add start 1)))
+            ((meta scalar-value (heap-at c (+ start 1)))
              (flags u64 (base:convert (field meta scalar))))
-            (match (match (n:lt flags 4) (true (n:eq (num:remainder flags 2) 1)) (false false))
+            (match (match (< flags 4) (true (== (num:remainder flags 2) 1)) (false false))
               (false unit)
               (true
                 (do
@@ -1473,12 +1474,12 @@
                     c
                     (values-replace
                       (deref (field c aggregates))
-                      (n:add start 1)
-                      (scalar-value (field meta ty) (base:convert (n:sub flags 1)))))
+                      (+ start 1)
+                      (scalar-value (field meta ty) (base:convert (- flags 1)))))
                   unit)))))))
     (_
-      (let ((half u64 (n:div count 2)))
-        (do (expire-memory c start half) (expire-memory c (n:add start half) (n:sub count half)))))))
+      (let ((half u64 (/ count 2)))
+        (do (expire-memory c start half) (expire-memory c (+ start half) (- count half)))))))
 
 (base:function write-word ((c machine) (region u64) (offset u64) (value u64) (count u64)) unit
   (match count
@@ -1486,25 +1487,25 @@
     (_
       (do
         (byte-store c region offset (num:remainder value 256))
-        (write-word c region (n:add offset 1) (n:div value 256) (n:sub count 1))))))
+        (write-word c region (+ offset 1) (/ value 256) (- count 1))))))
 
 (base:function read-word ((c machine) (region u64) (offset u64) (count u64)) u64
   (match count
     (0 0)
     (_
-      (n:add
+      (+
         (region-byte c region offset)
-        (n:mul 256 (read-word c region (n:add offset 1) (n:sub count 1)))))))
+        (* 256 (read-word c region (+ offset 1) (- count 1)))))))
 
 (base:function clear-word ((c machine) (region u64) (offset u64) (count u64)) unit
   (match count
     (0 unit)
     (1 (byte-store c region offset 0))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (clear-word c region offset half)
-          (clear-word c region (n:add offset half) (n:sub count half)))))))
+          (clear-word c region (+ offset half) (- count half)))))))
 
 (base:function store-fields
   ((c machine) (region u64) (offset u64) (fields u64) (base u64) (index u64) (value scalar-value))
@@ -1518,14 +1519,14 @@
          (part mem:layout (mem:of p ty))
          (start u64 (mem:align p base (field part alignment))))
         (do
-          (store-value c region (n:add offset start) ty (component c value index fields))
+          (store-value c region (+ offset start) ty (component c value index fields))
           (store-fields
             c
             region
             offset
             (m:next p fields)
-            (n:add start (field part size))
-            (n:add index 1)
+            (+ start (field part size))
+            (+ index 1)
             value))))))
 
 (base:function store-elements
@@ -1540,10 +1541,10 @@
           (store-elements
             c
             region
-            (n:add offset size)
+            (+ offset size)
             element
-            (n:sub count 1)
-            (n:add index 1)
+            (- count 1)
+            (+ index 1)
             value))))))
 
 (base:function store-value ((c machine) (region u64) (offset u64) (ty u64) (value scalar-value))
@@ -1578,7 +1579,7 @@
                 (store-fields
                   c
                   region
-                  (n:add offset (mem:union-offset p ty))
+                  (+ offset (mem:union-offset p ty))
                   (m:next p (m:child p case))
                   0
                   1
@@ -1614,8 +1615,8 @@
          (part mem:layout (mem:of p ty))
          (start u64 (mem:align p base (field part alignment))))
         (do
-          (push c (load-value c region (n:add offset start) ty))
-          (load-fields c region offset (m:next p fields) (n:add start (field part size))))))))
+          (push c (load-value c region (+ offset start) ty))
+          (load-fields c region offset (m:next p fields) (+ start (field part size))))))))
 
 (base:function load-elements ((c machine) (region u64) (offset u64) (ty u64) (count u64)) unit
   (match count
@@ -1626,9 +1627,9 @@
         (load-elements
           c
           region
-          (n:add offset (field (mem:of (field c program) ty) size))
+          (+ offset (field (mem:of (field c program) ty) size))
           ty
-          (n:sub count 1))))))
+          (- count 1))))))
 
 (base:function load-value ((c machine) (region u64) (offset u64) (ty u64)) scalar-value
   (match (memory-ok c)
@@ -1640,8 +1641,8 @@
             (let ((bits u64 (read-word c region offset (field (mem:of p ty) size))))
               (do
                 (match ty
-                  (1 (memory-check c (n:eq bits 0) 0))
-                  (2 (memory-check c (n:le bits 1) 0))
+                  (1 (memory-check c (== bits 0) 0))
+                  (2 (memory-check c (<= bits 1) 0))
                   (_ unit))
                 (scalar-value
                   ty
@@ -1664,12 +1665,12 @@
                       ((tag u64 (read-word c region offset 4))
                        (case u64 (check:component-at p (check:type-components p ty) tag)))
                       (do
-                        (memory-check c (n:gt case 0) 0)
+                        (memory-check c (> case 0) 0)
                         (push c (scalar-value 3 (base:convert tag)))
                         (load-fields
                           c
                           region
-                          (n:add offset (mem:union-offset p ty))
+                          (+ offset (mem:union-offset p ty))
                           (m:next p (m:child p case))
                           0))))
                   (_ (load-fields c region offset (check:type-components p ty) 0)))
@@ -1730,37 +1731,38 @@
     (0 0)
     (1 (match (region-byte c region start) (0 0) (_ 1)))
     (_
-      (let ((half u64 (n:div count 2)) (found u64 (find-zero c region start half)))
-        (match (n:lt found half)
+      (let ((half u64 (/ count 2)) (found u64 (find-zero c region start half)))
+        (match (< found half)
           (true found)
-          (false (n:add half (find-zero c region (n:add start half) (n:sub count half)))))))))
+          (false (+ half (find-zero c region (+ start half) (- count half)))))))))
 
 (base:function memory-data-length ((c machine) (region u64) (offset u64) (length u64) (site u64))
   u64
   (match (memory-ok c)
     (false 0)
     (true
-      (let ((remaining u64 (n:sub length offset)) (found u64 (find-zero c region offset remaining)))
-        (do (memory-check c (n:lt found remaining) site) found)))))
+      (let ((remaining u64 (- length offset)) (found u64 (find-zero c region offset remaining)))
+        (do (memory-check c (< found remaining) site) found)))))
 
 (base:function validate-output ((c machine) (value scalar-value) (site u64)) unit
   (match (field value ty)
     (11
-      (match (n:ge (base:convert (field value scalar)) pointer-tag)
+      (let ((bits u64 (base:convert (field value scalar))))
+      (match (>= bits pointer-tag)
         (false
-          (let ((p m:context (field c program)) (bits u64 (base:convert (field value scalar))))
+          (let ((p m:context (field c program)))
             (memory-check
               c
-              (match (n:gt bits 0)
+              (match (> bits 0)
                 (true
-                  (match (n:lt bits (m:nodes-length (deref (field p items))))
-                    (true (n:eq (field (m:at p bits) kind) 17))
+                  (match (< bits (m:nodes-length (deref (field p items))))
+                    (true (== (field (m:at p bits) kind) 17))
                     (false false)))
                 (false false))
               site)))
         (true
           (let
-            ((location (tuple u64 u64) (resolve-pointer c (base:convert (field value scalar)) site)))
+            ((location (tuple u64 u64) (resolve-pointer c bits site)))
             (match (memory-ok c)
               (false unit)
               (true
@@ -1771,7 +1773,7 @@
                     (tuple-get location 1)
                     (base:convert (field (heap-at c (tuple-get location 0)) scalar))
                     site)
-                  unit)))))))
+                  unit))))))))
     (_
       (match (check:type-kind (field c program) (field value ty))
         (20 (validate-output-components c value site))
@@ -1783,7 +1785,7 @@
 (base:function validate-output-components ((c machine) (value scalar-value) (site u64)) unit
   (let
     ((handle u64 (base:convert (field value scalar)))
-     (count u64 (base:convert (field (heap-at c (n:sub handle 1)) scalar))))
+     (count u64 (base:convert (field (heap-at c (- handle 1)) scalar))))
     (validate-output-range c handle count site)))
 
 (base:function validate-output-range ((c machine) (start u64) (count u64) (site u64)) unit
@@ -1794,21 +1796,21 @@
         (0 unit)
         (1 (validate-output c (heap-at c start) site))
         (_
-          (let ((half u64 (n:div count 2)))
+          (let ((half u64 (/ count 2)))
             (do
               (validate-output-range c start half site)
-              (validate-output-range c (n:add start half) (n:sub count half) site))))))))
+              (validate-output-range c (+ start half) (- count half) site))))))))
 
 (base:function output-byte ((p m:context) (items values-array) (bits u64) (index u64)) u8
-  (match (n:lt bits pointer-tag)
+  (match (< bits pointer-tag)
     (true (deref (pointer-offset (m:literal-bytes p bits) index)))
     (false
       (let
-        ((id u64 (n:sub bits pointer-tag))
+        ((id u64 (- bits pointer-tag))
          (region u64 (base:convert (field (values-at items id) scalar)))
-         (offset u64 (base:convert (field (values-at items (n:add id 1)) scalar))))
+         (offset u64 (base:convert (field (values-at items (+ id 1)) scalar))))
         (base:convert
-          (field (values-at items (n:add (n:add region 2) (n:add offset index))) scalar))))))
+          (field (values-at items (+ (+ region 2) (+ offset index))) scalar))))))
 
 (base:function output-length ((p m:context) (items values-array) (bits u64) (start u64) (count u64))
   u64
@@ -1816,10 +1818,10 @@
     (0 0)
     (1 (match (output-byte p items bits start) (0 0) (_ 1)))
     (_
-      (let ((half u64 (n:div count 2)) (found u64 (output-length p items bits start half)))
-        (match (n:lt found half)
+      (let ((half u64 (/ count 2)) (found u64 (output-length p items bits start half)))
+        (match (< found half)
           (true found)
-          (false (n:add half (output-length p items bits (n:add start half) (n:sub count half)))))))))
+          (false (+ half (output-length p items bits (+ start half) (- count half)))))))))
 
 (base:function output-bytes ((p m:context) (items values-array) (bits u64) (start u64) (count u64))
   unit
@@ -1827,22 +1829,23 @@
     (0 unit)
     (1 (let ((byte u8 (output-byte p items bits start))) (m:write 1 (data:view (& byte) 1))))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (output-bytes p items bits start half)
-          (output-bytes p items bits (n:add start half) (n:sub count half)))))))
+          (output-bytes p items bits (+ start half) (- count half)))))))
 
 (base:function write-data ((p m:context) (items values-array) (bits u64)) unit
-  (match (n:lt bits pointer-tag)
+  (match (< bits pointer-tag)
     (true
       (let ((bytes (pointer u8) (m:literal-bytes p bits)))
         (do (m:text 1 "data:") (m:number 1 (cstring:strlen bytes)) (m:text 1 ":") (m:text 1 bytes))))
     (false
       (let
-        ((id u64 (n:sub bits pointer-tag))
+        ((id u64 (- bits pointer-tag))
          (region u64 (base:convert (field (values-at items id) scalar)))
-         (offset u64 (base:convert (field (values-at items (n:add id 1)) scalar)))
-         (capacity u64 (n:sub (base:convert (field (values-at items region) scalar)) offset))
+         (offset u64 (base:convert (field (values-at items (+ id 1)) scalar)))
+         (total u64 (base:convert (field (values-at items region) scalar)))
+         (capacity u64 (- total offset))
          (length u64 (output-length p items bits 0 capacity)))
         (do
           (m:text 1 "data:")

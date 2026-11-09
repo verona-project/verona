@@ -1,7 +1,5 @@
 (import base)
 (import allocator)
-(import foundation.compat.arithmetic :as n)
-(import foundation.compat.arithmetic)
 (import array)
 (import error)
 (import data)
@@ -70,16 +68,16 @@
      (match (,done context)
        (true (formatter.model:success))
        (false
-         (match (foundation.compat.arithmetic:eq count 0)
+         (match (== count 0)
            (true (formatter.model:success))
            (false
-             (match (foundation.compat.arithmetic:eq count 1)
+             (match (== count 1)
                (true (,step context))
                (false
-                 (let ((half u64 (foundation.compat.arithmetic:div count 2)))
+                 (let ((half u64 (/ count 2)))
                    (formatter.model:steps
                      (,name context half)
-                     (,name context (foundation.compat.arithmetic:sub count half))))))))))))
+                     (,name context (- count half))))))))))))
 
 (base:function empty ((backing allocator:backend)) tape
   (nodes-empty (cast (pointer node) (cast (pointer void) "")) (array:layout 48 8 backing)))
@@ -91,13 +89,13 @@
   (do (store (deref (pointer-offset (tuple-get items 0) i)) value) unit))
 
 (base:function byte ((source data:view) (i u64)) u64
-  (match (n:lt i (field source length))
+  (match (< i (field source length))
     (true (base:convert (deref (pointer-offset (field source bytes) i))))
     (false 0)))
 
 (base:function equal-at ((source data:view) (start u64) (length u64) (text (pointer u8)) (size u64))
   bool
-  (match (n:eq length size)
+  (match (== length size)
     (false false)
     (true
       (data:equal
@@ -105,10 +103,10 @@
         (data:view text size)))))
 
 (base:function cap ((value u64)) u64
-  (match (n:gt value 240) (true 241) (false value)))
+  (match (> value 240) (true 241) (false value)))
 
 (base:function plus ((left u64) (right u64)) u64
-  (cap (n:add (cap left) (cap right))))
+  (cap (+ (cap left) (cap right))))
 
 (export
   node

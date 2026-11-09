@@ -2,7 +2,6 @@
 (import core.model :as m)
 (import arena)
 (import data)
-(import foundation.compat.arithmetic :as n)
 
 ; Immutable little-endian decimal magnitudes. Buffers belong to the invocation
 ; arena. Zero has an empty magnitude and is never negative.
@@ -16,9 +15,9 @@
       (m:require
         (field w context)
         (field w site)
-        (n:gt (deref left) 0)
+        (> (deref left) 0)
         "compile-time evaluation step limit exceeded")
-      (store (deref left) (n:sub (deref left) 1))
+      (store (deref left) (- (deref left) 1))
       unit)))
 
 (base:function buffer ((w work) (count u64)) data:data
@@ -26,30 +25,30 @@
     (do (m:storage (data:resize (& out) count)) out)))
 
 (base:function digit ((value number) (index u64)) u64
-  (match (n:lt index (data:length (field value digits)))
+  (match (< index (data:length (field value digits)))
     (true (base:convert (deref (pointer-offset (data:bytes (field value digits)) index))))
     (false 0)))
 
 (base:function trim-range ((digits data:data) (start u64) (count u64)) u64
   (match count
     (0 start)
-    (1 (match (deref (pointer-offset (data:bytes digits) start)) (0 start) (_ (n:add start 1))))
+    (1 (match (deref (pointer-offset (data:bytes digits) start)) (0 start) (_ (+ start 1))))
     (_
       (let
-        ((half u64 (n:div count 2))
-         (middle u64 (n:add start half))
-         (found u64 (trim-range digits middle (n:sub count half))))
-        (match (n:gt found middle) (true found) (false (trim-range digits start half)))))))
+        ((half u64 (/ count 2))
+         (middle u64 (+ start half))
+         (found u64 (trim-range digits middle (- count half))))
+        (match (> found middle) (true found) (false (trim-range digits start half)))))))
 
 (base:function trim ((digits data:data) (count u64)) u64
   (trim-range digits 0 count))
 
 (base:function normalized ((negative bool) (digits data:data)) number
   (let ((owner data:data digits) (count u64 (trim digits (data:length digits))))
-    (do (m:storage (data:resize (& owner) count)) (number (base:and negative (n:gt count 0)) owner))))
+    (do (m:storage (data:resize (& owner) count)) (number (base:and negative (> count 0)) owner))))
 
 (base:function zero ((value number)) bool
-  (n:eq (data:length (field value digits)) 0))
+  (== (data:length (field value digits)) 0))
 
 (base:function read-digits
   ((w work) (id u64) (text data:view) (offset u64) (out (pointer u8)) (index u64) (count u64)) unit
@@ -57,45 +56,45 @@
     (0 unit)
     (1
       (let
-        ((byte u64 (base:convert (deref (pointer-offset (field text bytes) (n:add offset index)))))
-         (length u64 (n:sub (field text length) offset)))
+        ((byte u64 (base:convert (deref (pointer-offset (field text bytes) (+ offset index)))))
+         (length u64 (- (field text length) offset)))
         (do
           (charge w)
           (m:require
             (field w context)
             id
-            (base:and (n:ge byte 48) (n:le byte 57))
+            (base:and (>= byte 48) (<= byte 57))
             "expected an integer")
           (store
-            (deref (pointer-offset out (n:sub (n:sub length index) 1)))
-            (base:convert (n:sub byte 48)))
+            (deref (pointer-offset out (- (- length index) 1)))
+            (base:convert (- byte 48)))
           unit)))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (read-digits w id text offset out index half)
-          (read-digits w id text offset out (n:add index half) (n:sub count half)))))))
+          (read-digits w id text offset out (+ index half) (- count half)))))))
 
 (base:function parse ((w work) (id u64)) number
   (let
     ((text data:view (m:spelling (field w context) id))
      (sign u64 (base:convert (deref (field text bytes))))
      (offset u64 (match sign (43 1) (45 1) (_ 0)))
-     (digits data:data (buffer w (n:sub (field text length) offset))))
+     (digits data:data (buffer w (- (field text length) offset))))
     (do
       (read-digits w id text offset (data:bytes digits) 0 (data:length digits))
-      (normalized (n:eq sign 45) digits))))
+      (normalized (== sign 45) digits))))
 
 (base:function compare-range ((w work) (a number) (b number) (start u64) (count u64)) i32
   (match count
     (0 0)
     (1
       (let ((left u64 (digit a start)) (right u64 (digit b start)))
-        (do (charge w) (base:cond ((n:lt left right) -1) ((n:gt left right) 1) (true 0)))))
+        (do (charge w) (base:cond ((< left right) -1) ((> left right) 1) (true 0)))))
     (_
       (let
-        ((half u64 (n:div count 2))
-         (high i32 (compare-range w a b (n:add start half) (n:sub count half))))
+        ((half u64 (/ count 2))
+         (high i32 (compare-range w a b (+ start half) (- count half))))
         (match high (0 (compare-range w a b start half)) (_ high))))))
 
 (base:function compare-digits ((w work) (a number) (b number) (count u64)) i32
@@ -103,13 +102,13 @@
 
 (base:function magnitude-compare ((w work) (a number) (b number)) i32
   (let ((left u64 (data:length (field a digits))) (right u64 (data:length (field b digits))))
-    (base:cond ((n:lt left right) -1) ((n:gt left right) 1) (true (compare-digits w a b left)))))
+    (base:cond ((< left right) -1) ((> left right) 1) (true (compare-digits w a b left)))))
 
 (base:function compare ((w work) (a number) (b number)) i32
   (match
-    (n:eq
-      (match (field a negative) (true 1) (false 0))
-      (match (field b negative) (true 1) (false 0)))
+    (==
+      (match (field a negative) (true (cast i32 1)) (false (cast i32 0)))
+      (match (field b negative) (true (cast i32 1)) (false (cast i32 0))))
     (false (match (field a negative) (true -1) (false 1)))
     (true
       (let ((value i32 (magnitude-compare w a b)))
@@ -136,25 +135,25 @@
          (value
            u64
            (match subtract
-             (true (n:sub (n:sub (n:add left 10) right) (deref carry)))
-             (false (n:add (n:add left right) (deref carry)))))
+             (true (- (- (+ left 10) right) (deref carry)))
+             (false (+ (+ left right) (deref carry)))))
          (next
            u64
            (match subtract
-             (true (match (n:lt value 10) (true 1) (false 0)))
-             (false (n:div value 10)))))
+             (true (match (< value 10) (true 1) (false 0)))
+             (false (/ value 10)))))
         (do
           (charge w)
           (store
             (deref (pointer-offset (data:bytes out) index))
-            (base:convert (n:sub value (n:mul (n:div value 10) 10))))
+            (base:convert (- value (* (/ value 10) 10))))
           (store (deref carry) next)
           unit)))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (add-range w a b out index half carry subtract)
-          (add-range w a b out (n:add index half) (n:sub count half) carry subtract))))))
+          (add-range w a b out (+ index half) (- count half) carry subtract))))))
 
 (base:function add-digits
   ((w work)
@@ -167,7 +166,7 @@
    (subtract bool)) unit
   (let ((carry u64 initial))
     (do
-      (add-range w a b out index (n:sub count index) (& carry) subtract)
+      (add-range w a b out index (- count index) (& carry) subtract)
       (match subtract
         (true unit)
         (false
@@ -179,15 +178,15 @@
 
 (base:function add ((w work) (a number) (b number)) number
   (match
-    (n:eq
-      (match (field a negative) (true 1) (false 0))
-      (match (field b negative) (true 1) (false 0)))
+    (==
+      (match (field a negative) (true (cast i32 1)) (false (cast i32 0)))
+      (match (field b negative) (true (cast i32 1)) (false (cast i32 0))))
     (true
       (let
         ((left u64 (data:length (field a digits)))
          (right u64 (data:length (field b digits)))
-         (count u64 (match (n:gt left right) (true left) (false right)))
-         (out data:data (buffer w (n:add count 1))))
+         (count u64 (match (> left right) (true left) (false right)))
+         (out data:data (buffer w (+ count 1))))
         (do (add-digits w a b out 0 count 0 false) (normalized (field a negative) out))))
     (false
       (match (magnitude-compare w a b)
@@ -211,31 +210,32 @@
     (0 unit)
     (1
       (let
-        ((index u64 (n:add row column))
+        ((index u64 (+ row column))
+         (previous u64 (base:convert (deref (pointer-offset (data:bytes out) index))))
          (value
            u64
-           (n:add
-             (n:add (n:mul (digit a row) (digit b column)) (deref carry))
-             (base:convert (deref (pointer-offset (data:bytes out) index))))))
+           (+
+             (+ (* (digit a row) (digit b column)) (deref carry))
+             previous)))
         (do
           (charge w)
           (store
             (deref (pointer-offset (data:bytes out) index))
-            (base:convert (n:sub value (n:mul (n:div value 10) 10))))
-          (store (deref carry) (n:div value 10))
+            (base:convert (- value (* (/ value 10) 10))))
+          (store (deref carry) (/ value 10))
           unit)))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (multiply-columns w a b out row column half carry)
-          (multiply-columns w a b out row (n:add column half) (n:sub count half) carry))))))
+          (multiply-columns w a b out row (+ column half) (- count half) carry))))))
 
 (base:function multiply-row
   ((w work) (a number) (b number) (out data:data) (row u64) (column u64) (initial u64)) unit
   (let ((carry u64 initial) (count u64 (data:length (field b digits))))
     (do
-      (multiply-columns w a b out row column (n:sub count column) (& carry))
-      (store (deref (pointer-offset (data:bytes out) (n:add row count))) (base:convert carry))
+      (multiply-columns w a b out row column (- count column) (& carry))
+      (store (deref (pointer-offset (data:bytes out) (+ row count))) (base:convert carry))
       unit)))
 
 (base:function multiply-range
@@ -244,26 +244,26 @@
     (0 unit)
     (1 (multiply-row w a b out start 0 0))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (multiply-range w a b out start half)
-          (multiply-range w a b out (n:add start half) (n:sub count half)))))))
+          (multiply-range w a b out (+ start half) (- count half)))))))
 
 (base:function multiply-rows ((w work) (a number) (b number) (out data:data) (row u64)) unit
-  (multiply-range w a b out row (n:sub (data:length (field a digits)) row)))
+  (multiply-range w a b out row (- (data:length (field a digits)) row)))
 
 (base:function multiply ((w work) (a number) (b number)) number
   (let
     ((out
        data:data
-       (buffer w (n:add (data:length (field a digits)) (data:length (field b digits))))))
+       (buffer w (+ (data:length (field a digits)) (data:length (field b digits))))))
     (do
       (match (base:or (zero a) (zero b)) (true unit) (false (multiply-rows w a b out 0)))
       (normalized
         (base:not
-          (n:eq
-            (match (field a negative) (true 1) (false 0))
-            (match (field b negative) (true 1) (false 0))))
+          (==
+            (match (field a negative) (true (cast i32 1)) (false (cast i32 0)))
+            (match (field b negative) (true (cast i32 1)) (false (cast i32 0)))))
         out))))
 
 (base:function shift-range ((w work) (a number) (out data:data) (index u64) (count u64)) unit
@@ -273,29 +273,29 @@
       (do
         (charge w)
         (store
-          (deref (pointer-offset (data:bytes out) (n:add index 1)))
+          (deref (pointer-offset (data:bytes out) (+ index 1)))
           (base:convert (digit a index)))
         unit))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (shift-range w a out index half)
-          (shift-range w a out (n:add index half) (n:sub count half)))))))
+          (shift-range w a out (+ index half) (- count half)))))))
 
 (base:function shift-digits ((w work) (a number) (out data:data) (index u64)) unit
-  (shift-range w a out index (n:sub (data:length (field a digits)) index)))
+  (shift-range w a out index (- (data:length (field a digits)) index)))
 
 (base:function quotient-digit ((w work) (a number) (b number) (value u64)) (tuple u64 number)
   (match (magnitude-compare w a b)
     (-1 (tuple value a))
-    (_ (quotient-digit w (magnitude-subtract w a b) b (n:add value 1)))))
+    (_ (quotient-digit w (magnitude-subtract w a b) b (+ value 1)))))
 
 (base:function divide-range
   ((w work) (a number) (b number) (out data:data) (start u64) (count u64) (remainder number)) number
   (match count
     (0 remainder)
     (1
-      (let ((shifted data:data (buffer w (n:add (data:length (field remainder digits)) 1))))
+      (let ((shifted data:data (buffer w (+ (data:length (field remainder digits)) 1))))
         (do
           (charge w)
           (shift-digits w remainder shifted 0)
@@ -308,8 +308,8 @@
               (tuple-get part 1))))))
     (_
       (let
-        ((half u64 (n:div count 2))
-         (high number (divide-range w a b out (n:add start half) (n:sub count half) remainder)))
+        ((half u64 (/ count 2))
+         (high number (divide-range w a b out (+ start half) (- count half) remainder)))
         (divide-range w a b out start half high)))))
 
 (base:function divide-digits
@@ -326,9 +326,9 @@
          number
          (normalized
            (base:not
-             (n:eq
-               (match (field a negative) (true 1) (false 0))
-               (match (field b negative) (true 1) (false 0))))
+             (==
+               (match (field a negative) (true (cast i32 1)) (false (cast i32 0)))
+               (match (field b negative) (true (cast i32 1)) (false (cast i32 0)))))
            out)))
       (tuple
         quotient
@@ -338,11 +338,11 @@
   ((w work) (value number) (out (pointer data:data)) (start u64) (count u64)) unit
   (match count
     (0 unit)
-    (1 (do (charge w) (m:storage (data:append out (base:convert (n:add 48 (digit value start)))))))
+    (1 (do (charge w) (m:storage (data:append out (base:convert (+ 48 (digit value start)))))))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
-          (write-range w value out (n:add start half) (n:sub count half))
+          (write-range w value out (+ start half) (- count half))
           (write-range w value out start half))))))
 
 (base:function write-digits ((w work) (value number) (out (pointer data:data)) (count u64)) unit

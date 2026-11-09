@@ -313,7 +313,9 @@ class CoreTests(unittest.TestCase):
 (%function main () i64 (%zext-primitive-u8-i64 (narrow)))
 """, 42)
         self.agrees(self.program("(%zext-primitive-u8-i64 (+ (cast u8 40) 2))"), 42)
-        for expression in ("(+ 1 (cast u8 1))", "(+ 1 1)", "(== 1 1)", "(< 1 2)"):
+        result = self.run_core("check", "(%function main () unit (do (+ 1 (cast u8 1)) unit))")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for expression in ("(+ 1 1)", "(== 1 1)", "(< 1 2)"):
             result = self.run_core("check", f"(%function main () unit (do {expression} unit))")
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn("ambiguous numeric literal", result.stderr)

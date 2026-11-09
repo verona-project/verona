@@ -4,7 +4,6 @@
 (import core.model :as m)
 (import core.numeric :as num)
 (import data)
-(import foundation.compat.arithmetic :as n)
 
 (base:external-function decimal-to-float "strtof" ((pointer u8) (pointer (pointer u8))) f32)
 
@@ -26,7 +25,7 @@
 
 (base:function parse-text ((c m:context) (id u64) (ty u64)) u64
   (let ((text data:view (m:spelling c id)) (length u64 (field text length)))
-    (match (arena:allocate (field c memory) (n:add length 1) 1)
+    (match (arena:allocate (field c memory) (+ length 1) 1)
       ((allocated bytes)
        (do
          (allocator:copy-bytes bytes (field text bytes) length)
@@ -56,8 +55,8 @@
 
 (base:function finite ((ty u64) (bits u64)) bool
   (match ty
-    (12 (n:lt (num:remainder bits 2147483648) 2139095040))
-    (_ (n:lt (num:remainder bits 9223372036854775808) 9218868437227405312))))
+    (12 (< (num:remainder bits 2147483648) 2139095040))
+    (_ (< (num:remainder bits 9223372036854775808) 9218868437227405312))))
 
 (base:function widen ((ty u64) (bits i64)) f64
   (match ty (12 (base:convert (unpack32 bits))) (_ (unpack64 bits))))
@@ -96,12 +95,12 @@
     ((num:float-type from)
      (let ((value f64 (widen from bits)))
        (base:cond
-         ((n:eq to 12) (pack32 (base:convert value)))
-         ((n:eq to 13) (pack64 value))
+         ((== to 12) (pack32 (base:convert value)))
+         ((== to 13) (pack64 value))
          ((num:signed-type to)
           (let ((signed i64 (base:convert value))) (num:normalize to (base:convert signed))))
          (true (let ((unsigned u64 (base:convert value))) (num:normalize to unsigned))))))
-    ((n:eq to 12)
+    ((== to 12)
      (pack32
        (match (num:signed-type from)
          (true (base:convert bits))

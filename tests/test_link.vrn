@@ -7,7 +7,6 @@
 (import error)
 (import system_allocator :as system)
 (import libc.string :as cstring)
-(import foundation.compat.arithmetic :as n)
 
 (base:variable budget u64 0)
 
@@ -18,14 +17,14 @@
     (0 (a:failure (out-of-memory)))
     (_
       (do
-        (assign budget (n:sub budget 1))
+        (assign budget (- budget 1))
         (match (a:allocate (system:create) size alignment)
-          ((allocated bytes) (do (assign live (n:add live 1)) (a:success bytes)))
+          ((allocated bytes) (do (assign live (+ live 1)) (a:success bytes)))
           (reason reason))))))
 
 (base:function release ((context (pointer void)) (bytes (pointer u8)) (size u64) (alignment u64))
   unit
-  (do (assign live (n:sub live 1)) (a:deallocate (system:create) bytes size alignment) unit))
+  (do (assign live (- live 1)) (a:deallocate (system:create) bytes size alignment) unit))
 
 (base:function option
   ((owner (pointer link:options)) (status error:status) (kind link:option-kind) (value (pointer u8)))
@@ -69,12 +68,12 @@
                (testing:checks
                  (testing:check (match status ((ok) true) (_ false)))
                  (testing:check
-                   (n:eq
+                   (=
                      (link:strings-length args)
                      (match (cstring:strcmp kind "static-library")
                        (0 5)
                        (_
-                         (n:add
+                         (+
                            (match (link:frameworks-supported) (true 10) (false 8))
                            (match (cstring:strcmp kind "shared-library") (0 1) (_ 0)))))))
                  (testing:check
@@ -93,7 +92,7 @@
                    (m:is-empty
                      (cast
                        (pointer void)
-                       (link:strings-at args (n:sub (link:strings-length args) 1)))))))
+                       (link:strings-at args (- (link:strings-length args) 1)))))))
              (_ (testing:empty))))))
       (do
         (link:strings-destroy (& args))
@@ -101,8 +100,8 @@
         (arena:destroy (& memory))
         (testing:checks
           checks
-          (testing:check (n:eq live 0))
-          (match limit (20 (testing:empty)) (_ (allocation-case (n:add limit 1) kind))))))))
+          (testing:check (= live 0))
+          (match limit (20 (testing:empty)) (_ (allocation-case (+ limit 1) kind))))))))
 
 (testing:test argument-storage-and-allocation-cleanup
   (testing:checks

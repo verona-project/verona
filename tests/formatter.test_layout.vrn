@@ -1,6 +1,5 @@
 (import base)
 (import testing)
-(import foundation.compat.arithmetic :as n)
 (import data)
 (import formatter.test_support :as support)
 

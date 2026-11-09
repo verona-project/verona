@@ -2,7 +2,6 @@
 (import allocator)
 (import array)
 (import error)
-(import foundation.compat.arithmetic)
 
 ; File IDs and interned-name IDs occupy distinct fields. Offsets are bytes.
 ; Source identity and half-open byte range [start, start + length).

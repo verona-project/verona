@@ -32,8 +32,6 @@
 (import llvm.enums :as enum)
 (import llvm.types :as t)
 (import llvm.target :as target)
-(import foundation.compat.arithmetic :as n)
-(import foundation.compat.signed_arithmetic :as signed)
 
 (base:type machine-options
   (product (triple (pointer u8)) (cpu (pointer u8)) (features (pointer u8))))
@@ -46,8 +44,8 @@
 ; Format negative magnitudes with unsigned arithmetic so minBound remains representable.
 (base:function signed-number ((value i64)) unit
   (let ((bits u64 (base:convert value)))
-    (match (signed:lt value 0)
-      (true (do (m:text 1 "-") (m:number 1 (n:sub 0 bits))))
+    (match (< value 0)
+      (true (do (m:text 1 "-") (m:number 1 (- 0 bits))))
       (false (m:number 1 bits)))))
 
 ; Wait for the selected child, retrying interrupted waits; return true only for status zero.
@@ -55,7 +53,7 @@
   (let ((status i32 0) (result i32 (process:waitpid pid (& status) 0)))
     (match result
       (-1
-        (match (signed:eq (base:convert (deref (errno:errno-pointer))) (base:convert c:EINTR))
+        (match (== (deref (errno:errno-pointer)) c:EINTR)
           (true (wait-result pid))
           (false false)))
       (_ (match status (0 true) (_ false))))))
@@ -145,7 +143,7 @@
           (& path)
           (data:view
             constants:temporary-object-template
-            (n:add (cstring:strlen constants:temporary-object-template) 1))))
+            (+ (cstring:strlen constants:temporary-object-template) 1))))
       (let ((descriptor i32 (fs:mkstemp (data:bytes path))))
         (match descriptor
           (-1 (do (m:text 2 "cannot create temporary object file\n") 2))
@@ -249,7 +247,7 @@
                  (let ((code exit-code (compile c owner output optimization links kind)))
                    (match
                      (base:and-then
-                       (n:eq (base:convert code) 0)
+                       (== code (cast i32 0))
                        (base:or (equal kind "static-library") (equal kind "shared-library")))
                      (true (match (header:write c all output) (true 0) (false 2)))
                      (false code)))))))
@@ -289,7 +287,7 @@
 (base:function link-policy ((links link:options) (platform (pointer u8))) unit
   (match
     (base:and
-      (n:gt (link:strings-length (field links frameworks)) 0)
+      (> (link:strings-length (field links frameworks)) 0)
       (base:not (equal platform "darwin")))
     (true (m:fatal "frameworks are supported only on Darwin targets"))
     (false unit)))
@@ -297,16 +295,16 @@
 ; Return the final dot after DIRECTORY, or END when the filename has no extension.
 (base:function source-extension
   ((path (pointer u8)) (index u64) (end u64) (directory u64) (last u64)) u64
-  (match (n:eq index end)
+  (match (== index end)
     (true last)
     (false
       (source-extension
         path
-        (n:add index 1)
+        (+ index 1)
         end
         directory
         (match (deref (pointer-offset path index))
-          (46 (match (n:gt index directory) (true index) (false last)))
+          (46 (match (> index directory) (true index) (false last)))
           (_ last))))))
 
 ; Match the reference driver's source-adjacent default artifact names.
@@ -323,7 +321,7 @@
       (match (base:or (equal kind "static-library") (equal kind "shared-library"))
         (true (format:append (& out) "lib"))
         (false unit))
-      (match (n:eq directory stem-end)
+      (match (== directory stem-end)
         (true (format:append (& out) "a.out"))
         (false
           (m:storage
@@ -331,7 +329,7 @@
               (& out)
               (data:view path length)
               directory
-              (n:sub stem-end directory)))))
+              (- stem-end directory)))))
       (base:cond
         ((equal kind "object") (format:append (& out) ".o"))
         ((equal kind "static-library") (format:append (& out) ".a"))
@@ -410,7 +408,7 @@
          (result
            exit-code
            (base:cond
-             ((n:gt errors 0) 2)
+             ((> errors 0) 2)
              ((equal mode "check") 0)
              ((base:and (equal mode "eval") (check:command-line-main c main))
               (do
@@ -469,7 +467,7 @@
    (machine (pointer machine-options))
    (features (pointer (pointer void)))
    (memory (pointer arena:arena))) bool
-  (match (n:eq index end)
+  (match (== index end)
     (true true)
     (false
       (let ((option (pointer u8) (deref (pointer-offset argv index))))
@@ -479,14 +477,14 @@
              (base:or (equal option "--cpu") (equal option "--features")))
            (match
              (base:and
-               (n:lt (n:add index 1) end)
+               (< (+ index 1) end)
                (base:or
                  compile
                  (base:not (base:or (equal option "--cpu") (equal option "--features")))))
              (false false)
              (true
-               (let ((value (pointer u8) (deref (pointer-offset argv (n:add index 1)))))
-                 (match (base:or (equal option "--features") (n:gt (cstring:strlen value) 0))
+               (let ((value (pointer u8) (deref (pointer-offset argv (+ index 1)))))
+                 (match (base:or (equal option "--features") (> (cstring:strlen value) 0))
                    (false false)
                    (true
                      (do
@@ -515,7 +513,7 @@
                          (true (config:add-feature memory features value)))
                        (command-options
                          argv
-                         (n:add index 2)
+                         (+ index 2)
                          end
                          compile
                          roots
@@ -527,10 +525,10 @@
                          features
                          memory))))))))
           ((equal option "--emit")
-           (match (base:and-then compile (n:lt (n:add index 1) end))
+           (match (base:and-then compile (< (+ index 1) end))
              (false false)
              (true
-               (let ((value (pointer u8) (deref (pointer-offset argv (n:add index 1)))))
+               (let ((value (pointer u8) (deref (pointer-offset argv (+ index 1)))))
                  (match
                    (base:or-else
                      (equal value "object")
@@ -543,7 +541,7 @@
                        (store (deref kind) value)
                        (command-options
                          argv
-                         (n:add index 2)
+                         (+ index 2)
                          end
                          compile
                          roots
@@ -555,18 +553,18 @@
                          features
                          memory))))))))
           ((equal option "--module-path")
-           (match (n:lt (n:add index 1) end)
+           (match (< (+ index 1) end)
              (false false)
              (true
-               (let ((path (pointer u8) (deref (pointer-offset argv (n:add index 1)))))
-                 (match (n:gt (cstring:strlen path) 0)
+               (let ((path (pointer u8) (deref (pointer-offset argv (+ index 1)))))
+                 (match (> (cstring:strlen path) 0)
                    (false false)
                    (true
                      (do
                        (m:storage (modules:paths-append roots path))
                        (command-options
                          argv
-                         (n:add index 2)
+                         (+ index 2)
                          end
                          compile
                          roots
@@ -623,17 +621,17 @@
              features
              memory))
           ((base:or (equal option "-o") (equal option "--output"))
-           (match (base:and-then compile (n:lt (n:add index 1) end))
+           (match (base:and-then compile (< (+ index 1) end))
              (false false)
              (true
                (match (equal (deref output) "")
                  (false false)
                  (true
                    (do
-                     (store (deref output) (deref (pointer-offset argv (n:add index 1))))
+                     (store (deref output) (deref (pointer-offset argv (+ index 1))))
                      (command-options
                        argv
-                       (n:add index 2)
+                       (+ index 2)
                        end
                        compile
                        roots
@@ -679,14 +677,14 @@
    (machine (pointer machine-options))
    (features (pointer (pointer void)))
    (memory (pointer arena:arena))) bool
-  (match (base:and-then compile (n:lt (n:add index 1) end))
+  (match (base:and-then compile (< (+ index 1) end))
     (false false)
     (true
-      (match (link:add-option links kind (deref (pointer-offset argv (n:add index 1))))
+      (match (link:add-option links kind (deref (pointer-offset argv (+ index 1))))
         ((ok)
          (command-options
            argv
-           (n:add index 2)
+           (+ index 2)
            end
            compile
            roots
@@ -720,7 +718,7 @@
         (store (deref level) option)
         (command-options
           argv
-          (n:add index 1)
+          (+ index 1)
           end
           compile
           roots
@@ -733,7 +731,7 @@
           memory)))))
 
 (base:function source-command ((argc i32) (argv (pointer (pointer u8)))) exit-code
-  (match (signed:lt (base:convert argc) 3)
+  (match (< argc (cast i32 3))
     (true (usage))
     (false
       (let
@@ -805,19 +803,19 @@
    (end u64)
    (memory (pointer arena:arena))
    (features (pointer (pointer void)))) bool
-  (match (n:eq index end)
+  (match (== index end)
     (true true)
     (false
       (match
         (base:and-then
-          (n:lt (n:add index 1) end)
+          (< (+ index 1) end)
           (equal (deref (pointer-offset argv index)) "--feature")
-          (n:gt (cstring:strlen (deref (pointer-offset argv (n:add index 1)))) 0))
+          (> (cstring:strlen (deref (pointer-offset argv (+ index 1)))) 0))
         (false false)
         (true
           (do
-            (config:add-feature memory features (deref (pointer-offset argv (n:add index 1))))
-            (build-features argv (n:add index 2) end memory features)))))))
+            (config:add-feature memory features (deref (pointer-offset argv (+ index 1))))
+            (build-features argv (+ index 2) end memory features)))))))
 
 (base:function build-command ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (let
@@ -864,7 +862,7 @@
                  c
                  (field request output)
                  1
-                 (n:sub
+                 (-
                    (modules:directory-end
                      (field request output)
                      0
@@ -894,21 +892,21 @@
 (base:function command ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (match
     (base:and-then
-      (base:not (signed:lt (base:convert argc) 2))
+      (base:not (< argc (cast i32 2)))
       (equal (deref (pointer-offset argv 1)) "build"))
     (false (source-command argc argv))
     (true
-      (match (signed:lt (base:convert argc) 4) (true (usage)) (false (build-command argc argv))))))
+      (match (< argc (cast i32 4)) (true (usage)) (false (build-command argc argv))))))
 
 (base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (match
     (base:and-then
-      (base:not (signed:lt (base:convert argc) 2))
+      (base:not (< argc (cast i32 2)))
       (base:or
         (equal (deref (pointer-offset argv 1)) "--version")
         (equal (deref (pointer-offset argv 1)) "-V")))
     (true
-      (match (signed:eq (base:convert argc) 2)
+      (match (== argc (cast i32 2))
         (true (do (m:text 1 constants:compiler-version) (m:text 1 "\n") 0))
         (false (usage))))
     (false (command argc argv))))

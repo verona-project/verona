@@ -10,7 +10,6 @@
 (import libc.descriptor :as fd)
 (import core.model :as m)
 (import libc.string :as cstring)
-(import foundation.compat.arithmetic :as n)
 
 (base:function run-case ((name (pointer u8)) (test testing:test-function)) testing:result
   (let ((result testing:result (testing:execute test)))
@@ -24,7 +23,7 @@
     (match
       (data:assign-bytes
         (& path)
-        (data:view "/tmp/verona tests-XXXXXX" (n:add (cstring:strlen "/tmp/verona tests-XXXXXX") 1)))
+        (data:view "/tmp/verona tests-XXXXXX" (+ (cstring:strlen "/tmp/verona tests-XXXXXX") 1)))
       ((ok)
        (let ((descriptor i32 (fs:mkstemp (data:bytes path))))
          (match descriptor

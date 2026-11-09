@@ -6,8 +6,6 @@
 (import data)
 (import error)
 (import libc.string :as cstring)
-(import foundation.compat.arithmetic)
-(import foundation.compat.arithmetic :as n)
 
 ; Arrays own their pointer storage and borrow their NUL-terminated strings.
 (array:define strings (pointer u8))
@@ -82,13 +80,13 @@
    (index u64)) error:status
   (match status
     ((ok)
-     (match (n:eq index (strings-length items))
+     (match (== index (strings-length items))
        (true (error:success))
        (false
          (let
            ((first error:status (strings-append args flag))
             (second error:status (append-value args first (strings-at items index))))
-           (append-pairs args second flag items (n:add index 1))))))
+           (append-pairs args second flag items (+ index 1))))))
     (reason reason)))
 
 (base:function append-libraries
@@ -99,7 +97,7 @@
    (index u64)) error:status
   (match status
     ((ok)
-     (match (n:eq index (strings-length items))
+     (match (== index (strings-length items))
        (true (error:success))
        (false
          (let ((name (pointer u8) (strings-at items index)) (length u64 (cstring:strlen name)))
@@ -115,13 +113,13 @@
                      (allocator:copy-bytes
                        (pointer-offset (data:bytes text) 2)
                        name
-                       (n:add length 1))
+                       (+ length 1))
                      (append-libraries
                        args
                        memory
                        (strings-append args (data:bytes text))
                        items
-                       (n:add index 1))))
+                       (+ index 1))))
                   (reason reason)))))))))
     (reason reason)))
 
@@ -138,7 +136,7 @@
    (platform (pointer u8))) error:status
   (match
     (base:and
-      (n:gt (strings-length (field config frameworks)) 0)
+      (> (strings-length (field config frameworks)) 0)
       (match (cstring:strcmp platform "darwin") (0 false) (_ true)))
     (true (error:invalid))
     (false
@@ -203,12 +201,12 @@
         (_ (build-arguments-for args memory tool input output config platform))))))
 
 (base:function shift-arguments ((args strings-array) (index u64)) unit
-  (match (n:gt index 1)
+  (match (> index 1)
     (false unit)
     (true
       (do
-        (store (deref (pointer-offset (tuple-get args 0) index)) (strings-at args (n:sub index 1)))
-        (shift-arguments args (n:sub index 1))))))
+        (store (deref (pointer-offset (tuple-get args 0) index)) (strings-at args (- index 1)))
+        (shift-arguments args (- index 1))))))
 
 (base:function native-platform () (pointer u8)
   (match (frameworks-supported) (true "darwin") (false "linux")))

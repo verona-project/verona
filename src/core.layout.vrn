@@ -8,14 +8,13 @@
 (import llvm.types :as t)
 (import llvm.core :as ir)
 (import llvm.target :as target)
-(import foundation.compat.arithmetic :as n)
 
 ; Allocate arena-owned storage for count LLVM value handles; terminate on allocation failure.
 (base:function values ((c m:context) (count u64)) (pointer t:value-ref)
   (match
     (arena:allocate
       (field c memory)
-      (n:mul count constants:llvm-handle-byte-size)
+      (* count constants:llvm-handle-byte-size)
       constants:llvm-handle-alignment)
     ((allocated p) (cast (pointer t:value-ref) (cast (pointer void) p)))
     (_
@@ -41,7 +40,7 @@
     (_
       (do
         (store (deref (pointer-offset out count)) (value-type c owner (field (m:at c id) ty)))
-        (component-types c owner (m:next c id) out (n:add count 1))))))
+        (component-types c owner (m:next c id) out (+ count 1))))))
 
 (base:function sum-types
   ((c m:context) (owner llvm:session) (id u64) (out (pointer t:type-ref)) (index u64)) u32
@@ -55,19 +54,19 @@
              (pointer t:type-ref)
              (cast
                (pointer void)
-               (values c (n:add 1 (check:chain-length c (m:next c (m:child c id))))))))
+               (values c (+ 1 (check:chain-length c (m:next c (m:child c id))))))))
          (count u32 (component-types c owner (m:next c (m:child c id)) buffer 0)))
         (do
           (store
             (deref (pointer-offset out index))
             (ir:struct-type (field owner context) buffer count 0))
-          (sum-types c owner (m:next c id) out (n:add index 1)))))))
+          (sum-types c owner (m:next c id) out (+ index 1)))))))
 
 (base:function value-type ((c m:context) (owner llvm:session) (ty u64)) t:type-ref
   (base:cond
-    ((n:le ty num:descriptor-base) (scalar-type owner ty))
-    ((n:eq (check:type-kind c ty) 34) (ir:pointer-type (field owner context) 0))
-    ((n:eq (check:type-kind c ty) 49)
+    ((<= ty num:descriptor-base) (scalar-type owner ty))
+    ((== (check:type-kind c ty) 34) (ir:pointer-type (field owner context) 0))
+    ((== (check:type-kind c ty) 49)
      (ir:array-type (value-type c owner (check:array-element c ty)) (check:array-length c ty)))
     (true
       (let
@@ -77,7 +76,7 @@
              (pointer t:type-ref)
              (cast
                (pointer void)
-               (values c (n:add 1 (check:chain-length c (check:type-components c ty)))))))
+               (values c (+ 1 (check:chain-length c (check:type-components c ty)))))))
          (count
            u32
            (match (check:type-kind c ty)

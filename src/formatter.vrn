@@ -1,7 +1,5 @@
 (import base)
 (import allocator)
-(import foundation.compat.arithmetic)
-(import foundation.compat.arithmetic :as n)
 (import array)
 (import arena)
 (import data)
@@ -35,13 +33,13 @@
 
 (base:function format
   ((source data:view) (width u64) (out (pointer data:data)) (backing allocator:backend)) m:status
-  (match (n:lt width 20)
+  (match (< width 20)
     (true (m:limit 0 "width must be between 20 and 240"))
     (false
-      (match (n:gt width 240)
+      (match (> width 240)
         (true (m:limit 0 "width must be between 20 and 240"))
         (false
-          (match (n:gt (field source length) 16777216)
+          (match (> (field source length) 16777216)
             (true (m:limit 0 "input limit (16 MiB) exceeded"))
             (false
               (match (string:validate source)

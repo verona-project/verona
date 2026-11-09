@@ -6,7 +6,6 @@
 (import data)
 (import error)
 (import libc.string :as cstring)
-(import foundation.compat.arithmetic :as n)
 
 (base:function append-view ((out (pointer data:data)) (value data:view) (start u64) (count u64))
   error:status
@@ -14,9 +13,9 @@
     (0 (error:success))
     (1 (data:append out (deref (pointer-offset (field value bytes) start))))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (match (append-view out value start half)
-          ((ok) (append-view out value (n:add start half) (n:sub count half)))
+          ((ok) (append-view out value (+ start half) (- count half)))
           (reason reason))))))
 
 (base:function append ((out (pointer data:data)) (text (pointer u8))) unit
@@ -24,9 +23,9 @@
 
 (base:function digits ((out (pointer data:data)) (value u64)) unit
   (do
-    (match (n:ge value 10) (true (digits out (n:div value 10))) (false unit))
+    (match (>= value 10) (true (digits out (/ value 10))) (false unit))
     (m:storage
-      (data:append out (base:convert (n:add 48 (n:sub value (n:mul (n:div value 10) 10))))))))
+      (data:append out (base:convert (+ 48 (- value (* (/ value 10) 10))))))))
 
 ; Stable recursive wire syntax. Nominal names include their session module ID.
 (base:function prefix ((c m:context) (ty u64) (case u64)) data:data
@@ -36,7 +35,7 @@
         (22 (append (& out) "tuple("))
         (49 (append (& out) "array("))
         (_
-          (let ((id u64 (n:sub ty num:descriptor-base)))
+          (let ((id u64 (- ty num:descriptor-base)))
             (do
               (append (& out) (match (check:type-kind c ty) (20 "product:") (_ "sum:")))
               (digits (& out) (m:owner c id))

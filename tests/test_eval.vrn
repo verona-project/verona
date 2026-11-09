@@ -13,8 +13,6 @@
 (import error)
 (import system_allocator :as system)
 (import libc.string :as cstring)
-(import foundation.compat.arithmetic :as n)
-(import foundation.compat.signed_arithmetic :as signed)
 
 ; Every case evaluates the same checked program repeatedly, including after failure.
 (base:function case ((text (pointer u8)) (config e:options) (code u64) (expected i64))
@@ -41,20 +39,20 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (n:eq errors 0))
-         (testing:check (n:eq (field first code) code))
-         (testing:check (n:eq (field second code) code))
+         (testing:check (= errors 0))
+         (testing:check (= (field first code) code))
+         (testing:check (= (field second code) code))
          (match code
            (0
              (testing:checks
-               (testing:check (signed:eq (field (field first result) scalar) expected))
-               (testing:check (signed:eq (field (field second result) scalar) expected))
-               (testing:check (n:eq (field (field first result) ty) 3))
-               (testing:check (n:eq (e:frames-length (field first trace)) 0))))
+               (testing:check (= (field (field first result) scalar) expected))
+               (testing:check (= (field (field second result) scalar) expected))
+               (testing:check (= (field (field first result) ty) 3))
+               (testing:check (= (e:frames-length (field first trace)) 0))))
            (_
              (testing:checks
-               (testing:check (n:gt (field first site) 0))
-               (testing:check (n:gt (e:frames-length (field first trace)) 0))))))))
+               (testing:check (> (field first site) 0))
+               (testing:check (> (e:frames-length (field first trace)) 0))))))))
     (do
       (e:destroy (& first))
       (e:destroy (& second))
@@ -84,14 +82,14 @@
     (0 (a:failure (out-of-memory)))
     (_
       (do
-        (assign budget (n:sub budget 1))
+        (assign budget (- budget 1))
         (match (a:allocate (system:create) size alignment)
-          ((allocated bytes) (do (assign live (n:add live 1)) (a:success bytes)))
+          ((allocated bytes) (do (assign live (+ live 1)) (a:success bytes)))
           (reason reason))))))
 
 (base:function release ((context (pointer void)) (bytes (pointer u8)) (size u64) (alignment u64))
   unit
-  (do (assign live (n:sub live 1)) (a:deallocate (system:create) bytes size alignment) unit))
+  (do (assign live (- live 1)) (a:deallocate (system:create) bytes size alignment) unit))
 
 (base:function allocation-cases ((c m:context) (main u64) (args e:values-array) (limit u64))
   testing:result
@@ -106,10 +104,10 @@
         (e:destroy (& result))
         (testing:checks
           (testing:check valid)
-          (testing:check (n:eq live 0))
+          (testing:check (= live 0))
           (match limit
-            (100 (testing:check (n:eq (field result code) 0)))
-            (_ (allocation-cases c main args (n:add limit 1)))))))))
+            (100 (testing:check (= (field result code) 0)))
+            (_ (allocation-cases c main args (+ limit 1)))))))))
 
 (testing:test reusable-and-storage
   (let
@@ -144,11 +142,11 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (n:eq (field failed code) 1))
-         (testing:check (n:eq (field success code) 0))
-         (testing:check (signed:eq (field (field success result) scalar) 21))
-         (testing:check (n:eq (field (m:at c (field failed site)) kind) 9))
-         (testing:check (n:eq (e:frames-length (field failed trace)) 1)))))
+         (testing:check (= (field failed code) 1))
+         (testing:check (= (field success code) 0))
+         (testing:check (= (field (field success result) scalar) 21))
+         (testing:check (= (field (m:at c (field failed site)) kind) 9))
+         (testing:check (= (e:frames-length (field failed trace)) 1)))))
     (do
       (e:destroy (& failed))
       (e:destroy (& success))
@@ -168,7 +166,7 @@
           (m:link c (deref root) right)
           (store (deref root) (m:add c (m:node 9 0 0 head 0 3 1 0 0 0)))
           unit)))
-    (_ (let ((half u64 (n:div count 2))) (do (nest c half root) (nest c (n:sub count half) root))))))
+    (_ (let ((half u64 (/ count 2))) (do (nest c half root) (nest c (- count half) root))))))
 
 (testing:test deep-expressions
   (let
@@ -195,8 +193,8 @@
      (checks
        testing:result
        (testing:checks
-         (testing:check (n:eq (field result code) 0))
-         (testing:check (signed:eq (field (field result result) scalar) 2001)))))
+         (testing:check (= (field result code) 0))
+         (testing:check (= (field (field result result) scalar) 2001)))))
     (do (e:destroy (& result)) (e:values-destroy (& args)) (arena:destroy (& memory)) checks)))
 
 (base:function typed-entry ((text (pointer u8)) (ty u64) (scalar i64)) testing:result
@@ -223,10 +221,10 @@
      (checks
        testing:result
        (testing:checks
-         (testing:check (n:eq (field result code) 0))
-         (testing:check (n:eq (field (field result result) ty) ty))
-         (testing:check (signed:eq (field (field result result) scalar) scalar))
-         (testing:check (n:eq (field invalid code) 6)))))
+         (testing:check (= (field result code) 0))
+         (testing:check (= (field (field result result) ty) ty))
+         (testing:check (= (field (field result result) scalar) scalar))
+         (testing:check (= (field invalid code) 6)))))
     (do
       (e:destroy (& result))
       (e:destroy (& invalid))
@@ -280,12 +278,12 @@
      (checks
        testing:result
        (testing:checks
-         (testing:check (n:eq errors 0))
-         (testing:check (n:eq (field copy code) 0))
-         (testing:check (n:eq (field unbacked code) 6))
-         (testing:check (signed:eq (field (e:values-at (field copy aggregates) inner) scalar) 42))
+         (testing:check (= errors 0))
+         (testing:check (= (field copy code) 0))
+         (testing:check (= (field unbacked code) 6))
+         (testing:check (= (field (e:values-at (field copy aggregates) inner) scalar) 42))
          (testing:check
-           (signed:eq (field (e:values-at (field copy aggregates) (n:add inner 1)) scalar) 1)))))
+           (= (field (e:values-at (field copy aggregates) (+ inner 1)) scalar) 1)))))
     (do
       (e:destroy (& copy))
       (e:destroy (& unbacked))
@@ -352,11 +350,11 @@
      (checks
        testing:result
        (testing:checks
-         (testing:check (n:eq errors 0))
-         (testing:check (n:eq (field one code) 0))
-         (testing:check (n:eq (field two code) 0))
-         (testing:check (signed:eq (field (field one result) scalar) 42))
-         (testing:check (signed:eq (field (field two result) scalar) 42)))))
+         (testing:check (= errors 0))
+         (testing:check (= (field one code) 0))
+         (testing:check (= (field two code) 0))
+         (testing:check (= (field (field one result) scalar) 42))
+         (testing:check (= (field (field two result) scalar) 42)))))
     (do
       (e:destroy (& one))
       (e:destroy (& two))
@@ -399,7 +397,7 @@
     ((result
        e:outcome
        (e:run-with-aggregates c entry args borrowed (e:options 0 0) (system:create)))
-     (checks testing:result (testing:check (n:eq (field result code) code))))
+     (checks testing:result (testing:check (= (field result code) code))))
     (do (e:destroy (& result)) checks)))
 
 (testing:test structured-invalid-inputs
@@ -504,7 +502,7 @@
      (result
        testing:result
        (match invalid
-         (true (testing:check (n:gt errors 0)))
+         (true (testing:check (> errors 0)))
          (false
            (let
              ((one e:outcome (e:run c main args (e:options 0 0) (system:create)))
@@ -512,11 +510,11 @@
               (result
                 testing:result
                 (testing:checks
-                  (testing:check (n:eq errors 0))
-                  (testing:check (n:eq (field one code) 0))
-                  (testing:check (n:eq (field two code) 0))
-                  (testing:check (signed:eq (field (field one result) scalar) 42))
-                  (testing:check (signed:eq (field (field two result) scalar) 42)))))
+                  (testing:check (= errors 0))
+                  (testing:check (= (field one code) 0))
+                  (testing:check (= (field two code) 0))
+                  (testing:check (= (field (field one result) scalar) 42))
+                  (testing:check (= (field (field two result) scalar) 42)))))
              (do (e:destroy (& one)) (e:destroy (& two)) result))))))
     (do (e:values-destroy (& args)) (arena:destroy (& memory)) result)))
 
@@ -530,7 +528,7 @@
      (errors u64 0)
      (text
        (pointer u8)
-       "(%function compare ((left (pointer void)) (right (pointer void))) i64 (if (== left right) 42 0))(%function main () i64 0)")
+       "(%function compare ((left (pointer void)) (right (pointer void))) i64 (if (= left right) 42 0))(%function main () i64 0)")
      (c
        m:context
        (m:context
@@ -551,9 +549,9 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (n:eq errors 0))
-         (testing:check (n:eq (field out code) 0))
-         (testing:check (signed:eq (field (field out result) scalar) expected)))))
+         (testing:check (= errors 0))
+         (testing:check (= (field out code) 0))
+         (testing:check (= (field (field out result) scalar) expected)))))
     (do (e:destroy (& out)) (e:values-destroy (& args)) (arena:destroy (& memory)) result)))
 
 (testing:test pointer-identity
@@ -563,13 +561,13 @@
     (opaque-pointer-equality 1 1 42)
     (opaque-pointer-equality 1 2 0)
     (case
-      "(%function main () i64 (let ((x i64 1) (p (& x)) (q (pointer-offset p 0))) (if (== p q) 42 0)))"
+      "(%function main () i64 (let ((x i64 1) (p (& x)) (q (pointer-offset p 0))) (if (= p q) 42 0)))"
       (e:options 0 0)
       0
       42)
     ; Equality neither dereferences nor tests the lifetime of the pointee.
     (case
-      "(%function escaped () (pointer i64) (let ((x i64 7)) (& x)))(%function main () i64 (let ((p (escaped))) (if (== p p) 42 0)))"
+      "(%function escaped () (pointer i64) (let ((x i64 7)) (& x)))(%function main () i64 (let ((p (escaped))) (if (= p p) 42 0)))"
       (e:options 0 0)
       0
       42)))
@@ -610,7 +608,7 @@
      (args e:values-array (e:values-new (system:create)))
      (checks
        testing:result
-       (testing:checks (testing:check (n:eq errors 0)) (allocation-cases c main args 0))))
+       (testing:checks (testing:check (= errors 0)) (allocation-cases c main args 0))))
     (do (e:values-destroy (& args)) (arena:destroy (& memory)) checks)))
 
 (export

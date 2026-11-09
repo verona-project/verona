@@ -7,8 +7,6 @@
 (import error)
 (import core.span :as span)
 (import core.names :as names)
-(import foundation.compat.arithmetic)
-(import foundation.compat.arithmetic :as n)
 
 ; IDs are zero-based; spans retain file identity and byte spelling.
 ; Node kinds: identifier=0, integer=1, list=2, data=4, character=5, quote=6, quasiquote=7, unquote=8, splice=9, float=10.
@@ -317,7 +315,7 @@
   (base:convert (deref (pointer-offset (field (field c source) bytes) i))))
 
 (base:function digit ((b u64)) bool
-  (match (n:ge b 48) (true (n:le b 57)) (false false)))
+  (match (>= b 48) (true (<= b 57)) (false false)))
 
 (base:function space ((b u64)) bool
   (match b (9 true) (10 true) (13 true) (32 true) (_ false)))
@@ -328,8 +326,8 @@
 (base:function valid ((b u64)) bool
   (base:cond
     ((space b) true)
-    ((n:lt b 33) false)
-    ((n:gt b 126) false)
+    ((< b 33) false)
+    ((> b 126) false)
     (true (match b (34 false) (39 false) (44 false) (92 false) (96 false) (_ true)))))
 
 ; Balanced range traversal bounds native stack use independently of nesting/width.
@@ -345,10 +343,10 @@
               (field c children)
               (deref (pointer-offset (tuple-get (deref (field c pending)) 0) start)))))
         (_
-          (let ((half u64 (n:div count 2)))
+          (let ((half u64 (/ count 2)))
             (do
               (copy-children c start half)
-              (copy-children c (n:add start half) (n:sub count half)))))))
+              (copy-children c (+ start half) (- count half)))))))
     (_ unit)))
 
 (base:function frame-at ((c context) (index u64)) frame
@@ -375,7 +373,7 @@
     (match depth
       (0 (storage c (ids-append (field c pending) id)))
       (_
-        (let ((index u64 (n:sub depth 1)) (f frame (frame-at c index)))
+        (let ((index u64 (- depth 1)) (f frame (frame-at c index)))
           (match (field f kind)
             (2 (storage c (ids-append (field c pending) id)))
             (11 (do (pop-frame c index) (emit-present c id loc)))
@@ -392,7 +390,7 @@
                       (span:span
                         (field c file)
                         (field f opening)
-                        (n:sub (n:add (field loc start) (field loc length)) (field f opening))
+                        (- (+ (field loc start) (field loc length)) (field f opening))
                         0)
                       first
                       1)))))))))))
@@ -404,10 +402,10 @@
     (match depth
       (0 unit)
       (_
-        (let ((index u64 (n:sub depth 1)) (f frame (frame-at c index)))
+        (let ((index u64 (- depth 1)) (f frame (frame-at c index)))
           (base:cond
-            ((n:eq (field f kind) 2) unit)
-            ((n:ge (field f kind) 11) (do (rewind-form c f) (pop-frame c index) (emit-skipped c)))
+            ((== (field f kind) 2) unit)
+            ((>= (field f kind) 11) (do (rewind-form c f) (pop-frame c index) (emit-skipped c)))
             (true (fail c 13 (field f opening) 1))))))))
 
 (base:function rewind-form ((c context) (f frame)) unit
@@ -427,10 +425,10 @@
 
 (base:function prefix-depth ((c context) (depth u64) (remaining u64)) bool
   (base:cond
-    ((n:eq remaining 0) false)
-    ((n:eq depth 0) true)
-    ((n:eq (field (frame-at c (n:sub depth 1)) kind) 2) true)
-    (true (prefix-depth c (n:sub depth 1) (n:sub remaining 1)))))
+    ((== remaining 0) false)
+    ((== depth 0) true)
+    ((== (field (frame-at c (- depth 1)) kind) 2) true)
+    (true (prefix-depth c (- depth 1) (- remaining 1)))))
 
 (base:function push-frame ((c context) (kind u64) (start u64)) unit
   (storage
@@ -449,13 +447,13 @@
     (match depth
       (0 (fail c 1 (field loc start) 1))
       (_
-        (let ((index u64 (n:sub depth 1)) (f frame (frame-at c index)))
+        (let ((index u64 (- depth 1)) (f frame (frame-at c index)))
           (match (field f kind)
             (2
               (let
                 ((pending ids-array (deref (field c pending)))
                  (first u64 (ids-length (deref (field c children))))
-                 (count u64 (n:sub (ids-length pending) (field f pending))))
+                 (count u64 (- (ids-length pending) (field f pending))))
                 (do
                   (copy-children c (field f pending) count)
                   (store
@@ -475,7 +473,7 @@
                           (span:span
                             (field c file)
                             (field f opening)
-                            (n:sub (n:add (field loc start) 1) (field f opening))
+                            (- (+ (field loc start) 1) (field f opening))
                             0)
                           first
                           count)))
@@ -495,7 +493,7 @@
                 (3 (close-list c loc))
                 (_
                   (match
-                    (match (n:ge (field value kind) 6)
+                    (match (>= (field value kind) 6)
                       (true (match (field value kind) (10 false) (_ true)))
                       (false false))
                     (true
@@ -515,28 +513,28 @@
           (46 (match (deref dot) (true false) (false (do (store (deref dot) true) true))))
           (_ (digit b)))))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (match (decimal-bytes c start half dot)
           (false false)
-          (true (decimal-bytes c (n:add start half) (n:sub count half) dot)))))))
+          (true (decimal-bytes c (+ start half) (- count half) dot)))))))
 
 (base:function decimal ((c context) (start u64) (end u64)) bool
   (let
-    ((first u64 (match (byte c start) (43 (n:add start 1)) (45 (n:add start 1)) (_ start)))
+    ((first u64 (match (byte c start) (43 (+ start 1)) (45 (+ start 1)) (_ start)))
      (dot bool false))
     (base:cond
-      ((n:lt (n:sub end first) 3) false)
+      ((< (- end first) 3) false)
       ((digit (byte c first))
-       (match (digit (byte c (n:sub end 1)))
-         (true (match (decimal-bytes c first (n:sub end first) (& dot)) (true dot) (false false)))
+       (match (digit (byte c (- end 1)))
+         (true (match (decimal-bytes c first (- end first) (& dot)) (true dot) (false false)))
          (false false)))
       (true false))))
 
 (base:function feature-operator ((c context) (start u64) (end u64)) feature-directive
   (base:cond
-    ((n:lt (n:sub end start) 2) (no-feature-operator))
-    ((n:eq (byte c start) 35)
-     (match (byte c (n:add start 1))
+    ((< (- end start) 2) (no-feature-operator))
+    ((== (byte c start) 35)
+     (match (byte c (+ start 1))
        (43 (feature-condition (feature-present)))
        (45 (feature-condition (feature-absent)))
        (_ (no-feature-operator))))
@@ -569,8 +567,8 @@
 
 (base:function finish-feature ((c context) (operator feature-polarity) (start u64) (end u64)) unit
   (let
-    ((first u64 (n:add start 2))
-     (length u64 (n:sub end first))
+    ((first u64 (+ start 2))
+     (length u64 (- end first))
      (bytes (pointer u8) (pointer-offset (field (field c source) bytes) first))
      (target features (field c target)))
     (match length
@@ -586,7 +584,7 @@
                  ((feature-absent) (match available (true false) (false true))))
                (true 11)
                (false 12))))
-          (consume c (token kind (span:span (field c file) start (n:sub end start) 0))))))))
+          (consume c (token kind (span:span (field c file) start (- end start) 0))))))))
 
 (base:function finish-atom ((c context) (end u64)) unit
   (let ((v scan (deref (field c state))))
@@ -606,11 +604,11 @@
         (true
           (consume
             c
-            (token 10 (span:span (field c file) (field v start) (n:sub end (field v start)) 0))))
-        (false (fail c 4 (field v start) (n:sub end (field v start))))))
+            (token 10 (span:span (field c file) (field v start) (- end (field v start)) 0))))
+        (false (fail c 4 (field v start) (- end (field v start))))))
     (false
       (let
-        ((loc span:span (span:span (field c file) (field v start) (n:sub end (field v start)) 0)))
+        ((loc span:span (span:span (field c file) (field v start) (- end (field v start)) 0)))
         (match (field v numeric)
           (true (consume c (token 1 loc)))
           (false
@@ -635,24 +633,24 @@
   (match b (110 10) (116 9) (34 34) (92 92) (_ 0)))
 
 (base:function named-byte ((bytes (pointer u8)) (length u64) (name (pointer u8))) bool
-  (match (n:eq length (cstring:strlen name)) (false false) (true (equal-folded bytes name length))))
+  (match (== length (cstring:strlen name)) (false false) (true (equal-folded bytes name length))))
 
 (base:function equal-folded ((bytes (pointer u8)) (name (pointer u8)) (length u64)) bool
   (match length
     (0 true)
     (_
-      (let ((b u64 (base:convert (deref bytes))))
+      (let ((b u64 (base:convert (deref bytes))) (other u64 (base:convert (deref name))))
         (match
-          (n:eq
-            (match (n:le 65 b) (false b) (true (match (n:le b 90) (true (n:add b 32)) (false b))))
-            (base:convert (deref name)))
-          (true (equal-folded (pointer-offset bytes 1) (pointer-offset name 1) (n:sub length 1)))
+          (==
+            (match (<= (cast u64 65) b) (false b) (true (match (<= b (cast u64 90)) (true (+ b (cast u64 32))) (false b))))
+            other)
+          (true (equal-folded (pointer-offset bytes 1) (pointer-offset name 1) (- length 1)))
           (false false))))))
 
 ; 128 is outside the supported byte range.
 (base:function character-byte ((bytes (pointer u8)) (length u64)) u64
   (base:cond
-    ((n:eq length 1) (base:convert (deref bytes)))
+    ((== length 1) (base:convert (deref bytes)))
     ((named-byte bytes length "space") 32)
     ((named-byte bytes length "newline") 10)
     ((named-byte bytes length "tab") 9)
@@ -667,14 +665,14 @@
 (base:function finish-literal ((c context) (kind u64) (start u64) (end u64)) unit
   (do
     (literal-state c (normal))
-    (consume c (token kind (span:span (field c file) start (n:sub end start) 0)))))
+    (consume c (token kind (span:span (field c file) start (- end start) 0)))))
 
 (base:function finish-character ((c context) (start u64) (end u64)) unit
-  (let ((first u64 (n:add start 2)) (length u64 (n:sub end start)))
+  (let ((first u64 (+ start 2)) (length u64 (- end start)))
     (base:cond
-      ((n:le end first) (fail c 9 start length))
-      ((n:ge
-         (character-byte (pointer-offset (field (field c source) bytes) first) (n:sub end first))
+      ((<= end first) (fail c 9 start length))
+      ((>=
+         (character-byte (pointer-offset (field (field c source) bytes) first) (- end first))
          128)
        (fail c 9 start length))
       (true (finish-literal c 5 start end)))))
@@ -684,24 +682,24 @@
 
 (base:function step ((c context) (i u64)) unit
   (let
-    ((b u64 (byte c i)) (v literal-scan (deref (field c literal))) (end u64 (n:add i 1)))
+    ((b u64 (byte c i)) (v literal-scan (deref (field c literal))) (end u64 (+ i 1)))
     (do
       (match b
         (10 (storage c (ids-append (field c lines) end)))
         (13
           (base:cond
-            ((n:eq end (field (field c source) length))
+            ((== end (field (field c source) length))
              (storage c (ids-append (field c lines) end)))
-            ((n:eq (byte c end) 10) unit)
+            ((== (byte c end) 10) unit)
             (true (storage c (ids-append (field c lines) end)))))
         (_ unit))
       (match v
         ((data-literal start)
           (base:cond
-            ((n:eq b 34) (finish-literal c 4 start end))
-            ((n:eq b 92) (literal-state c (data-escape start)))
-            ((n:eq b 0) (fail c 8 i 1))
-            ((n:gt b 127) (fail c 8 i 1))
+            ((== b 34) (finish-literal c 4 start end))
+            ((== b 92) (literal-state c (data-escape start)))
+            ((== b 0) (fail c 8 i 1))
+            ((> b 127) (fail c 8 i 1))
             (true unit)))
         ((data-escape start)
          (match (escape-byte b) (0 (fail c 7 i 1)) (_ (literal-state c (data-literal start)))))
@@ -717,20 +715,20 @@
 
 (base:function step-atom ((c context) (i u64) (b u64)) unit
   (base:cond
-    ((n:gt (field (deref (field c state)) code) 0) unit)
+    ((> (field (deref (field c state)) code) 0) unit)
     ((field (deref (field c state)) comment)
      (base:cond
-       ((n:gt b 126) (fail c 3 i 1))
+       ((> b 126) (fail c 3 i 1))
        ((space b) (match b (10 (set-comment c false)) (13 (set-comment c false)) (_ unit)))
-       ((n:lt b 32) (fail c 3 i 1))
+       ((< b 32) (fail c 3 i 1))
        (true unit)))
-    ((n:eq b 34) (finish-atom c i) (literal-state c (data-literal i)))
-    ((n:eq b 39) (prefix c i 6 1))
-    ((n:eq b 96) (prefix c i 7 1))
-    ((n:eq b 44)
-     (match (n:lt (n:add i 1) (field (field c source) length))
+    ((== b 34) (finish-atom c i) (literal-state c (data-literal i)))
+    ((== b 39) (prefix c i 6 1))
+    ((== b 96) (prefix c i 7 1))
+    ((== b 44)
+     (match (< (+ i 1) (field (field c source) length))
        (true
-         (match (byte c (n:add i 1))
+         (match (byte c (+ i 1))
            (64 (do (prefix c i 9 2) (literal-state c (splice-marker))))
            (_ (prefix c i 8 1))))
        (false (prefix c i 8 1))))
@@ -744,9 +742,9 @@
 (base:function character-start ((c context) (i u64) (b u64)) bool
   (base:cond
     ((field (deref (field c state)) active) false)
-    ((n:eq b 35)
-     (match (n:lt (n:add i 1) (field (field c source) length))
-       (true (n:eq (byte c (n:add i 1)) 92))
+    ((== b 35)
+     (match (< (+ i 1) (field (field c source) length))
+       (true (== (byte c (+ i 1)) 92))
        (false false)))
     (true false)))
 
@@ -771,8 +769,8 @@
         c
         (base:cond
           ((digit b) true)
-          ((n:lt (n:add i 1) (field (field c source) length))
-           (match b (43 (digit (byte c (n:add i 1)))) (45 (digit (byte c (n:add i 1)))) (_ false)))
+          ((< (+ i 1) (field (field c source) length))
+           (match b (43 (digit (byte c (+ i 1)))) (45 (digit (byte c (+ i 1)))) (_ false)))
           (true false))))))
 
 (base:function scan-range ((c context) (start u64) (count u64)) unit
@@ -782,8 +780,8 @@
         (0 unit)
         (1 (step c start))
         (_
-          (let ((half u64 (n:div count 2)))
-            (do (scan-range c start half) (scan-range c (n:add start half) (n:sub count half)))))))
+          (let ((half u64 (/ count 2)))
+            (do (scan-range c start half) (scan-range c (+ start half) (- count half)))))))
     (_ unit)))
 
 (base:function empty ((backing allocator:backend)) syntax
@@ -841,17 +839,17 @@
               ((character-first-byte start) (fail c 9 start 2))
               ((splice-marker) (finish-atom c (field source length)))
               ((data-literal start)
-               (fail c 6 start (n:sub (field source length) start)))
+               (fail c 6 start (- (field source length) start)))
               ((data-escape start)
-               (fail c 6 start (n:sub (field source length) start)))
+               (fail c 6 start (- (field source length) start)))
               ((character-prefix start)
-               (fail c 6 start (n:sub (field source length) start))))
+               (fail c 6 start (- (field source length) start))))
             (match (field state code)
               (0
                 (match (frames-length stack)
                   (0 unit)
                   (_
-                    (let ((f frame (frame-at c (n:sub (frames-length stack) 1))))
+                    (let ((f frame (frame-at c (- (frames-length stack) 1))))
                       (fail c (match (field f kind) (2 2) (_ 10)) (field f opening) 1)))))
               (_ unit))))
         (_ unit))
@@ -880,11 +878,11 @@
 
 ; Locate the greatest line start <= offset by binary search.
 (base:function line-index ((lines ids-array) (offset u64) (low u64) (high u64)) u64
-  (match (n:le (n:sub high low) 1)
+  (match (<= (- high low) 1)
     (true low)
     (false
-      (let ((mid u64 (n:add low (n:div (n:sub high low) 2))))
-        (match (n:le (deref (pointer-offset (tuple-get lines 0) mid)) offset)
+      (let ((mid u64 (+ low (/ (- high low) 2))))
+        (match (<= (deref (pointer-offset (tuple-get lines 0) mid)) offset)
           (true (line-index lines offset mid high))
           (false (line-index lines offset low mid)))))))
 
@@ -894,8 +892,8 @@
     ((lines ids-array (field tree lines))
      (index u64 (line-index lines offset 0 (ids-length lines))))
     (tuple
-      (n:add index 1)
-      (n:add (n:sub offset (deref (pointer-offset (tuple-get lines 0) index))) 1))))
+      (+ index 1)
+      (+ (- offset (deref (pointer-offset (tuple-get lines 0) index))) 1))))
 
 (base:function destroy ((owner (pointer syntax))) unit
   (let

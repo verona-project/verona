@@ -2,21 +2,20 @@
 (import core.model :as m)
 (import core.check :as check)
 (import core.numeric :as num)
-(import foundation.compat.arithmetic :as n)
 
 ; Native 64-bit object layout, shared by the managed evaluator's byte storage.
 ; Pointer values are opaque eight-byte tokens. Booleans occupy one byte.
 (base:type layout (product (size u64) (alignment u64)))
 
 (base:function maximum ((a u64) (b u64)) u64
-  (match (n:gt a b) (true a) (false b)))
+  (match (> a b) (true a) (false b)))
 
 (base:function add ((c m:context) (a u64) (b u64)) u64
-  (do (m:require c 0 (n:le a (n:sub (base:maxBound) b)) "object layout overflow") (n:add a b)))
+  (do (m:require c 0 (<= a (- (cast u64 18446744073709551615) b)) "object layout overflow") (+ a b)))
 
 (base:function align ((c m:context) (size u64) (alignment u64)) u64
   (let ((rest u64 (num:remainder size alignment)))
-    (match rest (0 size) (_ (add c size (n:sub alignment rest))))))
+    (match rest (0 size) (_ (add c size (- alignment rest))))))
 
 (base:function fields ((c m:context) (id u64) (size u64) (alignment u64)) layout
   (match id
@@ -48,9 +47,9 @@
 
 (base:function of ((c m:context) (ty u64)) layout
   (base:cond
-    ((n:eq ty 2) (layout 1 1))
-    ((num:integer-type ty) (let ((size u64 (n:div (num:width ty) 8))) (layout size size)))
-    ((n:eq ty 12) (layout 4 4))
+    ((== ty 2) (layout 1 1))
+    ((num:integer-type ty) (let ((size u64 (/ (num:width ty) 8))) (layout size size)))
+    ((== ty 12) (layout 4 4))
     ((match ty (1 true) (11 true) (13 true) (_ false)) (layout 8 8))
     (true
       (match (check:type-kind c ty)
@@ -67,9 +66,9 @@
                   (m:require
                     c
                     0
-                    (n:le count (n:div (base:maxBound) (field part size)))
+                    (<= count (/ (cast u64 18446744073709551615) (field part size)))
                     "object layout overflow")))
-              (layout (n:mul count (field part size)) (field part alignment)))))
+              (layout (* count (field part size)) (field part alignment)))))
         (21
           (let
             ((payload layout (union-layout c ty))
@@ -86,6 +85,6 @@
          (start u64 (align c offset (field part alignment))))
         (match index
           (0 start)
-          (_ (component-offset c (m:next c fields) (n:sub index 1) (add c start (field part size)))))))))
+          (_ (component-offset c (m:next c fields) (- index 1) (add c start (field part size)))))))))
 
 (export align layout of component-offset union-offset fields)

@@ -8,22 +8,21 @@
 (import arena)
 (import data)
 (import system_allocator :as system)
-(import foundation.compat.arithmetic :as n)
 
 ; Convert indexed syntax to the existing checked tape without recursive walking.
 (base:function link-range ((c m:context) (ids (pointer u64)) (start u64) (count u64)) unit
   (match count
     (0 unit)
-    (1 (m:link c (n:add (deref (pointer-offset ids start)) 1) 0))
+    (1 (m:link c (+ (deref (pointer-offset ids start)) 1) 0))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (link-range c ids start half)
-          (link-range c ids (n:add start half) (n:sub count half))
+          (link-range c ids (+ start half) (- count half))
           (m:link
             c
-            (n:add (deref (pointer-offset ids (n:sub (n:add start half) 1))) 1)
-            (n:add (deref (pointer-offset ids (n:add start half))) 1)))))))
+            (+ (deref (pointer-offset ids (- (+ start half) 1))) 1)
+            (+ (deref (pointer-offset ids (+ start half))) 1)))))))
 
 (base:function transfer ((c m:context) (tree syntax:syntax) (start u64) (count u64)) unit
   (match count
@@ -34,7 +33,7 @@
          (loc span:span (field v location))
          (children (pointer u64) (tuple-get (field tree children) 0)))
         (do
-          (match (n:gt (field v count) constants:sibling-form-limit)
+          (match (> (field v count) constants:sibling-form-limit)
             (true (m:error-at c (field loc start) "form count limit (4096) exceeded"))
             (false unit))
           (m:add
@@ -45,7 +44,7 @@
               (field loc length)
               (match (field v count)
                 (0 0)
-                (_ (n:add (deref (pointer-offset children (field v first))) 1)))
+                (_ (+ (deref (pointer-offset children (field v first))) 1)))
               0
               0
               0
@@ -54,8 +53,8 @@
               0))
           unit)))
     (_
-      (let ((half u64 (n:div count 2)))
-        (do (transfer c tree start half) (transfer c tree (n:add start half) (n:sub count half)))))))
+      (let ((half u64 (/ count 2)))
+        (do (transfer c tree start half) (transfer c tree (+ start half) (- count half)))))))
 
 (base:function connect ((c m:context) (tree syntax:syntax) (start u64) (count u64)) unit
   (match count
@@ -64,16 +63,16 @@
       (let ((v syntax:node (deref (pointer-offset (tuple-get (field tree items) 0) start))))
         (link-range c (tuple-get (field tree children) 0) (field v first) (field v count))))
     (_
-      (let ((half u64 (n:div count 2)))
-        (do (connect c tree start half) (connect c tree (n:add start half) (n:sub count half)))))))
+      (let ((half u64 (/ count 2)))
+        (do (connect c tree start half) (connect c tree (+ start half) (- count half)))))))
 
 (base:function print-ids ((ids (pointer u64)) (start u64) (count u64)) unit
   (match count
     (0 unit)
     (1 (do (m:text 1 " ") (m:number 1 (deref (pointer-offset ids start)))))
     (_
-      (let ((half u64 (n:div count 2)))
-        (do (print-ids ids start half) (print-ids ids (n:add start half) (n:sub count half)))))))
+      (let ((half u64 (/ count 2)))
+        (do (print-ids ids start half) (print-ids ids (+ start half) (- count half)))))))
 
 ; Flat indexed tree output remains safe at arbitrary reader nesting depth.
 (base:function print-range ((c m:context) (tree syntax:syntax) (start u64) (count u64)) unit
@@ -104,7 +103,7 @@
           (m:text 1 " bytes=")
           (m:number 1 (field loc start))
           (m:text 1 "..")
-          (m:number 1 (n:add (field loc start) (field loc length)))
+          (m:number 1 (+ (field loc start) (field loc length)))
           (m:text 1 " name=")
           (m:number 1 (field loc name))
           (m:text 1 " at=")
@@ -127,10 +126,10 @@
                     (field loc length))))))
           (m:text 1 "\n"))))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (print-range c tree start half)
-          (print-range c tree (n:add start half) (n:sub count half)))))))
+          (print-range c tree (+ start half) (- count half)))))))
 
 ; Analysis still has a bounded recursive implementation; reading is unrestricted.
 (base:function analysis-depth
@@ -141,18 +140,18 @@
       (let ((v syntax:token (deref (pointer-offset (tuple-get (field tree lexemes) 0) start))))
         (do
           (match (field v kind)
-            (2 (do (store (deref depth) (n:add (deref depth) 1)) unit))
-            (3 (do (store (deref depth) (n:sub (deref depth) 1)) unit))
+            (2 (do (store (deref depth) (+ (deref depth) 1)) unit))
+            (3 (do (store (deref depth) (- (deref depth) 1)) unit))
             (_ unit))
-          (match (n:gt (deref depth) constants:syntax-depth-limit)
+          (match (> (deref depth) constants:syntax-depth-limit)
             (true
               (m:error-at c (field (field v location) start) "syntax nesting limit (256) exceeded"))
             (false unit)))))
     (_
-      (let ((half u64 (n:div count 2)))
+      (let ((half u64 (/ count 2)))
         (do
           (analysis-depth c tree start half depth)
-          (analysis-depth c tree (n:add start half) (n:sub count half) depth))))))
+          (analysis-depth c tree (+ start half) (- count half) depth))))))
 
 (base:function run-with-features ((c m:context) (dump bool) (features syntax:features)) u64
   (let
@@ -218,7 +217,7 @@
                (do
                  (let ((depth u64 0))
                    (analysis-depth c tree 0 (syntax:tokens-length (field tree lexemes)) (& depth)))
-                 (match (n:gt (syntax:ids-length (field tree roots)) constants:sibling-form-limit)
+                 (match (> (syntax:ids-length (field tree roots)) constants:sibling-form-limit)
                    (true (m:error-at c 0 "form count limit (4096) exceeded"))
                    (false unit))
                  (m:add c (m:node 0 0 0 0 0 0 0 0 0 0))
@@ -231,7 +230,7 @@
                    (syntax:ids-length (field tree roots)))
                  (match (syntax:ids-length (field tree roots))
                    (0 0)
-                   (_ (n:add (deref (tuple-get (field tree roots) 0)) 1))))))))
+                   (_ (+ (deref (tuple-get (field tree roots) 0)) 1))))))))
         (do
           (syntax:destroy (& tree))
           (names:names-destroy (& table))
