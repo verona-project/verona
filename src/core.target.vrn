@@ -9,6 +9,7 @@
 (import llvm.types :as t)
 (import llvm.target :as target)
 (import libc.string :as cstring)
+(import libc.constants :as constants)
 
 (base:function machine
   ((config info:configuration) (module t:module-ref) (level i32) (message (pointer (pointer u8))))
@@ -62,7 +63,7 @@
               (do
                 (match (m:is-empty (cast (pointer void) message))
                   (true unit)
-                  (false (do (m:text 2 message) (ir:message-dispose message))))
+                  (false (do (m:text constants:STDERR-FILENO message) (ir:message-dispose message))))
                 (llvm:destroy owner)
                 (m:fatal "cannot resolve compilation target")))
             (false unit))

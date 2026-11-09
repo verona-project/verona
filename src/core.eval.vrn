@@ -1,4 +1,5 @@
 (import base)
+(import libc.constants :as constants)
 (import libc.string :as cstring)
 (import core.numeric :as num)
 (import core.float :as float)
@@ -1126,11 +1127,11 @@
     (1
       (let ((f frame (frames-at frames start)))
         (do
-          (m:text 2 "  in ")
+          (m:text constants:STDERR-FILENO "  in ")
           (m:write 2 (m:spelling p (m:next p (m:child p (field f function)))))
-          (m:text 2 " at ")
+          (m:text constants:STDERR-FILENO " at ")
           (m:location p (field (m:at p (field f site)) start))
-          (m:text 2 "\n"))))
+          (m:text constants:STDERR-FILENO "\n"))))
     (_
       (let ((half u64 (/ count 2)))
         (do
@@ -1140,14 +1141,14 @@
 (base:function report ((p m:context) (result outcome)) unit
   (do
     (m:location p (field (m:at p (field result site)) start))
-    (m:text 2 (message (field result code)))
-    (m:text 2 "\n")
+    (m:text constants:STDERR-FILENO (message (field result code)))
+    (m:text constants:STDERR-FILENO "\n")
     (trace-range p (field result trace) 0 (frames-length (field result trace)))))
 
 (base:function signed-number ((value i64)) unit
   (let ((bits u64 (base:convert value)))
     (match (< value 0)
-      (true (do (m:text 1 "-") (m:number 1 (- 0 bits))))
+      (true (do (m:text constants:STDOUT-FILENO "-") (m:number 1 (- 0 bits))))
       (false (m:number 1 bits)))))
 
 (base:function write-components
@@ -1156,21 +1157,21 @@
     (true unit)
     (false
       (do
-        (match index (0 unit) (_ (m:text 1 ",")))
+        (match index (0 unit) (_ (m:text constants:STDOUT-FILENO ",")))
         (write-value p items (values-at items (+ start index)))
         (write-components p items start count (+ index 1))))))
 
 (base:function write-float ((v scalar-value)) unit
   (do
-    (m:text 1 (num:name (field v ty)))
-    (m:text 1 ":")
+    (m:text constants:STDOUT-FILENO (num:name (field v ty)))
+    (m:text constants:STDOUT-FILENO ":")
     (m:number 1 (base:convert (field v scalar)))))
 
 (base:function write-value ((p m:context) (items values-array) (v scalar-value)) unit
   (match (field v ty)
-    (1 (m:text 1 "unit"))
-    (2 (do (m:text 1 "bool:") (signed-number (field v scalar))))
-    (3 (do (m:text 1 "i64:") (signed-number (field v scalar))))
+    (1 (m:text constants:STDOUT-FILENO "unit"))
+    (2 (do (m:text constants:STDOUT-FILENO "bool:") (signed-number (field v scalar))))
+    (3 (do (m:text constants:STDOUT-FILENO "i64:") (signed-number (field v scalar))))
     (11 (write-data p items (base:convert (field v scalar))))
     (12 (write-float v))
     (13 (write-float v))
@@ -1178,14 +1179,14 @@
       (match (num:integer-type (field v ty))
         (true
           (do
-            (m:text 1 (num:name (field v ty)))
-            (m:text 1 ":")
+            (m:text constants:STDOUT-FILENO (num:name (field v ty)))
+            (m:text constants:STDOUT-FILENO ":")
             (match (num:signed-type (field v ty))
               (true (signed-number (field v scalar)))
               (false (m:number 1 (base:convert (field v scalar)))))))
         (false
           (match (check:type-kind p (field v ty))
-            (34 (m:text 1 "pointer"))
+            (34 (m:text constants:STDOUT-FILENO "pointer"))
             (_
               (let
                 ((handle u64 (base:convert (field v scalar)))
@@ -1202,14 +1203,14 @@
                          (base:convert (field (values-at items handle) scalar))))))
                  (head data:data (format:prefix p (field v ty) case)))
                 (do
-                  (m:text 1 (data:bytes head))
+                  (m:text constants:STDOUT-FILENO (data:bytes head))
                   (write-components
                     p
                     items
                     (match sum (false handle) (true (+ handle 1)))
                     (match sum (false count) (true (- count 1)))
                     0)
-                  (m:text 1 ")"))))))))))
+                  (m:text constants:STDOUT-FILENO ")"))))))))))
 
 (export
   run-with-aggregates
@@ -1838,7 +1839,7 @@
   (match (< bits pointer-tag)
     (true
       (let ((bytes (pointer u8) (m:literal-bytes p bits)))
-        (do (m:text 1 "data:") (m:number 1 (cstring:strlen bytes)) (m:text 1 ":") (m:text 1 bytes))))
+        (do (m:text constants:STDOUT-FILENO "data:") (m:number 1 (cstring:strlen bytes)) (m:text constants:STDOUT-FILENO ":") (m:text constants:STDOUT-FILENO bytes))))
     (false
       (let
         ((id u64 (- bits pointer-tag))
@@ -1848,7 +1849,7 @@
          (capacity u64 (- total offset))
          (length u64 (output-length p items bits 0 capacity)))
         (do
-          (m:text 1 "data:")
+          (m:text constants:STDOUT-FILENO "data:")
           (m:number 1 length)
-          (m:text 1 ":")
+          (m:text constants:STDOUT-FILENO ":")
           (output-bytes p items bits 0 length))))))

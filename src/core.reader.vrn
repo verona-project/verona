@@ -5,6 +5,7 @@
 (import core.names :as names)
 (import core.configuration :as config)
 (import core.model :as m)
+(import libc.constants :as lconstants)
 (import arena)
 (import data)
 (import system_allocator :as system)
@@ -69,7 +70,7 @@
 (base:function print-ids ((ids (pointer u64)) (start u64) (count u64)) unit
   (match count
     (0 unit)
-    (1 (do (m:text 1 " ") (m:number 1 (deref (pointer-offset ids start)))))
+    (1 (do (m:text lconstants:STDOUT-FILENO " ") (m:number 1 (deref (pointer-offset ids start)))))
     (_
       (let ((half u64 (/ count 2)))
         (do (print-ids ids start half) (print-ids ids (+ start half) (- count half)))))))
@@ -84,10 +85,8 @@
          (loc span:span (field v location)))
         (do
           (m:number 1 start)
-          (m:text 1 " ")
-          (m:text
-            1
-            (match (field v kind)
+          (m:text lconstants:STDOUT-FILENO " ")
+          (m:text lconstants:STDOUT-FILENO (match (field v kind)
               (0 "identifier")
               (1 "integer")
               (4 "data")
@@ -98,33 +97,33 @@
               (9 "splice")
               (10 "float")
               (_ "list")))
-          (m:text 1 " file=")
+          (m:text lconstants:STDOUT-FILENO " file=")
           (m:number 1 (field loc file))
-          (m:text 1 " bytes=")
+          (m:text lconstants:STDOUT-FILENO " bytes=")
           (m:number 1 (field loc start))
-          (m:text 1 "..")
+          (m:text lconstants:STDOUT-FILENO "..")
           (m:number 1 (+ (field loc start) (field loc length)))
-          (m:text 1 " name=")
+          (m:text lconstants:STDOUT-FILENO " name=")
           (m:number 1 (field loc name))
-          (m:text 1 " at=")
+          (m:text lconstants:STDOUT-FILENO " at=")
           (m:number 1 (tuple-get (syntax:position tree (field loc start)) 0))
-          (m:text 1 ":")
+          (m:text lconstants:STDOUT-FILENO ":")
           (m:number 1 (tuple-get (syntax:position tree (field loc start)) 1))
           (match (field v kind)
             (2
               (do
-                (m:text 1 " children=[")
+                (m:text lconstants:STDOUT-FILENO " children=[")
                 (print-ids (tuple-get (field tree children) 0) (field v first) (field v count))
-                (m:text 1 " ]")))
+                (m:text lconstants:STDOUT-FILENO " ]")))
             (_
               (do
-                (m:text 1 " spelling=")
+                (m:text lconstants:STDOUT-FILENO " spelling=")
                 (m:write
                   1
                   (data:view
                     (pointer-offset (field (field c source) bytes) (field loc start))
                     (field loc length))))))
-          (m:text 1 "\n"))))
+          (m:text lconstants:STDOUT-FILENO "\n"))))
     (_
       (let ((half u64 (/ count 2)))
         (do
@@ -205,12 +204,12 @@
            (match dump
              (true
                (do
-                 (m:text 1 "roots=[")
+                 (m:text lconstants:STDOUT-FILENO "roots=[")
                  (print-ids
                    (tuple-get (field tree roots) 0)
                    0
                    (syntax:ids-length (field tree roots)))
-                 (m:text 1 " ]\n")
+                 (m:text lconstants:STDOUT-FILENO " ]\n")
                  (print-range c tree 0 (syntax:nodes-length (field tree items)))
                  0))
              (false

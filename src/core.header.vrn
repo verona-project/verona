@@ -11,6 +11,7 @@
 (import libc.string :as cstring)
 (import libc.stdio :as stdio)
 (import libc.types :as types)
+(import libc.constants :as constants)
 
 ; All construction storage belongs to the compilation arena. No LLVM handles
 ; are needed: headers describe checked C object layouts, not private values.
@@ -384,7 +385,7 @@
       (m:storage (data:append (& path) 0))
       (let ((file (pointer types:file-stream) (stdio:fopen (data:bytes path) "wb")))
         (match (m:is-empty (cast (pointer void) file))
-          (true (do (m:text 2 "cannot create library header\n") false))
+          (true (do (m:text constants:STDERR-FILENO "cannot create library header\n") false))
           (false
             (let
               ((count
@@ -393,6 +394,6 @@
                (closed i32 (stdio:fclose file)))
               (match (base:and (== count (data:length out)) (match closed (0 true) (_ false)))
                 (true true)
-                (false (do (m:text 2 "cannot write library header\n") false))))))))))
+                (false (do (m:text constants:STDERR-FILENO "cannot write library header\n") false))))))))))
 
 (export write)

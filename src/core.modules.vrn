@@ -14,6 +14,7 @@
 (import libc.stdio :as stdio)
 (import libc.types :as types)
 (import libc.string :as cstring)
+(import libc.constants :as lconstants)
 
 ; Private host boundary: realpath writes at most PATH_MAX bytes (<=4096 on our targets).
 (base:external-function realpath "realpath" ((pointer u8) (pointer u8)) (pointer u8))
@@ -211,7 +212,7 @@
       (true
         (do
           (match site
-            (0 (do (m:text 2 name) (m:fatal ": module not found (cannot resolve module path)")))
+            (0 (do (m:text lconstants:STDERR-FILENO name) (m:fatal ": module not found (cannot resolve module path)")))
             (_ (m:error (context l) site "module not found (cannot resolve module path)")))
           ""))
       (false
@@ -419,12 +420,12 @@
               ((loading)
                 (do
                   (m:location (context l) (field (m:at (context l) site) start))
-                  (m:text 2 "import cycle: ")
+                  (m:text lconstants:STDERR-FILENO "import cycle: ")
                   (cycle-names
                     l
                     id
                     (m:modules-length (deref (field (deref (field l session)) files))))
-                  (m:text 2 name)
+                  (m:text lconstants:STDERR-FILENO name)
                   (m:fatal "")))
               (_ unit))
             id))))))
@@ -448,7 +449,7 @@
   (do
     (match (valid-module-name (data:view name (cstring:strlen name)))
       (true unit)
-      (false (do (m:text 2 name) (m:fatal ": module name contains an empty component"))))
+      (false (do (m:text lconstants:STDERR-FILENO name) (m:fatal ": module name contains an empty component"))))
     (m:add (context l) (m:node 0 0 0 0 0 0 0 0 0 0))
     (load l name 0 0)
     (let ((first u64 0) (tail u64 0)) (do (order l 0 (& tail) (& first)) first))))
@@ -502,7 +503,7 @@
     (false
       (do
         (match (field (file l i) state)
-          ((loading) (do (m:text 2 (field (file l i) name)) (m:text 2 " -> ")))
+          ((loading) (do (m:text lconstants:STDERR-FILENO (field (file l i) name)) (m:text lconstants:STDERR-FILENO " -> ")))
           (_ unit))
         (cycle-names l (+ i 1) end)))))
 

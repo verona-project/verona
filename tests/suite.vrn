@@ -10,12 +10,13 @@
 (import libc.descriptor :as fd)
 (import core.model :as m)
 (import libc.string :as cstring)
+(import libc.constants :as constants)
 
 (base:function run-case ((name (pointer u8)) (test testing:test-function)) testing:result
   (let ((result testing:result (testing:execute test)))
     (do
-      (m:text 1 name)
-      (m:text 1 (match (field result failed) (0 ": passed\n") (_ ": FAILED\n")))
+      (m:text constants:STDOUT-FILENO name)
+      (m:text constants:STDOUT-FILENO (match (field result failed) (0 ": passed\n") (_ ": FAILED\n")))
       result)))
 
 (base:function main () exit-code

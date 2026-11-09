@@ -9,6 +9,7 @@
 (import core.expand :as expand)
 (import data)
 (import libc.string :as cstring)
+(import libc.constants :as lconstants)
 
 (base:function require ((c m:context) (id u64) (condition bool) (message (pointer u8))) unit
   (match condition (true unit) (false (m:report c id message))))
@@ -1270,11 +1271,11 @@
     ((== actual expected) unit)
     (true
       (m:location c (field (m:at c id) start))
-      (m:text 2 "type mismatch: expected ")
+      (m:text lconstants:STDERR-FILENO "type mismatch: expected ")
       (write-type c expected)
-      (m:text 2 ", actual ")
+      (m:text lconstants:STDERR-FILENO ", actual ")
       (write-type c actual)
-      (m:text 2 "\n")
+      (m:text lconstants:STDERR-FILENO "\n")
       (store (deref (field c errors)) (+ (deref (field c errors)) 1))
       unit)))
 
@@ -1288,7 +1289,7 @@
         (false
           (do
             (m:location c (field (m:at c origin) start))
-            (m:text 2 "note: expected type established here\n")
+            (m:text lconstants:STDERR-FILENO "note: expected type established here\n")
             unit))))))
 
 ; Check call arguments left to right against parameter types, including exact arity.
@@ -1955,9 +1956,9 @@
 (base:function unknown-function ((c m:context) (name u64)) unit
   (do
     (m:location c (field (m:at c name) start))
-    (m:text 2 "unknown function: ")
+    (m:text lconstants:STDERR-FILENO "unknown function: ")
     (m:write 2 (m:spelling c name))
-    (m:text 2 "\n")
+    (m:text lconstants:STDERR-FILENO "\n")
     (store (deref (field c errors)) (+ (deref (field c errors)) 1))
     unit))
 
@@ -3682,53 +3683,53 @@
     (0 unit)
     (_
       (do
-        (m:text 2 " ")
+        (m:text lconstants:STDERR-FILENO " ")
         (write-type c (field (m:at c id) ty))
         (write-type-components c (m:next c id))))))
 
 (base:function write-type ((c m:context) (ty u64)) unit
   (match ty
-    (0 (m:text 2 "<invalid>"))
-    (1 (m:text 2 "unit"))
-    (2 (m:text 2 "bool"))
-    (3 (m:text 2 "i64"))
-    (11 (m:text 2 "(pointer u8)"))
-    (14 (m:text 2 "void"))
+    (0 (m:text lconstants:STDERR-FILENO "<invalid>"))
+    (1 (m:text lconstants:STDERR-FILENO "unit"))
+    (2 (m:text lconstants:STDERR-FILENO "bool"))
+    (3 (m:text lconstants:STDERR-FILENO "i64"))
+    (11 (m:text lconstants:STDERR-FILENO "(pointer u8)"))
+    (14 (m:text lconstants:STDERR-FILENO "void"))
     (_
       (match (match (num:integer-type ty) (true true) (false (num:float-type ty)))
-        (true (m:text 2 (num:name ty)))
+        (true (m:text lconstants:STDERR-FILENO (num:name ty)))
         (false
           (match (type-kind c ty)
             (34
               (do
-                (m:text 2 "(pointer ")
+                (m:text lconstants:STDERR-FILENO "(pointer ")
                 (write-type c (field (m:at c (- ty num:descriptor-base)) target))
-                (m:text 2 ")")))
+                (m:text lconstants:STDERR-FILENO ")")))
             (49
               (do
-                (m:text 2 "(array ")
+                (m:text lconstants:STDERR-FILENO "(array ")
                 (write-type c (array-element c ty))
-                (m:text 2 " ")
+                (m:text lconstants:STDERR-FILENO " ")
                 (m:number 2 (array-length c ty))
-                (m:text 2 ")")))
+                (m:text lconstants:STDERR-FILENO ")")))
             (46
               (let ((v m:node (m:at c (- ty num:descriptor-base))))
                 (do
-                  (m:text 2 "(function (")
+                  (m:text lconstants:STDERR-FILENO "(function (")
                   (write-type-components c (field v child))
-                  (m:text 2 ") ")
+                  (m:text lconstants:STDERR-FILENO ") ")
                   (write-type c (field v target))
-                  (m:text 2 ")"))))
+                  (m:text lconstants:STDERR-FILENO ")"))))
             (22
               (do
-                (m:text 2 "(tuple")
+                (m:text lconstants:STDERR-FILENO "(tuple")
                 (write-type-components c (type-components c ty))
-                (m:text 2 ")")))
+                (m:text lconstants:STDERR-FILENO ")")))
             (_
               (let ((id u64 (- ty num:descriptor-base)))
                 (do
                   (m:number 2 (m:owner c id))
-                  (m:text 2 ":")
+                  (m:text lconstants:STDERR-FILENO ":")
                   (m:write 2 (m:spelling c (m:next c (m:child c id)))))))))))))
 
 (export

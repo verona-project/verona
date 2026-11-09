@@ -8,6 +8,7 @@
 (import libc.descriptor :as fd)
 (import libc.process :as process)
 (import libc.string :as cstring)
+(import libc.constants :as c)
 
 ; Stable indices into an arena-owned syntax/typed tape. Index zero is absent.
 ; Reader kinds: atom=0, list=1, data=25, character=26. Checked kinds: integer=2, bool=3, unit=4,
@@ -191,7 +192,7 @@
 
 ; Print a diagnostic to stderr and terminate with compiler-error status 2.
 (base:function fatal ((message (pointer u8))) unit
-  (do (text 2 message) (text 2 "\n") (process:exit 2) unit))
+  (do (text c:STDERR-FILENO message) (text c:STDERR-FILENO "\n") (process:exit 2) unit))
 
 ; Accept a successful Foundation operation; terminate on any storage error.
 (base:function storage ((result error:status)) unit
@@ -355,12 +356,12 @@
   (let ((pos position (position 1 1 false)))
     (do
       (locate c (source-start c offset) (- offset (source-start c offset)) (& pos))
-      (text 2 (source-path c offset))
-      (text 2 ":")
+      (text c:STDERR-FILENO (source-path c offset))
+      (text c:STDERR-FILENO ":")
       (number 2 (field pos line))
-      (text 2 ":")
+      (text c:STDERR-FILENO ":")
       (number 2 (field pos column))
-      (text 2 ": ")
+      (text c:STDERR-FILENO ": ")
       unit)))
 
 ; Report a fatal diagnostic at a source byte offset, then exit with status 2.
@@ -375,8 +376,8 @@
 (base:function report ((c context) (id u64) (message (pointer u8))) unit
   (do
     (location c (field (at c id) start))
-    (text 2 message)
-    (text 2 "\n")
+    (text c:STDERR-FILENO message)
+    (text c:STDERR-FILENO "\n")
     (store (deref (field c errors)) (+ (deref (field c errors)) 1))
     unit))
 
