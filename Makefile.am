@@ -83,3 +83,9 @@ uninstall-local:
 clean-local:
 	$(RM) $(VERONA) $(VERONA_FORMATTER) $(VERONA_PROJECT)
 	$(RM) $(abs_top_builddir)/build/compiler-tests/compiler-tests
+
+format:
+	for x in `ls src/.`; do \
+		$(VERONA_FORMATTER) --width 80 -- src/$$x > src/$$x.tmp; \
+		mv -v src/$$x.tmp src/$$x; \
+	done
