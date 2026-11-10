@@ -9,7 +9,12 @@
 (import formatter.model :as m)
 
 (base:type settings
-  (product (width u64) (check bool) (path (pointer u8)) (provided bool) (help bool)))
+  (product
+    (width u64)
+    (check bool)
+    (path (pointer u8))
+    (provided bool)
+    (help bool)))
 
 (base:type arguments (sum (ready settings) (invalid (pointer u8))))
 
@@ -20,7 +25,11 @@
   (invalid message))
 
 (base:function parse
-  ((argc u64) (argv (pointer (pointer u8))) (i u64) (value settings) (stopped bool)) arguments
+  ((argc u64)
+   (argv (pointer (pointer u8)))
+   (i u64)
+   (value settings)
+   (stopped bool)) arguments
   (match (>= i argc)
     (true (ready-result value))
     (false
@@ -34,7 +43,8 @@
             (match
               (match stopped
                 (true false)
-                (false (match (cstring:strcmp argument "--check") (0 true) (_ false))))
+                (false
+                  (match (cstring:strcmp argument "--check") (0 true) (_ false))))
               (true
                 (parse
                   argc
@@ -51,7 +61,10 @@
                 (match
                   (match stopped
                     (true false)
-                    (false (match (cstring:strcmp argument "--help") (0 true) (_ false))))
+                    (false
+                      (match (cstring:strcmp argument "--help")
+                        (0 true)
+                        (_ false))))
                   (true
                     (parse
                       argc
@@ -68,19 +81,33 @@
                     (match
                       (match stopped
                         (true false)
-                        (false (match (cstring:strcmp argument "--width") (0 true) (_ false))))
+                        (false
+                          (match (cstring:strcmp argument "--width")
+                            (0 true)
+                            (_ false))))
                       (true
                         (match (>= (+ i 1) argc)
-                          (true (bad-argument "--width requires an integer from 20 to 240"))
+                          (true
+                            (bad-argument
+                              "--width requires an integer from 20 to 240"))
                           (false
-                            (let ((text (pointer u8) (deref (pointer-offset argv (+ i 1)))))
-                              (match (number:parse-u64 (data:view text (cstring:strlen text)))
+                            (let
+                              ((text
+                                 (pointer u8)
+                                 (deref (pointer-offset argv (+ i 1)))))
+                              (match
+                                (number:parse-u64
+                                  (data:view text (cstring:strlen text)))
                                 ((value width)
                                  (match (< width 20)
-                                   (true (bad-argument "width must be between 20 and 240"))
+                                   (true
+                                     (bad-argument
+                                       "width must be between 20 and 240"))
                                    (false
                                      (match (> width 240)
-                                       (true (bad-argument "width must be between 20 and 240"))
+                                       (true
+                                         (bad-argument
+                                           "width must be between 20 and 240"))
                                        (false
                                          (parse
                                            argc
@@ -93,7 +120,9 @@
                                              (field value provided)
                                              (field value help))
                                            false))))))
-                                (_ (bad-argument "--width requires an integer from 20 to 240")))))))
+                                (_
+                                  (bad-argument
+                                    "--width requires an integer from 20 to 240")))))))
                       (false
                         (match
                           (match stopped
@@ -105,7 +134,8 @@
                           (true (bad-argument "unknown option"))
                           (false
                             (match (field value provided)
-                              (true (bad-argument "provide at most one input file"))
+                              (true
+                                (bad-argument "provide at most one input file"))
                               (false
                                 (parse
                                   argc
@@ -120,10 +150,18 @@
                                   stopped)))))))))))))))))
 
 (base:function usage ((fd i32)) m:status
-  (io:text fd "usage: verona-formatter [--check] [--width 20..240] [--] [FILE|-]\n"))
+  (io:text
+    fd
+    "usage: verona-formatter [--check] [--width 20..240] [--] [FILE|-]\n"))
 
 (base:type location-state
-  (product (source data:view) (end u64) (index u64) (line u64) (column u64) (cr bool)))
+  (product
+    (source data:view)
+    (end u64)
+    (index u64)
+    (line u64)
+    (column u64)
+    (cr bool)))
 
 (base:function location-done ((context (pointer location-state))) bool
   (>= (field (deref context) index) (field (deref context) end)))
@@ -139,18 +177,27 @@
        (match byte
          (13 (+ (field state line) 1))
          (10
-           (match (field state cr) (true (field state line)) (false (+ (field state line) 1))))
+           (match (field state cr)
+             (true (field state line))
+             (false (+ (field state line) 1))))
          (_ (field state line))))
      (column u64 (match byte (13 1) (10 1) (_ (+ (field state column) 1)))))
     (do
       (store
         (deref context)
-        (location-state source (field state end) (+ i 1) line column (== byte 13)))
+        (location-state
+          source
+          (field state end)
+          (+ i 1)
+          line
+          column
+          (== byte 13)))
       (m:success))))
 
 (m:iteration locate location-state location-done location-step)
 
-(base:function report ((path (pointer u8)) (source data:view) (status m:status)) unit
+(base:function report ((path (pointer u8)) (source data:view) (status m:status))
+  unit
   (let
     ((end
        u64
@@ -178,7 +225,11 @@
        m:status
        (m:steps
          (io:load (field options path) (& source))
-         (formatter:format (data:borrow source) (field options width) (& output) (system:create))))
+         (formatter:format
+           (data:borrow source)
+           (field options width)
+           (& output)
+           (system:create))))
      (exit
        exit-code
        (match result
@@ -187,22 +238,39 @@
             (true
               (match (data:equal (data:borrow source) (data:borrow output))
                 (true 0)
-                (false (do (io:text 2 (field options path)) (io:text 2 ": formatting differs\n") 1))))
+                (false
+                  (do
+                    (io:text 2 (field options path))
+                    (io:text 2 ": formatting differs\n")
+                    1))))
             (false
               (match (io:write 1 (data:borrow output))
                 ((ok) 0)
-                (failure (do (report (field options path) (data:borrow source) failure) 2))))))
-         (failure (do (report (field options path) (data:borrow source) failure) 2)))))
+                (failure
+                  (do
+                    (report (field options path) (data:borrow source) failure)
+                    2))))))
+         (failure
+           (do (report (field options path) (data:borrow source) failure) 2)))))
     (do (data:destroy (& output)) (data:destroy (& source)) exit)))
 
 (base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (let ((count u64 (base:convert argc)))
     (match (> count 128)
-      (true (do (io:text 2 "verona-formatter: too many arguments (maximum 127)\n") (usage 2) 2))
+      (true
+        (do
+          (io:text 2 "verona-formatter: too many arguments (maximum 127)\n")
+          (usage 2)
+          2))
       (false
         (match (parse count argv 1 (settings 100 false "-" false false) false)
           ((invalid message)
-           (do (io:text 2 "verona-formatter: ") (io:text 2 message) (io:text 2 "\n") (usage 2) 2))
+           (do
+             (io:text 2 "verona-formatter: ")
+             (io:text 2 message)
+             (io:text 2 "\n")
+             (usage 2)
+             2))
           ((ready options)
            (match (field options help)
              (true (match (usage 1) ((ok) 0) (_ 2)))

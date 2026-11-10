@@ -41,9 +41,15 @@
      (items m:tape (field state items))
      (i u64 (field state index)))
     (match (>= i (m:nodes-length items))
-      (true (m:syntax (field (m:at items (field state open)) start) "unterminated list"))
+      (true
+        (m:syntax
+          (field (m:at items (field state open)) start)
+          "unterminated list"))
       (false
-        (match (match (field state top) (true false) (false (== (field (m:at items i) kind) 2)))
+        (match
+          (match (field state top)
+            (true false)
+            (false (== (field (m:at items i) kind) 2)))
           (true
             (do
               (finish items i (+ i 1) 1)
@@ -85,10 +91,13 @@
 
 (m:iteration parse-forms parse-state parse-done parse-step)
 
-(base:function children ((items m:tape) (open u64) (i u64) (depth u64)) (tuple m:status u64)
+(base:function children ((items m:tape) (open u64) (i u64) (depth u64))
+  (tuple m:status u64)
   (let
     ((state parse-state (parse-state items open i depth 2 true false false))
-     (status m:status (parse-forms (& state) (+ (- (m:nodes-length items) i) 1))))
+     (status
+       m:status
+       (parse-forms (& state) (+ (- (m:nodes-length items) i) 1))))
     (tuple status (field state index))))
 
 (base:function skip-comments ((items m:tape) (i u64) (end u64)) u64
@@ -104,14 +113,19 @@
           (let
             ((middle u64 (+ i (/ (- end i) 2)))
              (found u64 (skip-comments items i middle)))
-            (match (< found middle) (true found) (false (skip-comments items middle end)))))))))
+            (match (< found middle)
+              (true found)
+              (false (skip-comments items middle end)))))))))
 
-(base:function prefix-child ((items m:tape) (prefix u64) (i u64) (depth u64)) (tuple m:status u64)
+(base:function prefix-child ((items m:tape) (prefix u64) (i u64) (depth u64))
+  (tuple m:status u64)
   (let ((target u64 (skip-comments items i (m:nodes-length items))))
     (match (>= target (m:nodes-length items))
       (true
         (tuple
-          (m:syntax (field (m:at items prefix) start) "reader prefix requires a following form")
+          (m:syntax
+            (field (m:at items prefix) start)
+            "reader prefix requires a following form")
           target))
       (false
         (match (form items target depth)
@@ -126,7 +140,9 @@
                    (match (== target i)
                      (false 241)
                      (true
-                       (m:plus (field node length) (m:plus gap (field (m:at items target) flat)))))))
+                       (m:plus
+                         (field node length)
+                         (m:plus gap (field (m:at items target) flat)))))))
                 (do (finish items prefix next flat) (tuple (m:success) next))))
              (failure (tuple failure next)))))))))
 
@@ -136,17 +152,29 @@
       (2 (tuple (m:syntax (field node start) "unexpected ')'") i))
       (1
         (match (>= depth 256)
-          (true (tuple (m:limit (field node start) "nesting limit (256) exceeded") i))
+          (true
+            (tuple
+              (m:limit (field node start) "nesting limit (256) exceeded")
+              i))
           (false (children items i (+ i 1) (+ depth 1)))))
       (4
         (match (>= depth 256)
-          (true (tuple (m:limit (field node start) "nesting limit (256) exceeded") i))
+          (true
+            (tuple
+              (m:limit (field node start) "nesting limit (256) exceeded")
+              i))
           (false (prefix-child items i (+ i 1) (+ depth 1)))))
       (5
         (match (>= depth 256)
-          (true (tuple (m:limit (field node start) "nesting limit (256) exceeded") i))
+          (true
+            (tuple
+              (m:limit (field node start) "nesting limit (256) exceeded")
+              i))
           (false (prefix-child items i (+ i 1) (+ depth 1)))))
-      (_ (do (finish items i (+ i 1) (field node flat)) (tuple (m:success) (+ i 1)))))))
+      (_
+        (do
+          (finish items i (+ i 1) (field node flat))
+          (tuple (m:success) (+ i 1)))))))
 
 (base:function parse ((items m:tape)) m:status
   (let ((state parse-state (parse-state items 0 0 0 0 true false true)))

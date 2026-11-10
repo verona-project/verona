@@ -8,8 +8,10 @@
 ; Double the read window after each full read. Recursion is logarithmic in
 ; file size, and the buffer retains the exact bytes including embedded NULs.
 (base:function read-more
-  ((file (pointer types:file-stream)) (out (pointer data:data)) (start u64) (window u64))
-  error:status
+  ((file (pointer types:file-stream))
+   (out (pointer data:data))
+   (start u64)
+   (window u64)) error:status
   (match (<= window (- (cast u64 18446744073709551615) start))
     (false (error:too-large))
     (true
@@ -19,7 +21,9 @@
            ((size
               u64
               (io:fread
-                (cast (pointer void) (pointer-offset (data:bytes (deref out)) start))
+                (cast
+                  (pointer void)
+                  (pointer-offset (data:bytes (deref out)) start))
                 1
                 window
                 file))
@@ -33,9 +37,14 @@
         (reason reason)))))
 
 ; Take ownership of an open stream. The caller retains the buffer on failure.
-(base:function read-open ((file (pointer types:file-stream)) (out (pointer data:data))) error:status
-  (let ((result error:status (read-more file out 0 4096)) (closed i32 (io:fclose file)))
-    (match result ((ok) (match closed (0 result) (_ (error:invalid)))) (_ result))))
+(base:function read-open
+  ((file (pointer types:file-stream)) (out (pointer data:data))) error:status
+  (let
+    ((result error:status (read-more file out 0 4096))
+     (closed i32 (io:fclose file)))
+    (match result
+      ((ok) (match closed (0 result) (_ (error:invalid))))
+      (_ result))))
 
 (base:function read ((path (pointer u8)) (out (pointer data:data))) error:status
   (let ((file (pointer types:file-stream) (io:fopen path "rb")))

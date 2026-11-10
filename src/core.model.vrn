@@ -88,7 +88,8 @@
 
 ; Resolved import edge. Owner/target are module indices; alias/site are tape IDs
 ; for the qualifier spelling and original import declaration respectively.
-(base:type import-info (product (owner u64) (target u64) (alias u64) (site u64)))
+(base:type import-info
+  (product (owner u64) (target u64) (alias u64) (site u64)))
 
 (array:define imports import-info)
 
@@ -129,33 +130,49 @@
   (match (base:is-null (field c session))
     (true 0)
     (false
-      (let ((s module-session (deref (cast (pointer module-session) (field c session)))))
+      (let
+        ((s
+           module-session
+           (deref (cast (pointer module-session) (field c session)))))
         (match (>= index (modules-length (deref (field s files))))
           (true 0)
           (false
             (let
-              ((v module-info (deref (pointer-offset (tuple-get (deref (field s files)) 0) index))))
+              ((v
+                 module-info
+                 (deref
+                   (pointer-offset (tuple-get (deref (field s files)) 0) index))))
               (match (< offset (+ (field v start) (field v length)))
                 (true index)
                 (false (module-at c offset (+ index 1)))))))))))
 
 (base:function owner ((c context) (id u64)) u64
   (let ((v node (at c id)))
-    (match (field v lookup-module) (0 (module-at c (field v start) 0)) (module (- module 1)))))
+    (match (field v lookup-module)
+      (0 (module-at c (field v start) 0))
+      (module (- module 1)))))
 
 (base:function file-info ((c context) (index u64)) module-info
-  (let ((s module-session (deref (cast (pointer module-session) (field c session)))))
+  (let
+    ((s
+       module-session
+       (deref (cast (pointer module-session) (field c session)))))
     (deref (pointer-offset (tuple-get (deref (field s files)) 0) index))))
 
 (base:function has-files ((c context)) bool
   (match (base:is-null (field c session))
     (true false)
     (false
-      (let ((s module-session (deref (cast (pointer module-session) (field c session)))))
+      (let
+        ((s
+           module-session
+           (deref (cast (pointer module-session) (field c session)))))
         (> (modules-length (deref (field s files))) 0)))))
 
 (base:function source-start ((c context) (offset u64)) u64
-  (match (has-files c) (false 0) (true (field (file-info c (module-at c offset 0)) start))))
+  (match (has-files c)
+    (false 0)
+    (true (field (file-info c (module-at c offset 0)) start))))
 
 (base:function source-path ((c context) (offset u64)) (pointer u8)
   (match (has-files c)
@@ -172,7 +189,12 @@
     (true unit)
     (false
       (let
-        ((count i64 (fd:write out (cast (pointer void) (field value bytes)) (field value length))))
+        ((count
+           i64
+           (fd:write
+             out
+             (cast (pointer void) (field value bytes))
+             (field value length))))
         (match (> count 0)
           (false (do (process:exit 2) unit))
           (true
@@ -185,14 +207,19 @@
 
 ; Write an unsigned decimal integer without a sign, padding, or newline.
 (base:function number ((out i32) (value u64)) unit
-  (let ((digit u8 (base:convert (+ (cast u64 48) (- value (* (/ value 10) 10))))))
+  (let
+    ((digit u8 (base:convert (+ (cast u64 48) (- value (* (/ value 10) 10))))))
     (do
       (match (>= value 10) (true (number out (/ value 10))) (false unit))
       (write out (data:view (& digit) 1)))))
 
 ; Print a diagnostic to stderr and terminate with compiler-error status 2.
 (base:function fatal ((message (pointer u8))) unit
-  (do (text c:STDERR-FILENO message) (text c:STDERR-FILENO "\n") (process:exit 2) unit))
+  (do
+    (text c:STDERR-FILENO message)
+    (text c:STDERR-FILENO "\n")
+    (process:exit 2)
+    unit))
 
 ; Accept a successful Foundation operation; terminate on any storage error.
 (base:function storage ((result error:status)) unit
@@ -210,7 +237,11 @@
 
 ; Replace a complete node at an existing tape index without changing the tape size.
 (base:function set ((c context) (id u64) (value node)) unit
-  (do (store (deref (pointer-offset (tuple-get (deref (field c items)) 0) id)) value) unit))
+  (do
+    (store
+      (deref (pointer-offset (tuple-get (deref (field c items)) 0) id))
+      value)
+    unit))
 
 ; Append a node and return its stable index.
 (base:function add ((c context) (value node)) u64
@@ -241,7 +272,10 @@
               (3 (field v value))
               (1
                 (match (field v ty)
-                  (0 (match (field v value) (0 (base:convert id)) (_ (field v value))))
+                  (0
+                    (match (field v value)
+                      (0 (base:convert id))
+                      (_ (field v value))))
                   (_ 0)))
               (_ 0))
             (field v generated)
@@ -274,7 +308,8 @@
         (field v lookup-module)))))
 
 ; Attach a checked kind, type, resolved target, and literal value; return the type ID.
-(base:function typed ((c context) (id u64) (kind u64) (ty u64) (target u64) (value i64)) u64
+(base:function typed
+  ((c context) (id u64) (kind u64) (ty u64) (target u64) (value i64)) u64
   (let ((v node (at c id)))
     (do
       (set
@@ -296,7 +331,8 @@
 ; Read a source byte as u64; return the zero sentinel at or beyond the source end.
 (base:function byte ((c context) (i u64)) u64
   (match (< i (field (field c source) length))
-    (true (base:convert (deref (pointer-offset (field (field c source) bytes) i))))
+    (true
+      (base:convert (deref (pointer-offset (field (field c source) bytes) i))))
     (false 0)))
 
 (base:function bytes-at ((bits u64)) (pointer u8)
@@ -330,7 +366,8 @@
 
 ; Advance a mutable source position over a byte range with bounded recursion depth.
 ; Treat CRLF as one newline and keep line/column positions one-based.
-(base:function locate ((c context) (start u64) (count u64) (pos (pointer position))) unit
+(base:function locate
+  ((c context) (start u64) (count u64) (pos (pointer position))) unit
   (match count
     (0 unit)
     (1
@@ -342,20 +379,28 @@
               (13 (position (+ (field v line) 1) 1 true))
               (10
                 (position
-                  (match (field v cr) (true (field v line)) (false (+ (field v line) 1)))
+                  (match (field v cr)
+                    (true (field v line))
+                    (false (+ (field v line) 1)))
                   1
                   false))
               (_ (position (field v line) (+ (field v column) 1) false))))
           unit)))
     (_
       (let ((half u64 (/ count 2)))
-        (do (locate c start half pos) (locate c (+ start half) (- count half) pos))))))
+        (do
+          (locate c start half pos)
+          (locate c (+ start half) (- count half) pos))))))
 
 ; Print FILE:LINE:COLUMN followed by a colon and space to stderr for a byte offset.
 (base:function location ((c context) (offset u64)) unit
   (let ((pos position (position 1 1 false)))
     (do
-      (locate c (source-start c offset) (- offset (source-start c offset)) (& pos))
+      (locate
+        c
+        (source-start c offset)
+        (- offset (source-start c offset))
+        (& pos))
       (text c:STDERR-FILENO (source-path c offset))
       (text c:STDERR-FILENO ":")
       (number 2 (field pos line))
@@ -382,7 +427,8 @@
     unit))
 
 ; Enforce an analysis invariant or report the supplied diagnostic at the node.
-(base:function require ((c context) (id u64) (condition bool) (message (pointer u8))) unit
+(base:function require
+  ((c context) (id u64) (condition bool) (message (pointer u8))) unit
   (match condition (true unit) (false (error c id message))))
 
 ; A linked environment on the host stack; no pointer escapes its recursive scope.
@@ -390,7 +436,8 @@
 ; Name resolution uses only NAME/BINDER; it leaves VALUE zero.
 ; Borrowed lexical environment link. Parent is another binding pointer erased
 ; to void, or null at the end. Stack-allocated links cannot escape their scope.
-(base:type binding (product (name u64) (binder u64) (value i64) (parent (pointer void))))
+(base:type binding
+  (product (name u64) (binder u64) (value i64) (parent (pointer void))))
 
 ; Inspect pointer bits on the supported 64-bit ABI; this does not dereference the pointee.
 (base:function address ((p (pointer void))) u64
@@ -402,7 +449,8 @@
 
 ; Construct the null pointer that marks the end of a borrowed environment chain.
 (base:function empty-env () (pointer void)
-  (let ((zero u64 0)) (deref (cast (pointer (pointer void)) (cast (pointer void) (& zero))))))
+  (let ((zero u64 0))
+    (deref (cast (pointer (pointer void)) (cast (pointer void) (& zero))))))
 
 ; Search lexical bindings from inner to outer scope; return a binder ID or zero if absent.
 (base:function lookup ((c context) (name u64) (env (pointer void))) u64
@@ -417,7 +465,10 @@
 ; Find a resolved binder's signed runtime value; a missing binder is a fatal internal error.
 (base:function value ((binder u64) (env (pointer void))) i64
   (match (base:is-null env)
-    (true (do (fatal "internal error: missing resolved binding") (let ((zero i64 0)) zero)))
+    (true
+      (do
+        (fatal "internal error: missing resolved binding")
+        (let ((zero i64 0)) zero)))
     (false
       (let ((b binding (deref (cast (pointer binding) env))))
         (match (== binder (field b binder))

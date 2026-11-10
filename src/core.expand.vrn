@@ -14,7 +14,8 @@
 (base:constant expansion-limit u64 256)
 
 ; Shared evaluation budget across helper macros, unquotes, and local bodies.
-(base:type evaluation (product (steps (pointer u64)) (depth u64) (unquote bool)))
+(base:type evaluation
+  (product (steps (pointer u64)) (depth u64) (unquote bool)))
 
 (base:function tick ((c m:context) (site u64) (config evaluation)) evaluation
   (do
@@ -29,7 +30,10 @@
       (< (field config depth) 256)
       "compile-time evaluation depth limit exceeded")
     (store (deref (field config steps)) (- (deref (field config steps)) 1))
-    (evaluation (field config steps) (+ (field config depth) 1) (field config unquote))))
+    (evaluation
+      (field config steps)
+      (+ (field config depth) 1)
+      (field config unquote))))
 
 (base:function lookup ((c m:context) (head u64)) u64
   (match (check:atom c head)
@@ -58,12 +62,17 @@
                          (- colon (field v start)))
                        0))))
                (member u64 (+ colon 1))
-               (name data:view (data:view (pointer-offset bytes member) (- end member))))
+               (name
+                 data:view
+                 (data:view (pointer-offset bytes member) (- end member))))
               (match target
                 (0 0)
                 (_
-                  (let ((id u64 (- target 1)) (exports u64 (field (m:file-info c id) exports)))
-                    (match (check:exported c (m:next c (m:child c exports)) name)
+                  (let
+                    ((id u64 (- target 1))
+                     (exports u64 (field (m:file-info c id) exports)))
+                    (match
+                      (check:exported c (m:next c (m:child c exports)) name)
                       (true (check:macro-in c id name))
                       (false 0))))))))))))
 
@@ -76,7 +85,9 @@
           (m:require
             c
             param
-            (match (check:arity c param 2) (true (check:atom c (m:next c param))) (false false))
+            (match (check:arity c param 2)
+              (true (check:atom c (m:next c param)))
+              (false false))
             "&rest requires a final parameter"))
         (false
           (do
@@ -84,11 +95,22 @@
             (parameters c (m:next c param))))))))
 
 (base:function install ((c m:context) (root u64)) unit
-  (let ((head u64 (m:child c root)) (name u64 (m:next c head)) (params u64 (m:next c name)))
+  (let
+    ((head u64 (m:child c root))
+     (name u64 (m:next c head))
+     (params u64 (m:next c name)))
     (do
-      (m:require c root (check:arity c head 4) "macro requires a name, parameters, and one body")
+      (m:require
+        c
+        root
+        (check:arity c head 4)
+        "macro requires a name, parameters, and one body")
       (m:require c name (check:atom c name) "expected macro name")
-      (m:require c params (== (field (m:at c params) kind) 1) "expected macro parameter list")
+      (m:require
+        c
+        params
+        (== (field (m:at c params) kind) 1)
+        "expected macro parameter list")
       (parameters c (m:child c params))
       (let ((id u64 (attach c root head 0)))
         (do
@@ -132,7 +154,8 @@
   (let ((v m:node (m:at c site)))
     (m:add c (m:node 1 (field v start) (field v length) child 0 0 0 0 0 0))))
 
-(base:function check-arguments ((c m:context) (site u64) (param u64) (arg u64)) unit
+(base:function check-arguments ((c m:context) (site u64) (param u64) (arg u64))
+  unit
   (base:cond
     ((== param 0) (m:require c site (== arg 0) "too many macro arguments"))
     ((m:is c param "&rest") unit)
@@ -159,15 +182,21 @@
 
 ; Templates are immutable until the final declaration is copied for checking.
 ; Keep the original node when neither of its links changes.
-(base:function template-links ((c m:context) (id u64) (child u64) (next u64)) u64
+(base:function template-links ((c m:context) (id u64) (child u64) (next u64))
+  u64
   (let ((v m:node (m:at c id)))
     (match (== (field v child) child)
-      (true (match (== (field v next) next) (true id) (false (attach c id child next))))
+      (true
+        (match (== (field v next) next)
+          (true id)
+          (false (attach c id child next))))
       (false (attach c id child next)))))
 
 ; Share each spliced element's subtree, but copy its sibling link.
 (base:function splice-list ((c m:context) (id u64) (tail u64)) u64
-  (match id (0 tail) (_ (template-links c id (m:child c id) (splice-list c (m:next c id) tail)))))
+  (match id
+    (0 tail)
+    (_ (template-links c id (m:child c id) (splice-list c (m:next c id) tail)))))
 
 ; The reference reader desugars these prefixes to named forms. Accept both
 ; spellings while retaining the original span and shape in nested templates.
@@ -190,7 +219,11 @@
     (match (field (m:at c id) kind)
       (1
         (do
-          (m:require c id (check:arity c child 2) "quote form requires one operand")
+          (m:require
+            c
+            id
+            (check:arity c child 2)
+            "quote form requires one operand")
           (m:next c child)))
       (_ child))))
 
@@ -226,7 +259,13 @@
                   (splice-list
                     c
                     (m:child c value)
-                    (template-items c invocation-module (m:next c id) env config depth)))))
+                    (template-items
+                      c
+                      invocation-module
+                      (m:next c id)
+                      env
+                      config
+                      depth)))))
             (_ (template-item c invocation-module id env config depth))))
         (false (template-item c invocation-module id env config depth))))))
 
@@ -239,7 +278,9 @@
    (depth u64)) u64
   (let
     ((value u64 (template c invocation-module id env config depth))
-     (next u64 (template-items c invocation-module (m:next c id) env config depth)))
+     (next
+       u64
+       (template-items c invocation-module (m:next c id) env config depth)))
     (template-links c value (m:child c value) next)))
 
 (base:function wrap-template ((c m:context) (id u64) (child u64)) u64
@@ -266,7 +307,11 @@
           id
           (template-items c invocation-module child env config depth)
           (m:next c id)))
-      (28 (wrap-template c id (template c invocation-module (operand c id) env config depth)))
+      (28
+        (wrap-template
+          c
+          id
+          (template c invocation-module (operand c id) env config depth)))
       (29
         (wrap-template
           c
@@ -285,15 +330,28 @@
             (wrap-template
               c
               id
-              (template c invocation-module (operand c id) env config (- depth 1))))))
+              (template
+                c
+                invocation-module
+                (operand c id)
+                env
+                config
+                (- depth 1))))))
       (31
         (match (== depth 1)
-          (true (do (m:error c id "unquote-splicing requires a list element") 0))
+          (true
+            (do (m:error c id "unquote-splicing requires a list element") 0))
           (false
             (wrap-template
               c
               id
-              (template c invocation-module (operand c id) env config (- depth 1))))))
+              (template
+                c
+                invocation-module
+                (operand c id)
+                env
+                config
+                (- depth 1))))))
       (_ (quoted c id)))))
 
 (base:function symbol-value ((c m:context) (id u64)) bool
@@ -306,11 +364,15 @@
       ((m:is c id "unit") false)
       (true (== (check:name-colon c id) (+ (field v start) (field v length)))))))
 
-(base:function symbol-part ((c m:context) (site u64) (value u64) (out (pointer data:data))) unit
+(base:function symbol-part
+  ((c m:context) (site u64) (value u64) (out (pointer data:data))) unit
   (let ((v m:node (m:at c value)) (start u64 (data:length (deref out))))
     (match (field v kind)
       (25
-        (let ((cursor u64 start) (escaped bool false) (length u64 (- (field v length) 2)))
+        (let
+          ((cursor u64 start)
+           (escaped bool false)
+           (length u64 (- (field v length) 2)))
           (do
             (grow-symbol c site out length)
             (check:decode-data
@@ -324,7 +386,11 @@
       (0
         (let ((name data:view (m:spelling c value)))
           (do
-            (m:require c site (symbol-value c value) "symbol-concat requires data or symbols")
+            (m:require
+              c
+              site
+              (symbol-value c value)
+              "symbol-concat requires data or symbols")
             (grow-symbol c site out (field name length))
             (allocator:copy-bytes
               (pointer-offset (data:bytes (deref out)) start)
@@ -332,7 +398,8 @@
               (field name length)))))
       (_ (m:error c site "symbol-concat requires data or symbols")))))
 
-(base:function grow-symbol ((c m:context) (site u64) (out (pointer data:data)) (length u64)) unit
+(base:function grow-symbol
+  ((c m:context) (site u64) (out (pointer data:data)) (length u64)) unit
   (let ((start u64 (data:length (deref out))))
     (do
       (m:require
@@ -365,9 +432,17 @@
    (config evaluation)) u64
   (let ((out data:data (data:empty (arena:allocator (field c memory)))))
     (do
-      (m:require c site (> first 0) "symbol-concat requires at least one component")
+      (m:require
+        c
+        site
+        (> first 0)
+        "symbol-concat requires at least one component")
       (symbol-parts c invocation-module first env config (& out))
-      (m:require c site (> (data:length out) 0) "symbol-concat cannot construct an empty name")
+      (m:require
+        c
+        site
+        (> (data:length out) 0)
+        "symbol-concat cannot construct an empty name")
       (m:add
         c
         (m:node
@@ -389,7 +464,17 @@
   (let ((v m:node (m:at c site)))
     (m:add
       c
-      (m:node 3 (field v start) (field v length) 0 0 0 0 (match value (true 1) (false 0)) 0 0))))
+      (m:node
+        3
+        (field v start)
+        (field v length)
+        0
+        0
+        0
+        0
+        (match value (true 1) (false 0))
+        0
+        0))))
 
 (base:function boolean-p ((c m:context) (id u64)) bool
   (match (field (m:at c id) kind)
@@ -402,14 +487,22 @@
 
 (base:function condition ((c m:context) (site u64) (value u64)) bool
   (do
-    (m:require c site (boolean-p c value) "compile-time condition requires a boolean")
+    (m:require
+      c
+      site
+      (boolean-p c value)
+      "compile-time condition requires a boolean")
     (match (field (m:at c value) kind)
       (3 (== (field (m:at c value) value) (cast i64 1)))
       (_ (m:is c value "true")))))
 
 (base:function require-list ((c m:context) (site u64) (value u64)) u64
   (do
-    (m:require c site (== (field (m:at c value) kind) 1) "compile-time operation requires a list")
+    (m:require
+      c
+      site
+      (== (field (m:at c value) kind) 1)
+      "compile-time operation requires a list")
     value))
 
 ; NIL denotes an empty list even when quoted, recursively through list data.
@@ -418,7 +511,11 @@
     (0 0)
     (_
       (let ((value u64 (quoted c id)))
-        (template-links c value (m:child c value) (quoted-items c (m:next c id)))))))
+        (template-links
+          c
+          value
+          (m:child c value)
+          (quoted-items c (m:next c id)))))))
 
 (base:function quoted ((c m:context) (id u64)) u64
   (match (field (m:at c id) kind)
@@ -431,11 +528,17 @@
     (_ id)))
 
 (base:function eval-body
-  ((c m:context) (module u64) (forms u64) (env (pointer void)) (config evaluation)) u64
+  ((c m:context)
+   (module u64)
+   (forms u64)
+   (env (pointer void))
+   (config evaluation)) u64
   (do
     (m:require c forms (> forms 0) "compile-time body requires an expression")
     (let ((value u64 (eval c module forms env config)))
-      (match (m:next c forms) (0 value) (next (eval-body c module next env config))))))
+      (match (m:next c forms)
+        (0 value)
+        (next (eval-body c module next env config))))))
 
 (base:function eval-bindings
   ((c m:context)
@@ -460,12 +563,16 @@
           (m:require
             c
             name
-            (match (check:atom c name) (true (symbol-value c name)) (false false))
+            (match (check:atom c name)
+              (true (symbol-value c name))
+              (false false))
             "expected compile-time binding name")
           (m:require
             c
             name
-            (match (m:is c name "nil") (true false) (false (== (m:lookup c name seen) 0)))
+            (match (m:is c name "nil")
+              (true false)
+              (false (== (m:lookup c name seen) 0)))
             "duplicate or reserved compile-time let binding")
           (let
             ((value u64 (eval c module init env config))
@@ -495,7 +602,12 @@
         (validate-clauses c (m:next c clauses))))))
 
 (base:function eval-clauses
-  ((c m:context) (module u64) (site u64) (clauses u64) (env (pointer void)) (config evaluation)) u64
+  ((c m:context)
+   (module u64)
+   (site u64)
+   (clauses u64)
+   (env (pointer void))
+   (config evaluation)) u64
   (match clauses
     (0 (list-value c site 0))
     (_
@@ -516,12 +628,19 @@
     (0 (boolean-value c site and))
     (_
       (let ((value bool (condition c args (eval c module args env config))))
-        (match (base:or (base:and and (base:not value)) (base:and (base:not and) value))
+        (match
+          (base:or
+            (base:and and (base:not value))
+            (base:and (base:not and) value))
           (true (boolean-value c site value))
           (false (eval-logical c module site (m:next c args) env config and)))))))
 
 (base:function eval-items
-  ((c m:context) (module u64) (args u64) (env (pointer void)) (config evaluation)) u64
+  ((c m:context)
+   (module u64)
+   (args u64)
+   (env (pointer void))
+   (config evaluation)) u64
   (match args
     (0 0)
     (_
@@ -532,14 +651,15 @@
 
 ; Reductions construct calls, as in the reference compiler; they never invoke
 ; HEAD. Copy sibling links so shared input lists and accumulators stay immutable.
-(base:function reduction-call ((c m:context) (site u64) (head u64) (left u64) (right u64)) u64
+(base:function reduction-call
+  ((c m:context) (site u64) (head u64) (left u64) (right u64)) u64
   (let
     ((last u64 (attach c right (m:child c right) 0))
      (first u64 (attach c left (m:child c left) last)))
     (list-value c site (attach c head (m:child c head) first))))
 
-(base:function reverse-reduction-items ((c m:context) (items u64) (tail u64) (config evaluation))
-  u64
+(base:function reverse-reduction-items
+  ((c m:context) (items u64) (tail u64) (config evaluation)) u64
   ; Sibling traversal consumes steps without nesting evaluator calls.
   (match items
     (0 tail)
@@ -550,8 +670,13 @@
           (reverse-reduction-items c (m:next c items) next config))))))
 
 (base:function reduction-items
-  ((c m:context) (site u64) (head u64) (initial u64) (items u64) (right bool) (config evaluation))
-  u64
+  ((c m:context)
+   (site u64)
+   (head u64)
+   (initial u64)
+   (items u64)
+   (right bool)
+   (config evaluation)) u64
   (match items
     (0 initial)
     (_
@@ -574,7 +699,11 @@
    (config evaluation)
    (right bool)) u64
   (do
-    (m:require c site (check:arity c args 3) "compile-time reduction requires three arguments")
+    (m:require
+      c
+      site
+      (check:arity c args 3)
+      "compile-time reduction requires three arguments")
     (let
       ((head u64 (eval c module args env config))
        (initial u64 (eval c module (m:next c args) env config))
@@ -602,7 +731,8 @@
                (false (m:child c values)))))
           (reduction-items c site head initial items right config))))))
 
-(base:function equal-items ((c m:context) (left u64) (right u64) (config evaluation)) bool
+(base:function equal-items
+  ((c m:context) (left u64) (right u64) (config evaluation)) bool
   (match left
     (0 (== right 0))
     (_
@@ -613,7 +743,8 @@
             (false false)
             (true (equal-items c (m:next c left) (m:next c right) config))))))))
 
-(base:function first-nonzero ((c m:context) (id u64) (start u64) (count u64)) u64
+(base:function first-nonzero ((c m:context) (id u64) (start u64) (count u64))
+  u64
   (match count
     (0 start)
     (1 (match (m:spelling-byte c id start) (48 (+ start 1)) (_ start)))
@@ -622,10 +753,14 @@
         ((half u64 (/ count 2))
          (end u64 (+ start (/ count 2)))
          (found u64 (first-nonzero c id start (/ count 2))))
-        (match (< found end) (true found) (false (first-nonzero c id end (- count half))))))))
+        (match (< found end)
+          (true found)
+          (false (first-nonzero c id end (- count half))))))))
 
 (base:function integer-magnitude ((c m:context) (id u64)) u64
-  (let ((v m:node (m:at c id)) (start u64 (match (m:spelling-byte c id 0) (43 1) (45 1) (_ 0))))
+  (let
+    ((v m:node (m:at c id))
+     (start u64 (match (m:spelling-byte c id 0) (43 1) (45 1) (_ 0))))
     (first-nonzero c id start (- (field v length) start))))
 
 (base:function equal-integers ((c m:context) (left u64) (right u64)) bool
@@ -642,8 +777,12 @@
         (== alen 0)
         (base:and
           (==
-            (match (m:spelling-byte c left 0) (45 (cast u64 1)) (_ (cast u64 0)))
-            (match (m:spelling-byte c right 0) (45 (cast u64 1)) (_ (cast u64 0))))
+            (match (m:spelling-byte c left 0)
+              (45 (cast u64 1))
+              (_ (cast u64 0)))
+            (match (m:spelling-byte c right 0)
+              (45 (cast u64 1))
+              (_ (cast u64 0))))
           (data:equal
             (data:view (pointer-offset (field a bytes) astart) alen)
             (data:view (pointer-offset (field b bytes) bstart) blen)))))))
@@ -656,7 +795,14 @@
      (escaped bool false))
     (do
       (m:storage (data:resize (& out) (field v length)))
-      (check:decode-node c id (data:bytes out) (& cursor) (& escaped) 1 (- (field v length) 2))
+      (check:decode-node
+        c
+        id
+        (data:bytes out)
+        (& cursor)
+        (& escaped)
+        1
+        (- (field v length) 2))
       (data:view (data:bytes out) cursor))))
 
 (base:function character-value ((c m:context) (id u64)) u64
@@ -667,7 +813,8 @@
         (- (field v length) 2)))))
 
 (base:function floating-value ((c m:context) (id u64)) i64
-  (let ((copy u64 (attach c id 0 0))) (do (float:parse c copy 13) (field (m:at c copy) value))))
+  (let ((copy u64 (attach c id 0 0)))
+    (do (float:parse c copy 13) (field (m:at c copy) value))))
 
 (base:function unit-p ((c m:context) (id u64)) bool
   (let ((v m:node (m:at c id)))
@@ -678,11 +825,14 @@
 (base:function qualified-value ((c m:context) (id u64)) bool
   (let ((v m:node (m:at c id)) (split u64 (check:name-colon c id)))
     (match
-      (base:or (== split (field v start)) (== split (+ (field v start) (field v length))))
+      (base:or
+        (== split (field v start))
+        (== split (+ (field v start) (field v length))))
       (true false)
       (false true))))
 
-(base:function equal-value ((c m:context) (left u64) (right u64) (config evaluation)) bool
+(base:function equal-value
+  ((c m:context) (left u64) (right u64) (config evaluation)) bool
   (base:cond
     ((boolean-p c left)
      (match (boolean-p c right)
@@ -700,21 +850,33 @@
        (true (equal-items c (m:child c left) (m:child c right) config))))
     ((== (syntax-kind c right) 1) false)
     ((check:integer-node c left)
-     (match (check:integer-node c right) (false false) (true (equal-integers c left right))))
+     (match (check:integer-node c right)
+       (false false)
+       (true (equal-integers c left right))))
     ((check:integer-node c right) false)
     ((== (syntax-kind c left) (syntax-kind c right))
      (match (syntax-kind c left)
        (0
          (match (qualified-value c left)
-           (true (match (qualified-value c right) (true (m:same c left right)) (false false)))
-           (false (match (qualified-value c right) (true false) (false (m:same c left right))))))
+           (true
+             (match (qualified-value c right)
+               (true (m:same c left right))
+               (false false)))
+           (false
+             (match (qualified-value c right)
+               (true false)
+               (false (m:same c left right))))))
        (25 (data:equal (data-value c left) (data-value c right)))
        (26 (== (character-value c left) (character-value c right)))
        (35 (== (floating-value c left) (floating-value c right)))
-       (28 (equal-value c (operand c left) (operand c right) (tick c left config)))
-       (29 (equal-value c (operand c left) (operand c right) (tick c left config)))
-       (30 (equal-value c (operand c left) (operand c right) (tick c left config)))
-       (31 (equal-value c (operand c left) (operand c right) (tick c left config)))
+       (28
+         (equal-value c (operand c left) (operand c right) (tick c left config)))
+       (29
+         (equal-value c (operand c left) (operand c right) (tick c left config)))
+       (30
+         (equal-value c (operand c left) (operand c right) (tick c left config)))
+       (31
+         (equal-value c (operand c left) (operand c right) (tick c left config)))
        (_ (m:same c left right))))
     (true false)))
 
@@ -738,13 +900,20 @@
    (self bool)
    (config evaluation)) u64
   (let
-    ((session m:module-session (deref (cast (pointer m:module-session) (field c session))))
+    ((session
+       m:module-session
+       (deref (cast (pointer m:module-session) (field c session))))
      (edges m:imports-array (deref (field session edges))))
     (match (>= index (m:imports-length edges))
-      (true (do (m:require c site (> found 0) "unknown state module qualifier") (- found 1)))
+      (true
+        (do
+          (m:require c site (> found 0) "unknown state module qualifier")
+          (- found 1)))
       (false
         (let
-          ((edge m:import-info (deref (pointer-offset (tuple-get edges 0) index)))
+          ((edge
+             m:import-info
+             (deref (pointer-offset (tuple-get edges 0) index)))
            (target u64 (+ (field edge target) 1)))
           (do
             (tick c site config)
@@ -754,18 +923,30 @@
                 (base:or
                   (data:equal name (m:spelling c (field edge alias)))
                   (data:equal name (module-name c (field edge target)))))
-              (false (state-module c module site name (+ index 1) found self config))
+              (false
+                (state-module c module site name (+ index 1) found self config))
               (true
                 (do
                   (m:require
                     c
                     site
-                    (base:and (base:not self) (base:or (== found 0) (== found target)))
+                    (base:and
+                      (base:not self)
+                      (base:or (== found 0) (== found target)))
                     "ambiguous state module qualifier")
-                  (state-module c module site name (+ index 1) target self config))))))))))
+                  (state-module
+                    c
+                    module
+                    site
+                    name
+                    (+ index 1)
+                    target
+                    self
+                    config))))))))))
 
 (base:function module-name ((c m:context) (id u64)) data:view
-  (let ((name (pointer u8) (field (m:file-info c id) name))) (data:view name (cstring:strlen name))))
+  (let ((name (pointer u8) (field (m:file-info c id) name)))
+    (data:view name (cstring:strlen name))))
 
 (base:function snapshot-items
   ((c m:context) (module u64) (items u64) (key bool) (config evaluation)) u64
@@ -777,11 +958,13 @@
          (next u64 (snapshot-items c module (m:next c items) key config)))
         (attach c value (m:child c value) next)))))
 
-(base:function snapshot ((c m:context) (module u64) (id u64) (key bool) (config evaluation)) u64
+(base:function snapshot
+  ((c m:context) (module u64) (id u64) (key bool) (config evaluation)) u64
   (let ((next evaluation (tick c id config)) (v m:node (m:at c id)))
     (match
       (match key
-        (true (match (check:atom c id) (true (qualified-value c id)) (false false)))
+        (true
+          (match (check:atom c id) (true (qualified-value c id)) (false false)))
         (false false))
       (true
         (let
@@ -821,7 +1004,8 @@
 
 ; Collection/state key equality follows the reference's plain data equality.
 ; Floating-point keys distinguish signed zero, rather than using runtime =.
-(base:function key-items-equal ((c m:context) (left u64) (right u64) (config evaluation)) bool
+(base:function key-items-equal
+  ((c m:context) (left u64) (right u64) (config evaluation)) bool
   (match left
     (0 (== right 0))
     (_
@@ -832,7 +1016,8 @@
             (false false)
             (true (key-items-equal c (m:next c left) (m:next c right) config))))))))
 
-(base:function key-equal ((c m:context) (left u64) (right u64) (config evaluation)) bool
+(base:function key-equal
+  ((c m:context) (left u64) (right u64) (config evaluation)) bool
   (let ((next evaluation (tick c left config)) (kind u64 (syntax-kind c left)))
     (match (== kind (syntax-kind c right))
       (false (equal-value c left right next))
@@ -850,7 +1035,8 @@
           (31 (key-equal c (operand c left) (operand c right) next))
           (_ (equal-value c left right next)))))))
 
-(base:function state-find ((c m:context) (id u64) (key u64) (config evaluation)) u64
+(base:function state-find ((c m:context) (id u64) (key u64) (config evaluation))
+  u64
   (match id
     (0 0)
     (_
@@ -869,20 +1055,26 @@
    (env (pointer void))
    (config evaluation)) u64
   (let
-    ((set bool (m:is c head "compiler:state-set!")) (ref bool (m:is c head "compiler:state-ref")))
+    ((set bool (m:is c head "compiler:state-set!"))
+     (ref bool (m:is c head "compiler:state-ref")))
     (do
       (m:require
         c
         site
         (match set
           (true (check:arity c args 2))
-          (false (base:or (check:arity c args 1) (base:and ref (check:arity c args 2)))))
+          (false
+            (base:or
+              (check:arity c args 1)
+              (base:and ref (check:arity c args 2)))))
         "invalid compiler state operation arity")
       (let
         ((input u64 (eval c module args env config))
          (value
            u64
-           (match (m:next c args) (0 (list-value c site 0)) (id (eval c module id env config)))))
+           (match (m:next c args)
+             (0 (list-value c site 0))
+             (id (eval c module id env config)))))
         (do
           (m:require
             c
@@ -925,20 +1117,31 @@
                             (field (deref session) macros))))
                       (_ (do (m:typed c entry 65 0 stored 0) unit)))
                     (snapshot c module stored false config))))
-              (ref (snapshot c module (match old (0 value) (_ old)) false config))
-              ((m:is c head "compiler:state-has?") (boolean-value c site (> old 0)))
+              (ref
+                (snapshot c module (match old (0 value) (_ old)) false config))
+              ((m:is c head "compiler:state-has?")
+               (boolean-value c site (> old 0)))
               (true
                 (do
-                  (match entry (0 unit) (_ (do (m:typed c entry 65 0 0 0) unit)))
+                  (match entry
+                    (0 unit)
+                    (_ (do (m:typed c entry 65 0 0 0) unit)))
                   (boolean-value c site (> old 0)))))))))))
 
 (base:function index-digits
-  ((c m:context) (site u64) (start u64) (count u64) (value (pointer u64)) (config evaluation)) unit
+  ((c m:context)
+   (site u64)
+   (start u64)
+   (count u64)
+   (value (pointer u64))
+   (config evaluation)) unit
   (match count
     (0 unit)
     (1
       (let
-        ((byte u64 (m:spelling-byte c site (- start (field (m:at c site) start))))
+        ((byte
+           u64
+           (m:spelling-byte c site (- start (field (m:at c site) start))))
          (digit u64 (- byte 48)))
         (do
           (tick c site config)
@@ -946,7 +1149,9 @@
           (m:require
             c
             site
-            (<= (deref value) (/ (- (cast u64 18446744073709551615) digit) (cast u64 10)))
+            (<=
+              (deref value)
+              (/ (- (cast u64 18446744073709551615) digit) (cast u64 10)))
             "list index out of bounds")
           (store (deref value) (+ (* (deref value) 10) digit))
           unit)))
@@ -956,7 +1161,8 @@
           (index-digits c site start half value config)
           (index-digits c site (+ start half) (- count half) value config))))))
 
-(base:function nth-item ((c m:context) (site u64) (items u64) (index u64) (config evaluation)) u64
+(base:function nth-item
+  ((c m:context) (site u64) (items u64) (index u64) (config evaluation)) u64
   (do
     (tick c site config)
     (m:require c site (> items 0) "list index out of bounds")
@@ -965,16 +1171,27 @@
       (_ (nth-item c site (m:next c items) (- index 1) config)))))
 
 (base:function eval-nth
-  ((c m:context) (module u64) (site u64) (args u64) (env (pointer void)) (config evaluation)) u64
+  ((c m:context)
+   (module u64)
+   (site u64)
+   (args u64)
+   (env (pointer void))
+   (config evaluation)) u64
   (do
     (m:require c site (check:arity c args 2) "nth requires two arguments")
     (let
       ((index u64 (eval c module args env config))
-       (values u64 (require-list c site (eval c module (m:next c args) env config)))
+       (values
+         u64
+         (require-list c site (eval c module (m:next c args) env config)))
        (v m:node (m:at c index))
        (value u64 0))
       (do
-        (m:require c site (check:integer-node c index) "list index out of bounds")
+        (m:require
+          c
+          site
+          (check:integer-node c index)
+          "list index out of bounds")
         (let
           ((sign u64 (m:spelling-byte c index 0))
            (start
@@ -998,36 +1215,51 @@
               "list index out of bounds")
             (nth-item c site (m:child c values) value config)))))))
 
-(base:function plist-search ((c m:context) (site u64) (items u64) (key u64) (config evaluation)) u64
+(base:function plist-search
+  ((c m:context) (site u64) (items u64) (key u64) (config evaluation)) u64
   (match items
     (0 0)
     (_
       (let ((value u64 (m:next c items)))
         (do
           (tick c site config)
-          (m:require c site (> value 0) "property list requires key/value pairs")
+          (m:require
+            c
+            site
+            (> value 0)
+            "property list requires key/value pairs")
           (match (key-equal c items key config)
             (true value)
             (false (plist-search c site (m:next c value) key config))))))))
 
-(base:function plist-shape ((c m:context) (site u64) (items u64) (config evaluation)) unit
+(base:function plist-shape
+  ((c m:context) (site u64) (items u64) (config evaluation)) unit
   (match items
     (0 unit)
     (_
       (let ((value u64 (m:next c items)))
         (do
           (tick c site config)
-          (m:require c site (> value 0) "property list requires key/value pairs")
+          (m:require
+            c
+            site
+            (> value 0)
+            "property list requires key/value pairs")
           (plist-shape c site (m:next c value) config))))))
 
-(base:function validate-plist ((c m:context) (site u64) (items u64) (config evaluation)) unit
+(base:function validate-plist
+  ((c m:context) (site u64) (items u64) (config evaluation)) unit
   (match items
     (0 unit)
     (_
       (let ((value u64 (m:next c items)))
         (do
           (tick c site config)
-          (m:require c site (> value 0) "property list requires key/value pairs")
+          (m:require
+            c
+            site
+            (> value 0)
+            "property list requires key/value pairs")
           (m:require
             c
             site
@@ -1036,7 +1268,12 @@
           (validate-plist c site (m:next c value) config))))))
 
 (base:function eval-plist-ref
-  ((c m:context) (module u64) (site u64) (args u64) (env (pointer void)) (config evaluation)) u64
+  ((c m:context)
+   (module u64)
+   (site u64)
+   (args u64)
+   (env (pointer void))
+   (config evaluation)) u64
   (do
     (m:require
       c
@@ -1047,7 +1284,11 @@
       ((value u64 (eval c module args env config))
        (key u64 (eval c module (m:next c args) env config))
        (last u64 (m:next c (m:next c args)))
-       (default u64 (match last (0 (list-value c site 0)) (_ (eval c module last env config)))))
+       (default
+         u64
+         (match last
+           (0 (list-value c site 0))
+           (_ (eval c module last env config)))))
       (do
         (require-list c site value)
         (plist-shape c site (m:child c value) config)
@@ -1068,7 +1309,10 @@
     (_
       (match (m:is c param "&rest")
         (true
-          (let ((binding m:binding (m:binding (m:next c param) (list-value c param args) 0 env)))
+          (let
+            ((binding
+               m:binding
+               (m:binding (m:next c param) (list-value c param args) 0 env)))
             (eval c module body (cast (pointer void) (& binding)) config)))
         (false
           (let ((binding m:binding (m:binding param args 0 env)))
@@ -1082,13 +1326,28 @@
               config)))))))
 
 (base:function invoke
-  ((c m:context) (module u64) (site u64) (macro u64) (args u64) (config evaluation)) u64
-  (let ((params u64 (m:next c (m:next c (m:child c macro)))) (values u64 (quoted-items c args)))
+  ((c m:context)
+   (module u64)
+   (site u64)
+   (macro u64)
+   (args u64)
+   (config evaluation)) u64
+  (let
+    ((params u64 (m:next c (m:next c (m:child c macro))))
+     (values u64 (quoted-items c args)))
     (do
       (check-arguments c site (m:child c params) args)
-      (invoke-parameters c module (m:child c params) values (m:next c params) (m:empty-env) config))))
+      (invoke-parameters
+        c
+        module
+        (m:child c params)
+        values
+        (m:next c params)
+        (m:empty-env)
+        config))))
 
-(base:function append-view ((c m:context) (out (pointer data:data)) (text data:view)) unit
+(base:function append-view
+  ((c m:context) (out (pointer data:data)) (text data:view)) unit
   (let ((start u64 (data:length (deref out))))
     (do
       (m:storage (data:resize out (+ start (field text length))))
@@ -1099,8 +1358,11 @@
 
 ; Computed literals own their spelling in the compilation arena while retaining
 ; the invocation location. Kind 69 distinguishes numeric text from generated names.
-(base:function text-node ((c m:context) (site u64) (kind u64) (text data:view)) u64
-  (let ((out data:data (data:empty (arena:allocator (field c memory)))) (v m:node (m:at c site)))
+(base:function text-node ((c m:context) (site u64) (kind u64) (text data:view))
+  u64
+  (let
+    ((out data:data (data:empty (arena:allocator (field c memory))))
+     (v m:node (m:at c site)))
     (do
       (m:storage (data:assign-bytes (& out) text))
       (m:add
@@ -1141,27 +1403,54 @@
         (do
           (tick c site config)
           (match byte
-            (10 (do (m:storage (data:append out 92)) (m:storage (data:append out 110))))
-            (9 (do (m:storage (data:append out 92)) (m:storage (data:append out 116))))
-            (34 (do (m:storage (data:append out 92)) (m:storage (data:append out 34))))
-            (92 (do (m:storage (data:append out 92)) (m:storage (data:append out 92))))
+            (10
+              (do
+                (m:storage (data:append out 92))
+                (m:storage (data:append out 110))))
+            (9
+              (do
+                (m:storage (data:append out 92))
+                (m:storage (data:append out 116))))
+            (34
+              (do
+                (m:storage (data:append out 92))
+                (m:storage (data:append out 34))))
+            (92
+              (do
+                (m:storage (data:append out 92))
+                (m:storage (data:append out 92))))
             (_ (m:storage (data:append out byte)))))))
     (_
       (let ((half u64 (/ count 2)))
         (do
           (encoded-bytes c site out bytes half config)
-          (encoded-bytes c site out (pointer-offset bytes half) (- count half) config))))))
+          (encoded-bytes
+            c
+            site
+            out
+            (pointer-offset bytes half)
+            (- count half)
+            config))))))
 
-(base:function string-value ((c m:context) (site u64) (text data:view) (config evaluation)) u64
+(base:function string-value
+  ((c m:context) (site u64) (text data:view) (config evaluation)) u64
   (let ((out data:data (data:empty (arena:allocator (field c memory)))))
     (do
       (m:storage (data:append (& out) 34))
-      (encoded-bytes c site (& out) (field text bytes) (field text length) config)
+      (encoded-bytes
+        c
+        site
+        (& out)
+        (field text bytes)
+        (field text length)
+        config)
       (m:storage (data:append (& out) 34))
       (text-node c site 25 (data:borrow out)))))
 
 (base:function string-input ((c m:context) (site u64) (id u64)) data:view
-  (do (m:require c site (== (syntax-kind c id) 25) "expected a string") (data-value c id)))
+  (do
+    (m:require c site (== (syntax-kind c id) 25) "expected a string")
+    (data-value c id)))
 
 (base:function callable-name ((c m:context) (value u64)) bool
   (base:and
@@ -1171,7 +1460,9 @@
     (base:not (unit-p c value))))
 
 (base:function list-size ((c m:context) (items u64) (config evaluation)) u64
-  (match items (0 0) (_ (do (tick c items config) (+ 1 (list-size c (m:next c items) config))))))
+  (match items
+    (0 0)
+    (_ (do (tick c items config) (+ 1 (list-size c (m:next c items) config))))))
 
 (base:function symbol-input ((c m:context) (site u64) (id u64)) data:view
   (do
@@ -1199,7 +1490,11 @@
       (let ((list u64 (require-list c site lists)) (item u64 (m:child c list)))
         (do
           (tick c site config)
-          (m:require c site (> item 0) "compiler:map requires lists of equal length")
+          (m:require
+            c
+            site
+            (> item 0)
+            "compiler:map requires lists of equal length")
           (let
             ((value
                u64
@@ -1212,7 +1507,8 @@
               (m:child c value)
               (map-arguments c site (m:next c lists) advance config))))))))
 
-(base:function empty-lists ((c m:context) (site u64) (lists u64) (config evaluation)) unit
+(base:function empty-lists
+  ((c m:context) (site u64) (lists u64) (config evaluation)) unit
   (match lists
     (0 unit)
     (_
@@ -1225,7 +1521,8 @@
           "compiler:map requires lists of equal length")
         (empty-lists c site (m:next c lists) config)))))
 
-(base:function map-calls ((c m:context) (site u64) (head u64) (lists u64) (config evaluation)) u64
+(base:function map-calls
+  ((c m:context) (site u64) (head u64) (lists u64) (config evaluation)) u64
   (let ((first u64 (m:child c (require-list c site lists))))
     (match first
       (0 (do (empty-lists c site lists config) 0))
@@ -1237,24 +1534,35 @@
            (tail u64 (map-calls c site head rest config)))
           (attach c call (m:child c call) tail))))))
 
-(base:function append-lists ((c m:context) (site u64) (lists u64) (config evaluation)) u64
+(base:function append-lists
+  ((c m:context) (site u64) (lists u64) (config evaluation)) u64
   (match lists
     (0 0)
     (_
       (let ((value u64 (require-list c site lists)))
         (do
           (tick c site config)
-          (copy-items c (m:child c value) (append-lists c site (m:next c lists) config) config))))))
+          (copy-items
+            c
+            (m:child c value)
+            (append-lists c site (m:next c lists) config)
+            config))))))
 
-(base:function copy-items ((c m:context) (items u64) (tail u64) (config evaluation)) u64
+(base:function copy-items
+  ((c m:context) (items u64) (tail u64) (config evaluation)) u64
   (match items
     (0 tail)
     (_
       (do
         (tick c items config)
-        (attach c items (m:child c items) (copy-items c (m:next c items) tail config))))))
+        (attach
+          c
+          items
+          (m:child c items)
+          (copy-items c (m:next c items) tail config))))))
 
-(base:function index-value ((c m:context) (site u64) (id u64) (config evaluation)) u64
+(base:function index-value
+  ((c m:context) (site u64) (id u64) (config evaluation)) u64
   (let
     ((v m:node (m:at c id))
      (value u64 0)
@@ -1277,15 +1585,25 @@
       value)))
 
 (base:function slice-items
-  ((c m:context) (site u64) (items u64) (count u64) (take bool) (config evaluation)) u64
+  ((c m:context)
+   (site u64)
+   (items u64)
+   (count u64)
+   (take bool)
+   (config evaluation)) u64
   (match count
     (0 (match take (true 0) (false (copy-items c items 0 config))))
     (_
       (do
         (tick c site config)
         (m:require c site (> items 0) "list index out of bounds")
-        (let ((rest u64 (slice-items c site (m:next c items) (- count 1) take config)))
-          (match take (true (attach c items (m:child c items) rest)) (false rest)))))))
+        (let
+          ((rest
+             u64
+             (slice-items c site (m:next c items) (- count 1) take config)))
+          (match take
+            (true (attach c items (m:child c items) rest))
+            (false rest)))))))
 
 ; Dispatch codes are internal, independent of semantic primitive opcodes.
 (base:function helper-code ((c m:context) (head u64)) u64
@@ -1333,8 +1651,16 @@
           ((== code 1) (list-value c site values))
           ((== code 2)
            (do
-             (m:require c site (> first 0) "compiler:call requires a callable name")
-             (m:require c site (callable-name c first) "compiler:call requires a callable name")
+             (m:require
+               c
+               site
+               (> first 0)
+               "compiler:call requires a callable name")
+             (m:require
+               c
+               site
+               (callable-name c first)
+               "compiler:call requires a callable name")
              (list-value c site (copy-items c values 0 config))))
           ((== code 3)
            (do
@@ -1343,12 +1669,20 @@
                site
                (base:and (> first 0) (> second 0))
                "compiler:map requires a head and at least one proper list")
-             (m:require c site (callable-name c first) "compiler:map requires a callable name")
+             (m:require
+               c
+               site
+               (callable-name c first)
+               "compiler:map requires a callable name")
              (list-value c site (map-calls c site first second config))))
           ((== code 8) (list-value c site (append-lists c site values config)))
           ((base:or (== code 10) (== code 11))
            (do
-             (m:require c site (check:arity c values 2) "list slice requires two arguments")
+             (m:require
+               c
+               site
+               (check:arity c values 2)
+               "list slice requires two arguments")
              (require-list c site second)
              (list-value
                c
@@ -1372,7 +1706,11 @@
                  (list-value
                    c
                    site
-                   (reverse-reduction-items c (m:child c (require-list c site first)) 0 config)))
+                   (reverse-reduction-items
+                     c
+                     (m:child c (require-list c site first))
+                     0
+                     config)))
                 ((== code 5)
                  (let ((text data:view (string-input c site first)))
                    (do
@@ -1382,24 +1720,34 @@
                        (> (field text length) 0)
                        "symbol requires a non-empty string")
                      (text-node c site 0 text))))
-                ((== code 6) (string-value c site (symbol-input c site first) config))
+                ((== code 6)
+                 (string-value c site (symbol-input c site first) config))
                 ((== code 9)
                  (unsigned-value
                    c
                    site
                    (match (syntax-kind c first)
                      (25 (field (data-value c first) length))
-                     (_ (list-size c (m:child c (require-list c site first)) config)))))
+                     (_
+                       (list-size
+                         c
+                         (m:child c (require-list c site first))
+                         config)))))
                 ((== code 12)
                  (boolean-value
                    c
                    site
-                   (base:or (check:integer-node c first) (== (syntax-kind c first) 35))))
-                ((== code 13) (boolean-value c site (check:integer-node c first)))
-                ((== code 14) (boolean-value c site (== (syntax-kind c first) 25)))
+                   (base:or
+                     (check:integer-node c first)
+                     (== (syntax-kind c first) 35))))
+                ((== code 13)
+                 (boolean-value c site (check:integer-node c first)))
+                ((== code 14)
+                 (boolean-value c site (== (syntax-kind c first) 25)))
                 ((== code 15) (boolean-value c site (callable-name c first)))
                 ((== code 16) (boolean-value c site (keyword-p c first)))
-                ((== code 17) (boolean-value c site (== (syntax-kind c first) 1)))
+                ((== code 17)
+                 (boolean-value c site (== (syntax-kind c first) 1)))
                 ((== code 18) (boolean-value c site (boolean-p c first)))
                 (true
                   (let ((name data:view (symbol-input c site first)))
@@ -1408,14 +1756,21 @@
                        (match (keyword-p c first)
                          (true (attach c first 0 0))
                          (false
-                           (let ((out data:data (data:empty (arena:allocator (field c memory)))))
+                           (let
+                             ((out
+                                data:data
+                                (data:empty (arena:allocator (field c memory)))))
                              (do
                                (m:storage (data:append (& out) 58))
                                (append-view c (& out) name)
                                (text-node c site 0 (data:borrow out)))))))
                       (true
                         (do
-                          (m:require c site (keyword-p c first) "expected a colon-prefixed keyword")
+                          (m:require
+                            c
+                            site
+                            (keyword-p c first)
+                            "expected a colon-prefixed keyword")
                           (let
                             ((text
                                data:view
@@ -1456,7 +1811,12 @@
         (join-strings c site (m:next c items) separator out config)))))
 
 (base:function matching-bytes
-  ((c m:context) (site u64) (a (pointer u8)) (b (pointer u8)) (count u64) (config evaluation)) bool
+  ((c m:context)
+   (site u64)
+   (a (pointer u8))
+   (b (pointer u8))
+   (count u64)
+   (config evaluation)) bool
   (match count
     (0 true)
     (1 (do (tick c site config) (== (deref a) (deref b))))
@@ -1473,7 +1833,12 @@
             config))))))
 
 (base:function find-substring
-  ((c m:context) (site u64) (text data:view) (part data:view) (start u64) (config evaluation)) u64
+  ((c m:context)
+   (site u64)
+   (text data:view)
+   (part data:view)
+   (start u64)
+   (config evaluation)) u64
   (do
     (tick c site config)
     (match (> (field part length) (- (field text length) start))
@@ -1491,8 +1856,12 @@
           (false (find-substring c site text part (+ start 1) config)))))))
 
 (base:function split-string
-  ((c m:context) (site u64) (text data:view) (separator data:view) (start u64) (config evaluation))
-  u64
+  ((c m:context)
+   (site u64)
+   (text data:view)
+   (separator data:view)
+   (start u64)
+   (config evaluation)) u64
   (let
     ((end u64 (find-substring c site text separator start config))
      (item
@@ -1506,7 +1875,14 @@
        u64
        (match (== end (field text length))
          (true 0)
-         (false (split-string c site text separator (+ end (field separator length)) config)))))
+         (false
+           (split-string
+             c
+             site
+             text
+             separator
+             (+ end (field separator length))
+             config)))))
     (attach c item 0 rest)))
 
 (base:function string-call
@@ -1530,7 +1906,11 @@
            (string-value c site (data:borrow out) config))))
       ((== code 2)
        (do
-         (m:require c site (check:arity c values 1) "string-length requires one argument")
+         (m:require
+           c
+           site
+           (check:arity c values 1)
+           "string-length requires one argument")
          (unsigned-value c site (field (string-input c site first) length))))
       ((== code 3)
        (do
@@ -1542,7 +1922,11 @@
          (let
            ((text data:view (string-input c site first))
             (start u64 (index-value c site second config))
-            (end u64 (match third (0 (field text length)) (_ (index-value c site third config)))))
+            (end
+              u64
+              (match third
+                (0 (field text length))
+                (_ (index-value c site third config)))))
            (do
              (m:require
                c
@@ -1552,11 +1936,17 @@
              (string-value
                c
                site
-               (data:view (pointer-offset (field text bytes) start) (- end start))
+               (data:view
+                 (pointer-offset (field text bytes) start)
+                 (- end start))
                config)))))
       ((== code 8)
        (do
-         (m:require c site (check:arity c values 2) "string-join requires two arguments")
+         (m:require
+           c
+           site
+           (check:arity c values 2)
+           "string-join requires two arguments")
          (let
            ((items u64 (m:child c (require-list c site first)))
             (separator data:view (string-input c site second))
@@ -1595,16 +1985,28 @@
                      config))))
               (true
                 (do
-                  (m:require c site (> (field right length) 0) "separator must not be empty")
+                  (m:require
+                    c
+                    site
+                    (> (field right length) 0)
+                    "separator must not be empty")
                   (let ((items u64 (split-string c site left right 0 config)))
                     (match code
                       (7 (list-value c site items))
                       (_
                         (let
                           ((replacement data:view (string-input c site third))
-                           (out data:data (data:empty (arena:allocator (field c memory)))))
+                           (out
+                             data:data
+                             (data:empty (arena:allocator (field c memory)))))
                           (do
-                            (join-strings c site items replacement (& out) config)
+                            (join-strings
+                              c
+                              site
+                              items
+                              replacement
+                              (& out)
+                              config)
                             (string-value c site (data:borrow out) config)))))))))))))))
 
 (base:function collection-code ((c m:context) (head u64)) u64
@@ -1630,9 +2032,15 @@
       (do
         (tick c site config)
         (let
-          ((key u64 (match plist (true items) (false (m:child c (require-list c site items)))))
+          ((key
+             u64
+             (match plist
+               (true items)
+               (false (m:child c (require-list c site items)))))
            (value u64 (m:next c key))
-           (rest u64 (match plist (true (m:next c value)) (false (m:next c items)))))
+           (rest
+             u64
+             (match plist (true (m:next c value)) (false (m:next c items)))))
           (do
             (m:require
               c
@@ -1652,10 +2060,19 @@
                  (list-value
                    c
                    site
-                   (attach c key (m:child c key) (attach c value (m:child c value) 0)))))
-              (attach c pair (m:child c pair) (collection-entries c site rest plist config)))))))))
+                   (attach
+                     c
+                     key
+                     (m:child c key)
+                     (attach c value (m:child c value) 0)))))
+              (attach
+                c
+                pair
+                (m:child c pair)
+                (collection-entries c site rest plist config)))))))))
 
-(base:function entry-find ((c m:context) (entries u64) (key u64) (config evaluation)) u64
+(base:function entry-find
+  ((c m:context) (entries u64) (key u64) (config evaluation)) u64
   (match entries
     (0 0)
     (_
@@ -1665,7 +2082,8 @@
           (true entries)
           (false (entry-find c (m:next c entries) key config)))))))
 
-(base:function validate-entries ((c m:context) (site u64) (entries u64) (config evaluation)) unit
+(base:function validate-entries
+  ((c m:context) (site u64) (entries u64) (config evaluation)) unit
   (match entries
     (0 unit)
     (_
@@ -1696,7 +2114,8 @@
     (0 0)
     (_
       (let
-        ((key u64 (m:child c entries)) (value u64 (match values (true (m:next c key)) (false key))))
+        ((key u64 (m:child c entries))
+         (value u64 (match values (true (m:next c key)) (false key))))
         (do
           (tick c site config)
           (attach
@@ -1706,8 +2125,13 @@
             (collect-components c site (m:next c entries) values config)))))))
 
 (base:function update-entries
-  ((c m:context) (site u64) (entries u64) (key u64) (value u64) (remove bool) (config evaluation))
-  u64
+  ((c m:context)
+   (site u64)
+   (entries u64)
+   (key u64)
+   (value u64)
+   (remove bool)
+   (config evaluation)) u64
   (do
     (tick c site config)
     (match entries
@@ -1715,7 +2139,14 @@
         (match remove
           (true 0)
           (false
-            (list-value c site (attach c key (m:child c key) (attach c value (m:child c value) 0))))))
+            (list-value
+              c
+              site
+              (attach
+                c
+                key
+                (m:child c key)
+                (attach c value (m:child c value) 0))))))
       (_
         (match (key-equal c (m:child c entries) key config)
           (true
@@ -1728,8 +2159,16 @@
                      (list-value
                        c
                        site
-                       (attach c key (m:child c key) (attach c value (m:child c value) 0)))))
-                  (attach c pair (m:child c pair) (copy-items c (m:next c entries) 0 config))))))
+                       (attach
+                         c
+                         key
+                         (m:child c key)
+                         (attach c value (m:child c value) 0)))))
+                  (attach
+                    c
+                    pair
+                    (m:child c pair)
+                    (copy-items c (m:next c entries) 0 config))))))
           (false
             (attach
               c
@@ -1763,7 +2202,12 @@
       (let
         ((entries
            u64
-           (collection-entries c site (m:child c (require-list c site values)) plist config))
+           (collection-entries
+             c
+             site
+             (m:child c (require-list c site values))
+             plist
+             config))
          (key u64 (m:next c values))
          (value u64 (m:next c key)))
         (do
@@ -1773,13 +2217,23 @@
               (let ((entry u64 (entry-find c entries key config)))
                 (match entry
                   (0
-                    (match value (0 (list-value c site 0)) (_ (attach c value (m:child c value) 0))))
+                    (match value
+                      (0 (list-value c site 0))
+                      (_ (attach c value (m:child c value) 0))))
                   (_
                     (let ((found u64 (m:next c (m:child c entry))))
                       (attach c found (m:child c found) 0))))))
             (2 (boolean-value c site (> (entry-find c entries key config) 0)))
-            (5 (list-value c site (collect-components c site entries false config)))
-            (6 (list-value c site (collect-components c site entries true config)))
+            (5
+              (list-value
+                c
+                site
+                (collect-components c site entries false config)))
+            (6
+              (list-value
+                c
+                site
+                (collect-components c site entries true config)))
             (_
               (list-value
                 c
@@ -1787,7 +2241,14 @@
                 (collect-output
                   c
                   site
-                  (update-entries c site entries key value (== operation 4) config)
+                  (update-entries
+                    c
+                    site
+                    entries
+                    key
+                    value
+                    (== operation 4)
+                    config)
                   plist
                   config)))))))))
 
@@ -1798,7 +2259,8 @@
     ((m:is c head "compiler:target-info") 3)
     (true 0)))
 
-(base:function contains-value ((c m:context) (items u64) (value u64) (config evaluation)) bool
+(base:function contains-value
+  ((c m:context) (items u64) (value u64) (config evaluation)) bool
   (match items
     (0 false)
     (_
@@ -1808,14 +2270,22 @@
           (equal-value c items value config)
           (contains-value c (m:next c items) value config))))))
 
-(base:function feature-value ((c m:context) (site u64) (text (pointer u8)) (config evaluation)) u64
-  (let ((copy (pointer u8) (info:copy (field c memory) (data:view text (cstring:strlen text)))))
+(base:function feature-value
+  ((c m:context) (site u64) (text (pointer u8)) (config evaluation)) u64
+  (let
+    ((copy
+       (pointer u8)
+       (info:copy (field c memory) (data:view text (cstring:strlen text)))))
     (do
       (info:lower copy (cstring:strlen copy))
       (string-value c site (data:view copy (cstring:strlen copy)) config))))
 
 (base:function feature-extras
-  ((c m:context) (site u64) (head (pointer void)) (items u64) (config evaluation)) u64
+  ((c m:context)
+   (site u64)
+   (head (pointer void))
+   (items u64)
+   (config evaluation)) u64
   (match (base:is-null head)
     (true items)
     (false
@@ -1833,12 +2303,15 @@
               (false (copy-items c items (attach c value 0 0) config)))
             config))))))
 
-(base:function effective-features ((c m:context) (site u64) (config evaluation)) u64
+(base:function effective-features ((c m:context) (site u64) (config evaluation))
+  u64
   (let
     ((facts syntax:features (info:reader-features c))
      (format
        (pointer u8)
-       (match (info:equal (field facts platform) "darwin") (true "macho") (false "elf")))
+       (match (info:equal (field facts platform) "darwin")
+         (true "macho")
+         (false "elf")))
      (items
        u64
        (attach
@@ -1860,7 +2333,8 @@
                (attach c (feature-value c site format config) 0 0)))))))
     (feature-extras c site (field facts extra) items config)))
 
-(base:function info-pair ((c m:context) (site u64) (key (pointer u8)) (value u64) (next u64)) u64
+(base:function info-pair
+  ((c m:context) (site u64) (key (pointer u8)) (value u64) (next u64)) u64
   (attach
     c
     (text-node c site 0 (data:view key (cstring:strlen key)))
@@ -1868,7 +2342,9 @@
     (attach c value (m:child c value) next)))
 
 (base:function target-values ((c m:context) (site u64) (config evaluation)) u64
-  (let ((pointer (pointer void) (info:from-context c)) (absent u64 (list-value c site 0)))
+  (let
+    ((pointer (pointer void) (info:from-context c))
+     (absent u64 (list-value c site 0)))
     (match (base:is-null pointer)
       (true
         (list-value
@@ -1897,10 +2373,14 @@
                   (info-pair c site ":object-format" absent 0)))))))
       (false
         (let
-          ((target info:configuration (deref (cast (pointer info:configuration) pointer)))
+          ((target
+             info:configuration
+             (deref (cast (pointer info:configuration) pointer)))
            (object
              (pointer u8)
-             (match (info:equal (field target platform) "darwin") (true "macho") (false "elf"))))
+             (match (info:equal (field target platform) "darwin")
+               (true "macho")
+               (false "elf"))))
           (list-value
             c
             site
@@ -1926,9 +2406,16 @@
                     (string-value
                       c
                       site
-                      (data:view (field target layout) (cstring:strlen (field target layout)))
+                      (data:view
+                        (field target layout)
+                        (cstring:strlen (field target layout)))
                       config)
-                    (info-pair c site ":object-format" (feature-value c site object config) 0)))))))))))
+                    (info-pair
+                      c
+                      site
+                      ":object-format"
+                      (feature-value c site object config)
+                      0)))))))))))
 
 (base:function context-call
   ((c m:context)
@@ -1955,7 +2442,9 @@
           ((value u64 (eval c module args env config))
            (name
              data:view
-             (match (syntax-kind c value) (25 (data-value c value)) (_ (symbol-input c site value))))
+             (match (syntax-kind c value)
+               (25 (data-value c value))
+               (_ (symbol-input c site value))))
            (text (pointer u8) (info:copy (field c memory) name)))
           (do
             (info:lower text (field name length))
@@ -1965,7 +2454,11 @@
               (contains-value
                 c
                 (effective-features c site config)
-                (string-value c site (data:view text (field name length)) config)
+                (string-value
+                  c
+                  site
+                  (data:view text (field name length))
+                  config)
                 config)))))
       (2 (list-value c site (effective-features c site config)))
       (_ (target-values c site config)))))
@@ -1989,7 +2482,8 @@
     ((m:is c head ">=") 15)
     (true 0)))
 
-(base:function integer-result ((c m:context) (site u64) (value big:number) (config evaluation)) u64
+(base:function integer-result
+  ((c m:context) (site u64) (value big:number) (config evaluation)) u64
   (text-node c site 69 (big:text (big:work c site (field config steps)) value)))
 
 (base:function float-result ((c m:context) (site u64) (bits i64)) u64
@@ -2000,15 +2494,32 @@
         site
         (float:finite 13 (base:convert bits))
         "compile-time floating-point overflow")
-      (m:add c (m:node 71 (field v start) (field v length) 0 0 0 0 bits 0 (field v lookup-module))))))
+      (m:add
+        c
+        (m:node
+          71
+          (field v start)
+          (field v length)
+          0
+          0
+          0
+          0
+          bits
+          0
+          (field v lookup-module))))))
 
 (base:function numeric-float ((c m:context) (site u64) (id u64)) i64
   (let ((copy u64 (attach c id 0 0)))
     (do
-      (m:require c site (== (float:parse c copy 13) 13) "compile-time floating-point overflow")
+      (m:require
+        c
+        site
+        (== (float:parse c copy 13) 13)
+        "compile-time floating-point overflow")
       (field (m:at c copy) value))))
 
-(base:function numeric-inputs ((c m:context) (site u64) (items u64) (config evaluation)) bool
+(base:function numeric-inputs
+  ((c m:context) (site u64) (items u64) (config evaluation)) bool
   (match items
     (0 true)
     (_
@@ -2023,7 +2534,12 @@
           (base:and (check:integer-node c items) rest))))))
 
 (base:function numeric-test
-  ((c m:context) (site u64) (left u64) (right u64) (config evaluation) (code u64)) bool
+  ((c m:context)
+   (site u64)
+   (left u64)
+   (right u64)
+   (config evaluation)
+   (code u64)) bool
   (match (base:and (check:integer-node c left) (check:integer-node c right))
     (true
       (let
@@ -2043,8 +2559,8 @@
         (numeric-float c site left)
         (numeric-float c site right)))))
 
-(base:function distinct-from ((c m:context) (site u64) (item u64) (rest u64) (config evaluation))
-  bool
+(base:function distinct-from
+  ((c m:context) (site u64) (item u64) (rest u64) (config evaluation)) bool
   (match rest
     (0 true)
     (_
@@ -2083,26 +2599,39 @@
            u64
            (match integers
              (true
-               (let ((a big:number (big:parse w current)) (b big:number (big:parse w items)))
+               (let
+                 ((a big:number (big:parse w current))
+                  (b big:number (big:parse w items)))
                  (match code
                    (1 (integer-result c site (big:add w a b) config))
-                   (2 (integer-result c site (big:add w a (big:negate b)) config))
+                   (2
+                     (integer-result c site (big:add w a (big:negate b)) config))
                    (3 (integer-result c site (big:multiply w a b) config))
                    (7 (match (big:compare w a b) (1 items) (_ current)))
                    (_ (match (big:compare w a b) (-1 items) (_ current))))))
              (false
-               (let ((a i64 (numeric-float c site current)) (b i64 (numeric-float c site items)))
+               (let
+                 ((a i64 (numeric-float c site current))
+                  (b i64 (numeric-float c site items)))
                  (base:cond
                    ((== code 7)
-                    (float-result c site (match (float:compare 6 13 a b) (true a) (false b))))
+                    (float-result
+                      c
+                      site
+                      (match (float:compare 6 13 a b) (true a) (false b))))
                    ((== code 8)
-                    (float-result c site (match (float:compare 8 13 a b) (true a) (false b))))
+                    (float-result
+                      c
+                      site
+                      (match (float:compare 8 13 a b) (true a) (false b))))
                    (true
                      (do
                        (m:require
                          c
                          site
-                         (base:or (base:not (== code 4)) (base:not (float:compare 5 13 b 0)))
+                         (base:or
+                           (base:not (== code 4))
+                           (base:not (float:compare 5 13 b 0)))
                          "division by zero")
                        (float-result c site (float:arithmetic code 13 a b))))))))))
         (numeric-fold c site (m:next c items) value config code integers)))))
@@ -2132,10 +2661,23 @@
              (digit data:view (big:text w (tuple-get part 0))))
             (do
               (m:storage (data:append out (deref (field digit bytes))))
-              (fraction-digits c site (tuple-get part 1) denominator ten out (- count 1) config))))))))
+              (fraction-digits
+                c
+                site
+                (tuple-get part 1)
+                denominator
+                ten
+                out
+                (- count 1)
+                config))))))))
 
 (base:function integer-division
-  ((c m:context) (site u64) (numerator u64) (denominator u64) (config evaluation) (code u64)) u64
+  ((c m:context)
+   (site u64)
+   (numerator u64)
+   (denominator u64)
+   (config evaluation)
+   (code u64)) u64
   (let
     ((w big:work (big:work c site (field config steps)))
      (a big:number (big:parse w numerator))
@@ -2155,11 +2697,20 @@
              bool
              (base:not
                (==
-                 (match (field a negative) (true (cast i32 1)) (false (cast i32 0)))
-                 (match (field b negative) (true (cast i32 1)) (false (cast i32 0)))))))
+                 (match (field a negative)
+                   (true (cast i32 1))
+                   (false (cast i32 0)))
+                 (match (field b negative)
+                   (true (cast i32 1))
+                   (false (cast i32 0)))))))
           (do
-            (match negative (true (m:storage (data:append (& out) 45))) (false unit))
-            (append-view c (& out) (big:text w (big:number false (field q digits))))
+            (match negative
+              (true (m:storage (data:append (& out) 45)))
+              (false unit))
+            (append-view
+              c
+              (& out)
+              (big:text w (big:number false (field q digits))))
             (m:storage (data:append (& out) 46))
             (fraction-digits
               c
@@ -2170,7 +2721,10 @@
               (& out)
               1100
               config)
-            (float-result c site (numeric-float c site (text-node c site 35 (data:borrow out))))))))))
+            (float-result
+              c
+              site
+              (numeric-float c site (text-node c site 35 (data:borrow out))))))))))
 
 (base:function numeric-call
   ((c m:context)
@@ -2198,22 +2752,30 @@
           (_ (match (>= code 10) (true (>= count 2)) (false (> count 0)))))
         "invalid numeric operation arity")
       (base:cond
-        ((>= code 10) (boolean-value c site (numeric-comparison c site values config code)))
+        ((>= code 10)
+         (boolean-value c site (numeric-comparison c site values config code)))
         ((base:or (== code 5) (== code 6))
          (do
-           (m:require c site integers "integer division requires integer operands")
+           (m:require
+             c
+             site
+             integers
+             "integer division requires integer operands")
            (integer-division c site values (m:next c values) config code)))
         ((== code 9)
          (match integers
            (true
              (let ((value big:number (big:parse w values)))
-               (integer-result c site (big:number false (field value digits)) config)))
+               (integer-result
+                 c
+                 site
+                 (big:number false (field value digits))
+                 config)))
            (false
              (float-result
                c
                site
-               (let
-                 ((bits u64 (base:convert (numeric-float c site values))))
+               (let ((bits u64 (base:convert (numeric-float c site values))))
                  (base:convert
                    (-
                      bits
@@ -2230,26 +2792,33 @@
                   u64
                   (match count
                     (1 values)
-                    (_ (numeric-fold c site (m:next c values) one config 3 true)))))
+                    (_
+                      (numeric-fold c site (m:next c values) one config 3 true)))))
                (integer-division c site numerator denominator config code)))
            (false
              (numeric-fold
                c
                site
                (match count (1 values) (_ (m:next c values)))
-               (match count (1 (float-result c site (float:pack64 1.0))) (_ values))
+               (match count
+                 (1 (float-result c site (float:pack64 1.0)))
+                 (_ values))
                config
                code
                false))))
         ((base:and (== code 2) (== count 1))
          (match integers
-           (true (integer-result c site (big:negate (big:parse w values)) config))
+           (true
+             (integer-result c site (big:negate (big:parse w values)) config))
            (false
              (float-result
                c
                site
                (base:convert
-                 (num:bitwise 13 (base:convert (numeric-float c site values)) 9223372036854775808))))))
+                 (num:bitwise
+                   13
+                   (base:convert (numeric-float c site values))
+                   9223372036854775808))))))
         ((base:or (== code 1) (== code 3))
          (numeric-fold
            c
@@ -2259,7 +2828,8 @@
            config
            code
            integers))
-        (true (numeric-fold c site (m:next c values) values config code integers))))))
+        (true
+          (numeric-fold c site (m:next c values) values config code integers))))))
 
 ; gcvt has a fixed C signature (unlike printf's variadic interface). Probe
 ; increasing significant precision until binary64 round-trips, then expand its
@@ -2267,8 +2837,12 @@
 (base:external-function gcvt-digits "gcvt" (f64 i32 (pointer u8)) (pointer u8))
 
 (base:function shortest-float
-  ((c m:context) (site u64) (bits i64) (precision i32) (out (pointer u8)) (config evaluation))
-  data:view
+  ((c m:context)
+   (site u64)
+   (bits i64)
+   (precision i32)
+   (out (pointer u8))
+   (config evaluation)) data:view
   (do
     (tick c site config)
     (gcvt-digits (float:unpack64 bits) precision out)
@@ -2276,8 +2850,7 @@
       ((text data:view (data:view out (cstring:strlen out)))
        (end (pointer u8) out)
        (parsed i64 (float:pack64 (float:decimal-to-double out (& end)))))
-      (match
-        (base:or (== parsed bits) (%=-primitive-i32 precision 17))
+      (match (base:or (== parsed bits) (%=-primitive-i32 precision 17))
         (true
           (do
             (m:require
@@ -2286,7 +2859,8 @@
               (== parsed bits)
               "floating-point decimal conversion did not round trip")
             text))
-        (false (shortest-float c site bits (%+-primitive-i32 precision 1) out config))))))
+        (false
+          (shortest-float c site bits (%+-primitive-i32 precision 1) out config))))))
 
 (base:function decimal-parts
   ((c m:context)
@@ -2322,7 +2896,10 @@
   (match (== index (field text length))
     (true value)
     (false
-      (let ((byte u64 (base:convert (deref (pointer-offset (field text bytes) index)))))
+      (let
+        ((byte
+           u64
+           (base:convert (deref (pointer-offset (field text bytes) index)))))
         (exponent-magnitude
           text
           (+ index 1)
@@ -2342,7 +2919,11 @@
         (match sign (45 (%--primitive-i64 0 value)) (_ value))))))
 
 (base:function zero-digits
-  ((c m:context) (site u64) (out (pointer data:data)) (count u64) (config evaluation)) unit
+  ((c m:context)
+   (site u64)
+   (out (pointer data:data))
+   (count u64)
+   (config evaluation)) unit
   (match count
     (0 unit)
     (_
@@ -2351,7 +2932,8 @@
         (m:storage (data:append out 48))
         (zero-digits c site out (- count 1) config)))))
 
-(base:function float-string ((c m:context) (site u64) (bits i64) (config evaluation)) u64
+(base:function float-string
+  ((c m:context) (site u64) (bits i64) (config evaluation)) u64
   (let
     ((storage data:data (data:empty (arena:allocator (field c memory))))
      (digits data:data (data:empty (arena:allocator (field c memory))))
@@ -2361,21 +2943,34 @@
     (do
       (m:storage (data:resize (& storage) 1024))
       (let
-        ((text data:view (shortest-float c site bits 1 (data:bytes storage) config))
+        ((text
+           data:view
+           (shortest-float c site bits 1 (data:bytes storage) config))
          (negative bool (== (deref (field text bytes)) (cast u8 45)))
          (start u64 (match negative (true 1) (false 0)))
-         (end u64 (decimal-parts c site text start (& digits) (& point) (& dot) config))
-         (position i64 (%+-primitive-i64 (base:convert point) (exponent-value text end)))
+         (end
+           u64
+           (decimal-parts c site text start (& digits) (& point) (& dot) config))
+         (position
+           i64
+           (%+-primitive-i64 (base:convert point) (exponent-value text end)))
          (offset u64 (base:convert position))
          (length u64 (data:length digits)))
         (do
-          (match negative (true (m:storage (data:append (& out) 45))) (false unit))
+          (match negative
+            (true (m:storage (data:append (& out) 45)))
+            (false unit))
           (base:cond
             ((%<=-primitive-i64 position 0)
              (do
                (m:storage (data:append (& out) 48))
                (m:storage (data:append (& out) 46))
-               (zero-digits c site (& out) (base:convert (%--primitive-i64 0 position)) config)
+               (zero-digits
+                 c
+                 site
+                 (& out)
+                 (base:convert (%--primitive-i64 0 position))
+                 config)
                (append-view c (& out) (data:borrow digits))))
             ((>= offset length)
              (do
@@ -2385,7 +2980,10 @@
                (m:storage (data:append (& out) 48))))
             (true
               (do
-                (append-view c (& out) (data:view (data:bytes digits) (base:convert position)))
+                (append-view
+                  c
+                  (& out)
+                  (data:view (data:bytes digits) (base:convert position)))
                 (m:storage (data:append (& out) 46))
                 (append-view
                   c
@@ -2398,23 +2996,27 @@
 (base:function whitespace-byte ((byte u8)) bool
   (match byte (32 true) (9 true) (10 true) (13 true) (_ false)))
 
-(base:function trim-left ((c m:context) (site u64) (text data:view) (index u64) (config evaluation))
+(base:function trim-left
+  ((c m:context) (site u64) (text data:view) (index u64) (config evaluation))
   u64
   (match (== index (field text length))
     (true index)
     (false
       (match (whitespace-byte (deref (pointer-offset (field text bytes) index)))
         (false index)
-        (true (do (tick c site config) (trim-left c site text (+ index 1) config)))))))
+        (true
+          (do (tick c site config) (trim-left c site text (+ index 1) config)))))))
 
-(base:function trim-right ((c m:context) (site u64) (text data:view) (end u64) (config evaluation))
-  u64
+(base:function trim-right
+  ((c m:context) (site u64) (text data:view) (end u64) (config evaluation)) u64
   (match end
     (0 0)
     (_
-      (match (whitespace-byte (deref (pointer-offset (field text bytes) (- end 1))))
+      (match
+        (whitespace-byte (deref (pointer-offset (field text bytes) (- end 1))))
         (false end)
-        (true (do (tick c site config) (trim-right c site text (- end 1) config)))))))
+        (true
+          (do (tick c site config) (trim-right c site text (- end 1) config)))))))
 
 (base:function validate-number-text
   ((c m:context)
@@ -2427,7 +3029,10 @@
   (match (== index (field text length))
     (true (m:require c site (> (deref digits) 0) "invalid numeric string"))
     (false
-      (let ((byte u64 (base:convert (deref (pointer-offset (field text bytes) index)))))
+      (let
+        ((byte
+           u64
+           (base:convert (deref (pointer-offset (field text bytes) index)))))
         (do
           (tick c site config)
           (match (check:digit byte)
@@ -2437,7 +3042,10 @@
                 (m:require
                   c
                   site
-                  (base:and (== byte 46) (base:not (deref dot)) (> (deref digits) 0))
+                  (base:and
+                    (== byte 46)
+                    (base:not (deref dot))
+                    (> (deref digits) 0))
                   "invalid numeric string")
                 (store (deref dot) true)
                 (store (deref digits) 0)
@@ -2453,7 +3061,11 @@
    (env (pointer void))
    (config evaluation)) u64
   (do
-    (m:require c site (check:arity c args 1) "numeric conversion requires one argument")
+    (m:require
+      c
+      site
+      (check:arity c args 1)
+      "numeric conversion requires one argument")
     (let ((value u64 (eval c module args env config)))
       (match (m:is c head "number->string")
         (true
@@ -2461,7 +3073,9 @@
             (m:require
               c
               site
-              (base:or (check:integer-node c value) (== (syntax-kind c value) 35))
+              (base:or
+                (check:integer-node c value)
+                (== (syntax-kind c value) 35))
               "expected an integer or floating-point number")
             (match (check:integer-node c value)
               (true
@@ -2480,15 +3094,27 @@
               (let
                 ((trimmed
                    data:view
-                   (data:view (pointer-offset (field text bytes) start) (- end start)))
+                   (data:view
+                     (pointer-offset (field text bytes) start)
+                     (- end start)))
                  (first u8 (deref (field trimmed bytes)))
                  (skip u64 (match first (43 1) (45 1) (_ 0))))
                 (do
-                  (validate-number-text c site trimmed skip (& dot) (& digits) config)
+                  (validate-number-text
+                    c
+                    site
+                    trimmed
+                    skip
+                    (& dot)
+                    (& digits)
+                    config)
                   (match dot
                     (false (text-node c site 69 trimmed))
                     (true
-                      (float-result c site (numeric-float c site (text-node c site 35 trimmed))))))))))))))
+                      (float-result
+                        c
+                        site
+                        (numeric-float c site (text-node c site 35 trimmed))))))))))))))
 
 (base:function eval-call
   ((c m:context)
@@ -2504,9 +3130,18 @@
        (m:require
          c
          site
-         (match (== (field (m:at c args) kind) 1) (true (> (m:next c args) 0)) (false false))
+         (match (== (field (m:at c args) kind) 1)
+           (true (> (m:next c args) 0))
+           (false false))
          "compile-time let requires bindings and a body")
-       (eval-bindings c module (m:child c args) (m:next c args) env (m:empty-env) config)))
+       (eval-bindings
+         c
+         module
+         (m:child c args)
+         (m:next c args)
+         env
+         (m:empty-env)
+         config)))
     ((m:is c head "cond")
      (do (validate-clauses c args) (eval-clauses c module site args env config)))
     ((m:is c head "and") (eval-logical c module site args env config true))
@@ -2514,39 +3149,85 @@
     (true
       (let ((macro u64 (lookup c head)))
         (do
-          (m:require c head (== (m:lookup c head env) 0) "compile-time value is not callable")
+          (m:require
+            c
+            head
+            (== (m:lookup c head env) 0)
+            "compile-time value is not callable")
           (base:cond
             ((> macro 0)
              (let
                ((value u64 (invoke c module site macro args config))
                 (result u64 (rehydrate c value (m:owner c site))))
                (eval c module result env config)))
-            ((base:or (m:is c head "number->string") (m:is c head "string->number"))
+            ((base:or
+               (m:is c head "number->string")
+               (m:is c head "string->number"))
              (conversion-call c module site head args env config))
             ((> (numeric-code c head) 0)
              (numeric-call c module site args env config (numeric-code c head)))
             ((> (collection-code c head) 0)
-             (collection-call c module site args env config (collection-code c head)))
+             (collection-call
+               c
+               module
+               site
+               args
+               env
+               config
+               (collection-code c head)))
             ((> (context-code c head) 0)
              (context-call c module site args env config (context-code c head)))
             ((> (string-code c head) 0)
              (string-call c module site args env config (string-code c head)))
             ((> (helper-code c head) 0)
-             (helper-call c module site head args env config (helper-code c head)))
-            ((m:is c head "symbol-concat") (symbol-concat c module site args env config))
-            ((state-operation c head) (eval-state c module site head args env config))
+             (helper-call
+               c
+               module
+               site
+               head
+               args
+               env
+               config
+               (helper-code c head)))
+            ((m:is c head "symbol-concat")
+             (symbol-concat c module site args env config))
+            ((state-operation c head)
+             (eval-state c module site head args env config))
             ((m:is c head "nth") (eval-nth c module site args env config))
-            ((m:is c head "plist-ref") (eval-plist-ref c module site args env config))
-            ((base:or (m:is c head "compiler:reduce") (m:is c head "compiler:reduce-right"))
-             (eval-reduction c module site args env config (m:is c head "compiler:reduce-right")))
-            ((m:is c head "list") (list-value c site (eval-items c module args env config)))
+            ((m:is c head "plist-ref")
+             (eval-plist-ref c module site args env config))
+            ((base:or
+               (m:is c head "compiler:reduce")
+               (m:is c head "compiler:reduce-right"))
+             (eval-reduction
+               c
+               module
+               site
+               args
+               env
+               config
+               (m:is c head "compiler:reduce-right")))
+            ((m:is c head "list")
+             (list-value c site (eval-items c module args env config)))
             ((m:is c head "cons")
              (do
-               (m:require c site (check:arity c args 2) "compile-time cons requires two arguments")
+               (m:require
+                 c
+                 site
+                 (check:arity c args 2)
+                 "compile-time cons requires two arguments")
                (let
                  ((item u64 (eval c module args env config))
-                  (tail u64 (require-list c site (eval c module (m:next c args) env config))))
-                 (list-value c site (attach c item (m:child c item) (m:child c tail))))))
+                  (tail
+                    u64
+                    (require-list
+                      c
+                      site
+                      (eval c module (m:next c args) env config))))
+                 (list-value
+                   c
+                   site
+                   (attach c item (m:child c item) (m:child c tail))))))
             ((m:is c head "equal?")
              (do
                (m:require
@@ -2560,9 +3241,19 @@
                  (boolean-value c site (equal-value c left right config)))))
             ((m:is c head "not")
              (do
-               (m:require c site (check:arity c args 1) "compile-time not requires one argument")
-               (boolean-value c site (base:not (condition c site (eval c module args env config))))))
-            ((base:or (m:is c head "car") (m:is c head "cdr") (m:is c head "empty?"))
+               (m:require
+                 c
+                 site
+                 (check:arity c args 1)
+                 "compile-time not requires one argument")
+               (boolean-value
+                 c
+                 site
+                 (base:not (condition c site (eval c module args env config))))))
+            ((base:or
+               (m:is c head "car")
+               (m:is c head "cdr")
+               (m:is c head "empty?"))
              (do
                (m:require
                  c
@@ -2570,29 +3261,47 @@
                  (check:arity c args 1)
                  "compile-time list operation requires one argument")
                (let
-                 ((value u64 (require-list c site (eval c module args env config)))
+                 ((value
+                    u64
+                    (require-list c site (eval c module args env config)))
                   (child u64 (m:child c value)))
                  (base:cond
                    ((m:is c head "empty?") (boolean-value c site (== child 0)))
-                   ((== child 0) (do (m:error c site "car/cdr require a non-empty list") 0))
+                   ((== child 0)
+                    (do (m:error c site "car/cdr require a non-empty list") 0))
                    ((m:is c head "cdr") (list-value c site (m:next c child)))
                    (true (attach c child (m:child c child) 0))))))
             (true (m:error c site "unsupported compile-time call") 0)))))))
 
-(base:function eval ((c m:context) (module u64) (site u64) (env (pointer void)) (config evaluation))
-  u64
+(base:function eval
+  ((c m:context)
+   (module u64)
+   (site u64)
+   (env (pointer void))
+   (config evaluation)) u64
   (let ((next evaluation (tick c site config)))
     (match (syntax-kind c site)
       (0
         (base:cond
           ((check:integer-node c site) site)
-          ((match (field (m:at c site) generated) (0 (m:is c site "true")) (_ false)) site)
-          ((match (field (m:at c site) generated) (0 (m:is c site "false")) (_ false)) site)
-          ((match (field (m:at c site) generated) (0 (m:is c site "unit")) (_ false)) site)
+          ((match (field (m:at c site) generated)
+             (0 (m:is c site "true"))
+             (_ false))
+           site)
+          ((match (field (m:at c site) generated)
+             (0 (m:is c site "false"))
+             (_ false))
+           site)
+          ((match (field (m:at c site) generated)
+             (0 (m:is c site "unit"))
+             (_ false))
+           site)
           ((m:is c site "nil") (list-value c site 0))
           (true
             (let ((value u64 (m:lookup c site env)))
-              (do (m:require c site (> value 0) "unknown compile-time name") value)))))
+              (do
+                (m:require c site (> value 0) "unknown compile-time name")
+                value)))))
       (3 site)
       (25 site)
       (26 site)
@@ -2601,12 +3310,21 @@
       (29 (template c module (operand c site) env next 1))
       (30
         (do
-          (m:require c site (field config unquote) "unquote is valid only inside quasiquote")
+          (m:require
+            c
+            site
+            (field config unquote)
+            "unquote is valid only inside quasiquote")
           (eval c module (operand c site) env next)))
-      (31 (do (m:error c site "unquote-splicing is valid only inside quasiquote") 0))
+      (31
+        (do
+          (m:error c site "unquote-splicing is valid only inside quasiquote")
+          0))
       (1
         (let ((head u64 (m:child c site)))
-          (match head (0 site) (_ (eval-call c module site head (m:next c head) env next)))))
+          (match head
+            (0 site)
+            (_ (eval-call c module site head (m:next c head) env next)))))
       (_ (do (m:error c site "unsupported compile-time expression") 0)))))
 
 (base:function form ((c m:context) (id u64)) bool
@@ -2653,7 +3371,9 @@
             (+ owner 1)))))))
 
 (base:function rehydrate ((c m:context) (value u64) (owner u64)) u64
-  (let ((v m:node (m:at c value)) (child u64 (result-tree c (field v child) owner)))
+  (let
+    ((v m:node (m:at c value))
+     (child u64 (result-tree c (field v child) owner)))
     (m:add
       c
       (m:node
@@ -2670,27 +3390,55 @@
 
 ; Generated declaration roots retain the invocation's location and module.
 (base:function expand-results
-  ((c m:context) (site m:node) (id u64) (fuel u64) (first (pointer u64)) (tail (pointer u64))) unit
+  ((c m:context)
+   (site m:node)
+   (id u64)
+   (fuel u64)
+   (first (pointer u64))
+   (tail (pointer u64))) unit
   (match id
     (0 unit)
     (_
       (let
         ((root
            u64
-           (m:add c (m:node 1 (field site start) (field site length) (m:child c id) 0 0 0 0 0 0))))
-        (do (expand c root fuel first tail) (expand-results c site (m:next c id) fuel first tail))))))
+           (m:add
+             c
+             (m:node
+               1
+               (field site start)
+               (field site length)
+               (m:child c id)
+               0
+               0
+               0
+               0
+               0
+               0))))
+        (do
+          (expand c root fuel first tail)
+          (expand-results c site (m:next c id) fuel first tail))))))
 
 (base:function append-declaration
   ((c m:context) (root u64) (first (pointer u64)) (tail (pointer u64))) unit
   (let ((v m:node (m:at c root)))
     (do
-      (m:set c root (m:node 1 (field v start) (field v length) (field v child) 0 0 0 0 0 0))
-      (match (deref tail) (0 (store (deref first) root)) (_ (m:link c (deref tail) root)))
+      (m:set
+        c
+        root
+        (m:node 1 (field v start) (field v length) (field v child) 0 0 0 0 0 0))
+      (match (deref tail)
+        (0 (store (deref first) root))
+        (_ (m:link c (deref tail) root)))
       (store (deref tail) root)
       unit)))
 
 (base:function expand
-  ((c m:context) (root u64) (fuel u64) (first (pointer u64)) (tail (pointer u64))) unit
+  ((c m:context)
+   (root u64)
+   (fuel u64)
+   (first (pointer u64))
+   (tail (pointer u64))) unit
   (let ((head u64 (m:child c root)) (macro u64 (lookup c head)))
     (base:cond
       ((> macro 0)
@@ -2707,8 +3455,20 @@
              (let
                ((value
                   u64
-                  (invoke c (m:owner c root) root macro args (evaluation (& budget) 0 false)))
-                (result u64 (attach c value (result-tree c (m:child c value) (m:owner c root)) 0)))
+                  (invoke
+                    c
+                    (m:owner c root)
+                    root
+                    macro
+                    args
+                    (evaluation (& budget) 0 false)))
+                (result
+                  u64
+                  (attach
+                    c
+                    value
+                    (result-tree c (m:child c value) (m:owner c root))
+                    0)))
                (do
                  (m:require
                    c
@@ -2721,12 +3481,28 @@
                        (m:set
                          c
                          root
-                         (m:node 1 (field v start) (field v length) (m:child c result) 0 0 0 0 0 0))
+                         (m:node
+                           1
+                           (field v start)
+                           (field v length)
+                           (m:child c result)
+                           0
+                           0
+                           0
+                           0
+                           0
+                           0))
                        (expand c root remaining first tail)))
                    (false
                      (do
                        (validate-forms c (m:child c result))
-                       (expand-results c v (m:child c result) remaining first tail))))))))))
+                       (expand-results
+                         c
+                         v
+                         (m:child c result)
+                         remaining
+                         first
+                         tail))))))))))
       ((m:is c head "%macro") (install c root))
       ; The seed installs the first source-defined macro, which can shadow it.
       ((m:is c head "macro") (install c root))
@@ -2737,16 +3513,24 @@
          (m:is c head "and")
          (m:is c head "or"))
        (let ((budget u64 100000))
-         (do (eval c (m:owner c root) root (m:empty-env) (evaluation (& budget) 0 false)) unit)))
+         (do
+           (eval
+             c
+             (m:owner c root)
+             root
+             (m:empty-env)
+             (evaluation (& budget) 0 false))
+           unit)))
       (true (append-declaration c root first tail)))))
 
-(base:function declaration ((c m:context) (root u64) (first (pointer u64)) (tail (pointer u64)))
-  unit
+(base:function declaration
+  ((c m:context) (root u64) (first (pointer u64)) (tail (pointer u64))) unit
   (expand c root expansion-limit first tail))
 
 ; Expand only the outer expression. The checker requests nested executable
 ; positions lazily, so patterns, type syntax, and unused templates are untouched.
-(base:function expression-loop ((c m:context) (id u64) (fuel u64) (budget (pointer u64))) unit
+(base:function expression-loop
+  ((c m:context) (id u64) (fuel u64) (budget (pointer u64))) unit
   (match (field (m:at c id) kind)
     (1
       (let ((macro u64 (lookup c (m:child c id))))
@@ -2792,7 +3576,8 @@
                   (expression-loop c id (- fuel 1) budget))))))))
     (_ unit)))
 
-(base:function cached-expansion ((c m:context) (entry u64) (origin u64) (config evaluation)) u64
+(base:function cached-expansion
+  ((c m:context) (entry u64) (origin u64) (config evaluation)) u64
   (match entry
     (0 0)
     (_
@@ -2814,8 +3599,12 @@
       (false (expression-loop c id expansion-limit (& budget)))
       (true
         (let
-          ((session (pointer m:module-session) (cast (pointer m:module-session) (field c session)))
-           (origin u64 (match (field site value) (0 id) (value (base:convert value))))
+          ((session
+             (pointer m:module-session)
+             (cast (pointer m:module-session) (field c session)))
+           (origin
+             u64
+             (match (field site value) (0 id) (value (base:convert value))))
            (cached
              u64
              (cached-expansion

@@ -5,9 +5,17 @@
 (import core.numeric :as num)
 (import data)
 
-(base:external-function decimal-to-float "strtof" ((pointer u8) (pointer (pointer u8))) f32)
+(base:external-function
+  decimal-to-float
+  "strtof"
+  ((pointer u8) (pointer (pointer u8)))
+  f32)
 
-(base:external-function decimal-to-double "strtod" ((pointer u8) (pointer (pointer u8))) f64)
+(base:external-function
+  decimal-to-double
+  "strtod"
+  ((pointer u8) (pointer (pointer u8)))
+  f64)
 
 ; Keep IEEE bits in the existing scalar payload. f32 uses the low 32 bits.
 (base:function pack32 ((value f32)) i64
@@ -39,15 +47,21 @@
                 (_ (pack64 (decimal-to-double bytes (& end)))))))
            (match (finite ty (base:convert bits))
              (true (m:typed c id 36 ty 0 bits))
-             (false (do (m:report c id "floating-point literal out of range") 0))))))
-      (_ (do (m:report c id "floating-point literal storage allocation failed") 0)))))
+             (false
+               (do (m:report c id "floating-point literal out of range") 0))))))
+      (_
+        (do
+          (m:report c id "floating-point literal storage allocation failed")
+          0)))))
 
 (base:function parse ((c m:context) (id u64) (ty u64)) u64
   (match (field (m:at c id) kind)
     (71
       (let
         ((value i64 (field (m:at c id) value))
-         (bits i64 (match ty (12 (pack32 (base:convert (unpack64 value)))) (_ value))))
+         (bits
+           i64
+           (match ty (12 (pack32 (base:convert (unpack64 value)))) (_ value))))
         (match (finite ty (base:convert bits))
           (true (m:typed c id 36 ty 0 bits))
           (false (do (m:report c id "floating-point literal out of range") 0)))))
@@ -98,8 +112,11 @@
          ((== to 12) (pack32 (base:convert value)))
          ((== to 13) (pack64 value))
          ((num:signed-type to)
-          (let ((signed i64 (base:convert value))) (num:normalize to (base:convert signed))))
-         (true (let ((unsigned u64 (base:convert value))) (num:normalize to unsigned))))))
+          (let ((signed i64 (base:convert value)))
+            (num:normalize to (base:convert signed))))
+         (true
+           (let ((unsigned u64 (base:convert value)))
+             (num:normalize to unsigned))))))
     ((== to 12)
      (pack32
        (match (num:signed-type from)
@@ -111,4 +128,14 @@
           (true (base:convert bits))
           (false (base:convert (%reinterpret-primitive-i64-u64 bits))))))))
 
-(export decimal-to-double finite parse pack32 pack64 unpack32 unpack64 arithmetic compare convert)
+(export
+  decimal-to-double
+  finite
+  parse
+  pack32
+  pack64
+  unpack32
+  unpack64
+  arithmetic
+  compare
+  convert)

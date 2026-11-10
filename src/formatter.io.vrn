@@ -11,17 +11,27 @@
 (base:function interrupted () bool
   (== (deref (errno:errno-pointer)) constants:EINTR))
 
-(base:function read-loop ((fd i32) (input (pointer data:data)) (scratch data:data)) m:status
+(base:function read-loop
+  ((fd i32) (input (pointer data:data)) (scratch data:data)) m:status
   (let
-    ((count i64 (native:read fd (cast (pointer void) (data:bytes scratch)) (data:length scratch))))
+    ((count
+       i64
+       (native:read
+         fd
+         (cast (pointer void) (data:bytes scratch))
+         (data:length scratch))))
     (match (< count 0)
       (true
-        (match (interrupted) (true (read-loop fd input scratch)) (false (m:io "cannot read input"))))
+        (match (interrupted)
+          (true (read-loop fd input scratch))
+          (false (m:io "cannot read input"))))
       (false
         (match (== count 0)
           (true (m:success))
           (false
-            (let ((size u64 (base:convert count)) (old u64 (data:length (deref input))))
+            (let
+              ((size u64 (base:convert count))
+               (old u64 (data:length (deref input))))
               (match (> size (- 16777216 old))
                 (true (m:limit old "input limit (16 MiB) exceeded"))
                 (false
@@ -47,10 +57,14 @@
 
 (base:function read ((fd i32) (input (pointer data:data))) m:status
   (let
-    ((scratch data:data (data:empty (field (tuple-get (deref input) 3) allocator)))
+    ((scratch
+       data:data
+       (data:empty (field (tuple-get (deref input) 3) allocator)))
      (result
        m:status
-       (m:steps (m:from-storage (data:resize (& scratch) 8192)) (read-loop fd input scratch))))
+       (m:steps
+         (m:from-storage (data:resize (& scratch) 8192))
+         (read-loop fd input scratch))))
     (do (data:destroy (& scratch)) result)))
 
 (base:function load ((path (pointer u8)) (input (pointer data:data))) m:status
@@ -61,9 +75,11 @@
         (match fd
           (-1 (m:io "cannot open input"))
           (_
-            (let ((result m:status (read fd input)) (closed i32 (native:close fd)))
+            (let
+              ((result m:status (read fd input)) (closed i32 (native:close fd)))
               (match result
-                ((ok) (match closed (0 (m:success)) (_ (m:io "cannot close input"))))
+                ((ok)
+                 (match closed (0 (m:success)) (_ (m:io "cannot close input"))))
                 (failure failure)))))))))
 
 (base:function write ((fd i32) (view data:view)) m:status
@@ -71,9 +87,17 @@
     (true (m:success))
     (false
       (let
-        ((count i64 (native:write fd (cast (pointer void) (field view bytes)) (field view length))))
+        ((count
+           i64
+           (native:write
+             fd
+             (cast (pointer void) (field view bytes))
+             (field view length))))
         (match (< count 0)
-          (true (match (interrupted) (true (write fd view)) (false (m:io "cannot write output"))))
+          (true
+            (match (interrupted)
+              (true (write fd view))
+              (false (m:io "cannot write output"))))
           (false
             (match (== count 0)
               (true (m:io "output made no progress"))

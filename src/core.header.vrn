@@ -31,7 +31,10 @@
   (m:storage (format:append-view (field c out) value 0 (field value length))))
 
 (base:function hex-digit ((c context) (value u64)) unit
-  (m:storage (data:append (field c out) (deref (pointer-offset "0123456789ABCDEF" value)))))
+  (m:storage
+    (data:append
+      (field c out)
+      (deref (pointer-offset "0123456789ABCDEF" value)))))
 
 (base:function hex ((c context) (value u64) (places u64)) unit
   (match places
@@ -46,17 +49,24 @@
     (true unit)
     (false
       (do
-        (hex c (base:convert (deref (pointer-offset (field value bytes) index))) 6)
+        (hex
+          c
+          (base:convert (deref (pointer-offset (field value bytes) index)))
+          6)
         (mangled c value (+ index 1))))))
 
 (base:function identifier ((c context) (value data:view) (index u64)) unit
   (match (== index (field value length))
     (true unit)
     (false
-      (let ((b u64 (base:convert (deref (pointer-offset (field value bytes) index)))))
+      (let
+        ((b
+           u64
+           (base:convert (deref (pointer-offset (field value bytes) index)))))
         (do
           (match (base:or (check:letter b) (check:digit b) (== b 95))
-            (true (bytes c (data:view (pointer-offset (field value bytes) index) 1)))
+            (true
+              (bytes c (data:view (pointer-offset (field value bytes) index) 1)))
             (false (do (text c "_") (hex c b 2))))
           (identifier c value (+ index 1)))))))
 
@@ -69,7 +79,9 @@
         (true unit)
         (false
           (let ((name (pointer u8) (field (m:file-info p (m:owner p id)) name)))
-            (do (mangled c (data:view name (cstring:strlen name)) 0) (text c "_")))))
+            (do
+              (mangled c (data:view name (cstring:strlen name)) 0)
+              (text c "_")))))
       (mangled c (m:spelling p (m:next p (m:child p id))) 0))))
 
 (base:function mangle ((c context) (ty u64)) unit
@@ -79,10 +91,12 @@
        (do
          (text c (match (num:signed-type ty) (true "i") (false "u")))
          (digits c (base:convert (num:width ty)))))
-      ((num:float-type ty) (do (text c "f") (digits c (base:convert (num:width ty)))))
+      ((num:float-type ty)
+       (do (text c "f") (digits c (base:convert (num:width ty)))))
       ((== ty 2) (text c "bool"))
       ((== ty 14) (text c "void"))
-      ((check:pointer-value-type p ty) (do (text c "p_") (mangle c (check:pointer-pointee p ty))))
+      ((check:pointer-value-type p ty)
+       (do (text c "p_") (mangle c (check:pointer-pointee p ty))))
       ((== (check:type-kind p ty) 49)
        (do
          (text c "a")
@@ -132,7 +146,10 @@
   (let ((p m:context (field c program)))
     (match (check:pointer-value-type p ty)
       (false
-        (do (spelling c ty) (match (field name length) (0 unit) (_ (text c " "))) (bytes c name)))
+        (do
+          (spelling c ty)
+          (match (field name length) (0 unit) (_ (text c " ")))
+          (bytes c name)))
       (true
         (let
           ((out data:data (data:empty (arena:allocator (field p memory))))
@@ -150,24 +167,35 @@
                     (text nested ")")
                     (declarator c (field v target) (data:borrow out)))))
               (false
-                (do (text nested "*") (bytes nested name) (declarator c pointee (data:borrow out)))))))))))
+                (do
+                  (text nested "*")
+                  (bytes nested name)
+                  (declarator c pointee (data:borrow out)))))))))))
 
 (base:function parameters ((c context) (id u64) (index u64) (named bool)) unit
   (match id
     (0 (match index (0 (text c "void")) (_ unit)))
     (_
       (let
-        ((out data:data (data:empty (arena:allocator (field (field c program) memory))))
+        ((out
+           data:data
+           (data:empty (arena:allocator (field (field c program) memory))))
          (name context (context (field c program) (& out))))
         (do
           (match index (0 unit) (_ (text c ", ")))
-          (match named (true (do (text name "arg") (digits name index))) (_ unit))
-          (declarator c (check:parameter-type (field c program) id) (data:borrow out))
+          (match named
+            (true (do (text name "arg") (digits name index)))
+            (_ unit))
+          (declarator
+            c
+            (check:parameter-type (field c program) id)
+            (data:borrow out))
           (parameters c (m:next (field c program) id) (+ index 1) named))))))
 
 ; Visit each descriptor once, including through recursive pointers. Children
 ; precede their by-value parents; forward declarations cover pointer cycles.
-(base:function visit ((c context) (ty u64) (seen (pointer u8)) (ordered (pointer ids-array))) unit
+(base:function visit
+  ((c context) (ty u64) (seen (pointer u8)) (ordered (pointer ids-array))) unit
   (match (> ty num:descriptor-base)
     (false unit)
     (true
@@ -185,7 +213,8 @@
                       (visit-components c (field v child) seen ordered)
                       (visit c (field v target) seen ordered))))
                 (49 (visit c (check:array-element p ty) seen ordered))
-                (20 (visit-components c (check:type-components p ty) seen ordered))
+                (20
+                  (visit-components c (check:type-components p ty) seen ordered))
                 (21 (visit-cases c (check:type-components p ty) seen ordered))
                 (_ unit))
               (match (check:type-kind p ty)
@@ -204,25 +233,36 @@
         (visit c (check:parameter-type (field c program) id) seen ordered)
         (visit-components c (m:next (field c program) id) seen ordered)))))
 
-(base:function visit-cases ((c context) (id u64) (seen (pointer u8)) (ordered (pointer ids-array)))
-  unit
+(base:function visit-cases
+  ((c context) (id u64) (seen (pointer u8)) (ordered (pointer ids-array))) unit
   (match id
     (0 unit)
     (_
       (do
-        (visit-components c (m:next (field c program) (m:child (field c program) id)) seen ordered)
+        (visit-components
+          c
+          (m:next (field c program) (m:child (field c program) id))
+          seen
+          ordered)
         (visit-cases c (m:next (field c program) id) seen ordered)))))
 
-(base:function collect ((c context) (id u64) (seen (pointer u8)) (ordered (pointer ids-array))) unit
+(base:function collect
+  ((c context) (id u64) (seen (pointer u8)) (ordered (pointer ids-array))) unit
   (match id
     (0 unit)
     (_
       (do
         (match (field (m:at (field c program) id) kind)
           (68
-            (let ((p m:context (field c program)) (fn u64 (field (m:at p id) target)))
+            (let
+              ((p m:context (field c program))
+               (fn u64 (field (m:at p id) target)))
               (do
-                (visit-components c (m:child p (check:signature p fn)) seen ordered)
+                (visit-components
+                  c
+                  (m:child p (check:signature p fn))
+                  seen
+                  ordered)
                 (visit c (field (m:at p fn) ty) seen ordered))))
           (_ unit))
         (collect c (m:next (field c program) id) seen ordered)))))
@@ -236,7 +276,10 @@
 (base:function zero-components ((p m:context) (id u64)) bool
   (match id
     (0 true)
-    (_ (base:and-then (zero-size p (check:parameter-type p id)) (zero-components p (m:next p id))))))
+    (_
+      (base:and-then
+        (zero-size p (check:parameter-type p id))
+        (zero-components p (m:next p id))))))
 
 (base:function fields ((c context) (id u64) (index u64) (named bool)) unit
   (match id
@@ -298,7 +341,11 @@
               (text name "]")
               (declarator c (check:array-element p ty) (data:borrow out))
               (text c "; };\n"))))
-        (20 (do (text c " {\n") (fields c (check:type-components p ty) 0 true) (text c "};\n")))
+        (20
+          (do
+            (text c " {\n")
+            (fields c (check:type-components p ty) 0 true)
+            (text c "};\n")))
         (21
           (do
             (text c " {\n  int32_t tag;\n")
@@ -312,7 +359,8 @@
             (text c "};\n")))
         (_ (m:fatal "internal error: invalid C header aggregate"))))))
 
-(base:function declarations ((c context) (ordered ids-array) (index u64) (forward bool)) unit
+(base:function declarations
+  ((c context) (ordered ids-array) (index u64) (forward bool)) unit
   (match (== index (ids-length ordered))
     (true unit)
     (false
@@ -347,7 +395,8 @@
 
 ; Replace the artifact's final extension, without treating directory dots as
 ; extensions. Library output paths are explicit until manifest builds arrive.
-(base:function extension ((path (pointer u8)) (index u64) (end u64) (last u64)) u64
+(base:function extension ((path (pointer u8)) (index u64) (end u64) (last u64))
+  u64
   (match (== index end)
     (true last)
     (false
@@ -370,7 +419,8 @@
      (path data:data (data:empty (arena:allocator (field p memory))))
      (length u64 (cstring:strlen output)))
     (do
-      (m:storage (data:resize (& seen) (m:nodes-length (deref (field p items)))))
+      (m:storage
+        (data:resize (& seen) (m:nodes-length (deref (field p items)))))
       (collect c all (data:bytes seen) (& ordered))
       (text
         c
@@ -380,20 +430,39 @@
       (declarations c ordered 0 false)
       (text c "\n")
       (exports c all)
-      (m:storage (data:assign-bytes (& path) (data:view output (extension output 0 length length))))
+      (m:storage
+        (data:assign-bytes
+          (& path)
+          (data:view output (extension output 0 length length))))
       (format:append (& path) ".h")
       (m:storage (data:append (& path) 0))
-      (let ((file (pointer types:file-stream) (stdio:fopen (data:bytes path) "wb")))
+      (let
+        ((file (pointer types:file-stream) (stdio:fopen (data:bytes path) "wb")))
         (match (base:is-null (cast (pointer void) file))
-          (true (do (m:text constants:STDERR-FILENO "cannot create library header\n") false))
+          (true
+            (do
+              (m:text constants:STDERR-FILENO "cannot create library header\n")
+              false))
           (false
             (let
               ((count
                  u64
-                 (stdio:fwrite (cast (pointer void) (data:bytes out)) 1 (data:length out) file))
+                 (stdio:fwrite
+                   (cast (pointer void) (data:bytes out))
+                   1
+                   (data:length out)
+                   file))
                (closed i32 (stdio:fclose file)))
-              (match (base:and (== count (data:length out)) (match closed (0 true) (_ false)))
+              (match
+                (base:and
+                  (== count (data:length out))
+                  (match closed (0 true) (_ false)))
                 (true true)
-                (false (do (m:text constants:STDERR-FILENO "cannot write library header\n") false))))))))))
+                (false
+                  (do
+                    (m:text
+                      constants:STDERR-FILENO
+                      "cannot write library header\n")
+                    false))))))))))
 
 (export write)

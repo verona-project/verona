@@ -4,18 +4,24 @@
 (import formatter.model :as m)
 
 ; Byte-oriented output with bounded storage; literal lexemes are never rewritten.
-(base:function byte ((out (pointer data:data)) (column (pointer u64)) (value u8)) m:status
+(base:function byte
+  ((out (pointer data:data)) (column (pointer u64)) (value u8)) m:status
   (match (>= (data:length (deref out)) 67108864)
     (true (m:limit 0 "formatted output limit (64 MiB) exceeded"))
     (false
       (m:steps
         (m:from-storage (data:append out value))
         (do
-          (store (deref column) (match value (10 0) (13 0) (_ (+ (deref column) 1))))
+          (store
+            (deref column)
+            (match value (10 0) (13 0) (_ (+ (deref column) 1))))
           (m:success))))))
 
 (base:function raw
-  ((out (pointer data:data)) (column (pointer u64)) (bytes (pointer u8)) (size u64)) m:status
+  ((out (pointer data:data))
+   (column (pointer u64))
+   (bytes (pointer u8))
+   (size u64)) m:status
   (match (== size 0)
     (true (m:success))
     (false
@@ -28,10 +34,18 @@
               (raw out column (pointer-offset bytes half) (- size half)))))))))
 
 (base:function token
-  ((source data:view) (node m:node) (out (pointer data:data)) (column (pointer u64))) m:status
-  (raw out column (pointer-offset (field source bytes) (field node start)) (field node length)))
+  ((source data:view)
+   (node m:node)
+   (out (pointer data:data))
+   (column (pointer u64))) m:status
+  (raw
+    out
+    column
+    (pointer-offset (field source bytes) (field node start))
+    (field node length)))
 
-(base:function spaces ((out (pointer data:data)) (column (pointer u64)) (count u64)) m:status
+(base:function spaces
+  ((out (pointer data:data)) (column (pointer u64)) (count u64)) m:status
   (match (== count 0)
     (true (m:success))
     (false
@@ -39,11 +53,16 @@
         (true (byte out column 32))
         (false
           (let ((half u64 (/ count 2)))
-            (m:steps (spaces out column half) (spaces out column (- count half)))))))))
+            (m:steps
+              (spaces out column half)
+              (spaces out column (- count half)))))))))
 
-(base:function line ((out (pointer data:data)) (column (pointer u64)) (indent u64)) m:status
+(base:function line
+  ((out (pointer data:data)) (column (pointer u64)) (indent u64)) m:status
   (m:steps
-    (match (== (deref column) 0) (true (m:success)) (false (byte out column 10)))
+    (match (== (deref column) 0)
+      (true (m:success))
+      (false (byte out column 10)))
     (spaces out column indent)))
 
 (base:function blank ((out (pointer data:data)) (column (pointer u64))) m:status

@@ -11,7 +11,13 @@
   (match (> a b) (true a) (false b)))
 
 (base:function add ((c m:context) (a u64) (b u64)) u64
-  (do (m:require c 0 (<= a (- (cast u64 18446744073709551615) b)) "object layout overflow") (+ a b)))
+  (do
+    (m:require
+      c
+      0
+      (<= a (- (cast u64 18446744073709551615) b))
+      "object layout overflow")
+    (+ a b)))
 
 (base:function align ((c m:context) (size u64) (alignment u64)) u64
   (let ((rest u64 (num:remainder size alignment)))
@@ -48,7 +54,8 @@
 (base:function of ((c m:context) (ty u64)) layout
   (base:cond
     ((== ty 2) (layout 1 1))
-    ((num:integer-type ty) (let ((size u64 (/ (num:width ty) 8))) (layout size size)))
+    ((num:integer-type ty)
+     (let ((size u64 (/ (num:width ty) 8))) (layout size size)))
     ((== ty 12) (layout 4 4))
     ((match ty (1 true) (11 true) (13 true) (_ false)) (layout 8 8))
     (true
@@ -58,7 +65,8 @@
         (22 (fields c (check:type-components c ty) 0 1))
         (49
           (let
-            ((part layout (of c (check:array-element c ty))) (count u64 (check:array-length c ty)))
+            ((part layout (of c (check:array-element c ty)))
+             (count u64 (check:array-length c ty)))
             (do
               (match (field part size)
                 (0 unit)
@@ -66,17 +74,25 @@
                   (m:require
                     c
                     0
-                    (<= count (/ (cast u64 18446744073709551615) (field part size)))
+                    (<=
+                      count
+                      (/ (cast u64 18446744073709551615) (field part size)))
                     "object layout overflow")))
               (layout (* count (field part size)) (field part alignment)))))
         (21
           (let
             ((payload layout (union-layout c ty))
              (alignment u64 (maximum 4 (field payload alignment))))
-            (layout (align c (add c (union-offset c ty) (field payload size)) alignment) alignment)))
+            (layout
+              (align
+                c
+                (add c (union-offset c ty) (field payload size))
+                alignment)
+              alignment)))
         (_ (do (m:error c 0 "incomplete object layout") (layout 0 1)))))))
 
-(base:function component-offset ((c m:context) (fields u64) (index u64) (offset u64)) u64
+(base:function component-offset
+  ((c m:context) (fields u64) (index u64) (offset u64)) u64
   (match fields
     (0 offset)
     (_
@@ -85,6 +101,11 @@
          (start u64 (align c offset (field part alignment))))
         (match index
           (0 start)
-          (_ (component-offset c (m:next c fields) (- index 1) (add c start (field part size)))))))))
+          (_
+            (component-offset
+              c
+              (m:next c fields)
+              (- index 1)
+              (add c start (field part size)))))))))
 
 (export align layout of component-offset union-offset fields)

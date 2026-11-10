@@ -13,11 +13,16 @@
 ; Transactional output: failures leave an existing destination unchanged.
 ; Source may borrow the destination, since all rendering precedes the commit.
 (base:function perform
-  ((source data:view) (width u64) (out (pointer data:data)) (backing allocator:backend)) m:status
+  ((source data:view)
+   (width u64)
+   (out (pointer data:data))
+   (backing allocator:backend)) m:status
   (let
     ((workspace arena:arena (arena:create backing 4096))
      (items m:tape (m:empty (arena:allocator (& workspace))))
-     (staging data:data (data:empty (field (tuple-get (deref out) 3) allocator)))
+     (staging
+       data:data
+       (data:empty (field (tuple-get (deref out) 3) allocator)))
      (result
        m:status
        (m:steps
@@ -32,7 +37,10 @@
         (failure (do (data:destroy (& staging)) failure))))))
 
 (base:function format
-  ((source data:view) (width u64) (out (pointer data:data)) (backing allocator:backend)) m:status
+  ((source data:view)
+   (width u64)
+   (out (pointer data:data))
+   (backing allocator:backend)) m:status
   (match (< width 20)
     (true (m:limit 0 "width must be between 20 and 240"))
     (false

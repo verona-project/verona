@@ -11,7 +11,8 @@
 (import libc.string :as cstring)
 (import libc.constants :as lconstants)
 
-(base:function require ((c m:context) (id u64) (condition bool) (message (pointer u8))) unit
+(base:function require
+  ((c m:context) (id u64) (condition bool) (message (pointer u8))) unit
   (match condition (true unit) (false (m:report c id message))))
 
 ; Test whether a sibling chain contains exactly count nodes.
@@ -31,8 +32,12 @@
   (let ((ty u64 (type-reference c id)))
     (base:cond
       ((== ty 14) (m:report c id "void type requires a pointer") 0)
-      ((== (type-kind c ty) 33) (m:report c id "opaque type requires a pointer") 0)
-      ((== (type-kind c ty) 46) (m:report c id "function type requires a pointer") 0)
+      ((== (type-kind c ty) 33)
+       (m:report c id "opaque type requires a pointer")
+       0)
+      ((== (type-kind c ty) 46)
+       (m:report c id "function type requires a pointer")
+       0)
       (true (do (resolve-value-layout c ty) ty)))))
 
 (base:function resolve-value-layout ((c m:context) (ty u64)) unit
@@ -77,11 +82,16 @@
        (true (do (m:report c id "expected concrete type") 0))))
     (true
       (let ((found u64 (type-resolve c id)))
-        (match found (0 (do (unknown-type c id) 0)) (_ (resolve-declared-type c found)))))))
+        (match found
+          (0 (do (unknown-type c id) 0))
+          (_ (resolve-declared-type c found)))))))
 
 ; Map an expanded typed i64 primitive name to its opcode; return zero for other names.
 (base:function letter ((b u64)) bool
-  (base:or (== b 95) (base:and (>= b 65) (<= b 90)) (base:and (>= b 97) (<= b 122))))
+  (base:or
+    (== b 95)
+    (base:and (>= b 65) (<= b 90))
+    (base:and (>= b 97) (<= b 122))))
 
 ; Recognize an ASCII decimal digit without interpreting its numeric value.
 (base:function digit ((b u64)) bool
@@ -97,7 +107,9 @@
         (base:cond ((letter b) true) ((digit b) true) (true (== b 45)))))
     (_
       (let ((middle u64 (+ i (/ (- end i) 2))))
-        (match (name-tail bytes i middle) (false false) (true (name-tail bytes middle end)))))))
+        (match (name-tail bytes i middle)
+          (false false)
+          (true (name-tail bytes middle end)))))))
 
 ; Require a valid, non-reserved identifier and report errors at its source location.
 (base:function identifier ((c m:context) (id u64)) unit
@@ -107,23 +119,81 @@
       (require
         c
         id
-        (match (field name length) (0 false) (_ (letter (base:convert (deref (field name bytes))))))
+        (match (field name length)
+          (0 false)
+          (_ (letter (base:convert (deref (field name bytes))))))
         "invalid identifier")
-      (require c id (name-tail (field name bytes) 0 (field name length)) "invalid identifier")
-      (require c id (match (m:is c id "if") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "let") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "function") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "true") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "false") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "unit") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "void") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "bool") (true false) (false true)) "reserved identifier")
+      (require
+        c
+        id
+        (name-tail (field name bytes) 0 (field name length))
+        "invalid identifier")
+      (require
+        c
+        id
+        (match (m:is c id "if") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "let") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "function") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "true") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "false") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "unit") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "void") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "bool") (true false) (false true))
+        "reserved identifier")
       (require c id (== (num:type-name c id) 0) "reserved identifier")
-      (require c id (match (m:is c id "cast") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "tuple") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "tuple-get") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "field") (true false) (false true)) "reserved identifier")
-      (require c id (match (m:is c id "match") (true false) (false true)) "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "cast") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "tuple") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "tuple-get") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "field") (true false) (false true))
+        "reserved identifier")
+      (require
+        c
+        id
+        (match (m:is c id "match") (true false) (false true))
+        "reserved identifier")
       unit)))
 
 ; Locate the parameter-list node in a structurally valid function declaration.
@@ -141,7 +211,9 @@
   (match (list c fn)
     (false false)
     (true
-      (match (arity c (m:child c fn) 5) (false false) (true (m:is c (m:child c fn) "%function"))))))
+      (match (arity c (m:child c fn) 5)
+        (false false)
+        (true (m:is c (m:child c fn) "%function"))))))
 
 (base:function constant-declaration ((c m:context) (id u64)) bool
   (m:is c (m:child c id) "%constant"))
@@ -155,7 +227,9 @@
     (true false)
     (false
       (let ((v m:binding (deref (cast (pointer m:binding) seen))))
-        (match (== ty (field v binder)) (true true) (false (c-seen ty (field v parent))))))))
+        (match (== ty (field v binder))
+          (true true)
+          (false (c-seen ty (field v parent))))))))
 
 (base:function c-components ((c m:context) (id u64) (seen (pointer void))) bool
   (match id
@@ -194,7 +268,10 @@
                  (let ((v m:node (m:at c (- pointee num:descriptor-base))))
                    (match (c-components c (field v child) rest)
                      (false false)
-                     (true (match (field v target) (14 true) (result (c-value-type c result rest)))))))
+                     (true
+                       (match (field v target)
+                         (14 true)
+                         (result (c-value-type c result rest)))))))
                 (true (c-value-type c pointee rest)))))
           (20 (c-components c (type-components c ty) rest))
           (21 (c-cases c (type-components c ty) rest))
@@ -216,14 +293,30 @@
         ((v m:node (m:at c id))
          (ty u64 (type-name c id))
          (next u64 (external-parameters c (m:next c id)))
-         (name u64 (m:add c (m:node 0 (field v start) 0 0 id ty 0 0 0 (field v lookup-module)))))
+         (name
+           u64
+           (m:add
+             c
+             (m:node 0 (field v start) 0 0 id ty 0 0 0 (field v lookup-module)))))
         (do
           (require
             c
             id
             (c-value-type c ty (m:empty-env))
             "external parameters require C-compatible value types")
-          (m:add c (m:node 1 (field v start) 0 name next ty 0 0 0 (field v lookup-module))))))))
+          (m:add
+            c
+            (m:node
+              1
+              (field v start)
+              0
+              name
+              next
+              ty
+              0
+              0
+              0
+              (field v lookup-module))))))))
 
 (base:function external-signature ((c m:context) (id u64) (all u64)) unit
   (let
@@ -234,7 +327,10 @@
      (result u64 (m:next c params)))
     (match
       (match (arity c head 5)
-        (true (match (== (field (m:at c symbol) kind) 25) (true (list c params)) (false false)))
+        (true
+          (match (== (field (m:at c symbol) kind) 25)
+            (true (list c params))
+            (false false)))
         (false false))
       (false
         (m:report
@@ -293,7 +389,19 @@
                       id
                       53
                       ty
-                      (m:add c (m:node 1 (field (m:at c params) start) 0 checked 0 0 0 0 0 0))
+                      (m:add
+                        c
+                        (m:node
+                          1
+                          (field (m:at c params) start)
+                          0
+                          checked
+                          0
+                          0
+                          0
+                          0
+                          0
+                          0))
                       (base:convert symbol))
                     unit)))
               (_ unit))))))))
@@ -338,7 +446,9 @@
     (0 unit)
     (_
       (do
-        (match (field (m:at c id) kind) (53 (external-symbols c id (m:next c id))) (_ unit))
+        (match (field (m:at c id) kind)
+          (53 (external-symbols c id (m:next c id)))
+          (_ unit))
         (check-external-symbols c (m:next c id))))))
 
 (base:function constant-initializer ((c m:context) (id u64)) u64
@@ -348,11 +458,21 @@
   (match (arity c (m:child c id) 4)
     (false (m:report c id "%constant requires a name, type, and value"))
     (true
-      (let ((name u64 (m:next c (m:child c id))) (ty u64 (type-name c (m:next c name))))
+      (let
+        ((name u64 (m:next c (m:child c id)))
+         (ty u64 (type-name c (m:next c name))))
         (do
           (generic-name c name)
-          (require c name (== (find c all name) id) "duplicate constant or declaration")
-          (require c name (== (type-resolve c name) 0) "constant conflicts with type constructor")
+          (require
+            c
+            name
+            (== (find c all name) id)
+            "duplicate constant or declaration")
+          (require
+            c
+            name
+            (== (type-resolve c name) 0)
+            "constant conflicts with type constructor")
           (require
             c
             name
@@ -361,7 +481,12 @@
           (require
             c
             name
-            (match (type-kind c ty) (20 false) (21 false) (22 false) (49 false) (_ true))
+            (match (type-kind c ty)
+              (20 false)
+              (21 false)
+              (22 false)
+              (49 false)
+              (_ true))
             "top-level aggregate constants are not supported yet")
           (m:typed c id 51 ty 0 0)
           unit)))))
@@ -370,11 +495,21 @@
   (match (arity c (m:child c id) 4)
     (false (m:report c id "%variable requires a name, type, and initializer"))
     (true
-      (let ((name u64 (m:next c (m:child c id))) (ty u64 (type-name c (m:next c name))))
+      (let
+        ((name u64 (m:next c (m:child c id)))
+         (ty u64 (type-name c (m:next c name))))
         (do
           (generic-name c name)
-          (require c name (== (find c all name) id) "duplicate variable or declaration")
-          (require c name (== (type-resolve c name) 0) "variable conflicts with type constructor")
+          (require
+            c
+            name
+            (== (find c all name) id)
+            "duplicate variable or declaration")
+          (require
+            c
+            name
+            (== (type-resolve c name) 0)
+            "variable conflicts with type constructor")
           (require
             c
             name
@@ -383,7 +518,12 @@
           (require
             c
             name
-            (match (type-kind c ty) (20 false) (21 false) (22 false) (49 false) (_ true))
+            (match (type-kind c ty)
+              (20 false)
+              (21 false)
+              (22 false)
+              (49 false)
+              (_ true))
             "top-level aggregate variables are not supported yet")
           (m:typed c id 63 ty 0 0)
           unit)))))
@@ -392,13 +532,16 @@
   (let ((head u64 (m:child c id)))
     (match (m:is c head "%function")
       (true
-        (match (arity c head 6) (true (m:is c (m:child c (signature c id)) "for")) (false false)))
+        (match (arity c head 6)
+          (true (m:is c (m:child c (signature c id)) "for"))
+          (false false)))
       (false false))))
 
 (base:function implementation-shape ((c m:context) (fn u64)) bool
   (let ((head u64 (m:child c fn)))
     (match (m:is c head "%implementation")
-      (true (match (atom c (m:next c head)) (true (arity c head 5)) (false false)))
+      (true
+        (match (atom c (m:next c head)) (true (arity c head 5)) (false false)))
       (false false))))
 
 (base:function callable-shape ((c m:context) (fn u64)) bool
@@ -426,10 +569,12 @@
 (base:function name-colon ((c m:context) (id u64)) u64
   (raw:name-colon c id))
 
-(base:function import-target ((c m:context) (owner u64) (alias data:view) (i u64)) u64
+(base:function import-target
+  ((c m:context) (owner u64) (alias data:view) (i u64)) u64
   (raw:import-target c owner alias i))
 
-(base:function named-in ((c m:context) (all u64) (owner u64) (name data:view)) u64
+(base:function named-in ((c m:context) (all u64) (owner u64) (name data:view))
+  u64
   (match all
     (0 0)
     (_
@@ -445,7 +590,8 @@
                 ((variable-declaration c all) true)
                 ((m:is c (m:child c all) "%external-function") true)
                 ((specialization-kind (field (m:at c all) kind)) false)
-                ((m:is c (m:child c all) "%function") (arity c (m:child c all) 5))
+                ((m:is c (m:child c all) "%function")
+                 (arity c (m:child c all) 5))
                 (true false))
               (true (data:equal name (m:spelling c (m:next c (m:child c all)))))
               (false false)))
@@ -462,7 +608,10 @@
   (match (base:is-null (field c session))
     (true false)
     (false
-      (let ((session m:module-session (deref (cast (pointer m:module-session) (field c session)))))
+      (let
+        ((session
+           m:module-session
+           (deref (cast (pointer m:module-session) (field c session)))))
         (match (>= i (m:modules-length (deref (field session files))))
           (true false)
           (false
@@ -471,7 +620,8 @@
                 (true true)
                 (false (known-module c name (+ i 1)))))))))))
 
-(base:function missing-qualifier ((c m:context) (site u64) (name data:view)) unit
+(base:function missing-qualifier ((c m:context) (site u64) (name data:view))
+  unit
   (m:report
     c
     site
@@ -485,7 +635,8 @@
 ; bootstrap scope. Explicit declarations replace the binding only in their module.
 (base:constant default-implementation u64 18446744073709551614)
 
-(base:function default-range ((c m:context) (code u64) (start u64) (count u64)) u64
+(base:function default-range ((c m:context) (code u64) (start u64) (count u64))
+  u64
   (match count
     (0 0)
     (1
@@ -494,8 +645,11 @@
           (true (match (== (field v target) code) (true start) (false 0)))
           (false 0))))
     (_
-      (let ((half u64 (/ count 2)) (found u64 (default-range c code start half)))
-        (match found (0 (default-range c code (+ start half) (- count half))) (_ found))))))
+      (let
+        ((half u64 (/ count 2)) (found u64 (default-range c code start half)))
+        (match found
+          (0 (default-range c code (+ start half) (- count half)))
+          (_ found))))))
 
 (base:function default-generic ((c m:context) (name u64)) u64
   (let ((code u64 (num:default-code c name)))
@@ -503,11 +657,22 @@
       (0 0)
       (_
         (let
-          ((found u64 (default-range c code 1 (- (m:nodes-length (deref (field c items))) 1))))
+          ((found
+             u64
+             (default-range
+               c
+               code
+               1
+               (- (m:nodes-length (deref (field c items))) 1))))
           (match found (0 (make-default-generic c name code 0)) (_ found)))))))
 
 (base:function default-name
-  ((c m:context) (site m:node) (text (pointer u8)) (length u64) (next u64) (owner u64)) u64
+  ((c m:context)
+   (site m:node)
+   (text (pointer u8))
+   (length u64)
+   (next u64)
+   (owner u64)) u64
   (m:add
     c
     (m:node
@@ -522,12 +687,15 @@
       (m:address (cast (pointer void) text))
       (+ owner 1))))
 
-(base:function make-default-generic ((c m:context) (name u64) (code u64) (owner u64)) u64
+(base:function make-default-generic
+  ((c m:context) (name u64) (code u64) (owner u64)) u64
   (let
     ((v m:node (m:at c name))
      (right u64 (default-name c v "right" 5 0 owner))
      (left u64 (default-name c v "left" 4 right owner))
-     (params u64 (m:add c (m:node 1 (field v start) 0 left 0 0 0 0 0 (+ owner 1))))
+     (params
+       u64
+       (m:add c (m:node 1 (field v start) 0 left 0 0 0 0 0 (+ owner 1))))
      (label
        u64
        (m:add
@@ -544,9 +712,12 @@
            (field v generated)
            (+ owner 1))))
      (head u64 (default-name c v "%generic" 8 label owner)))
-    (m:add c (m:node 62 (field v start) (field v length) head 0 0 code 0 0 (+ owner 1)))))
+    (m:add
+      c
+      (m:node 62 (field v start) (field v length) head 0 0 code 0 0 (+ owner 1)))))
 
-(base:function default-prefix ((c m:context) (args u64) (stop u64) (ty u64)) bool
+(base:function default-prefix ((c m:context) (args u64) (stop u64) (ty u64))
+  bool
   (match (== args stop)
     (true true)
     (false
@@ -565,7 +736,8 @@
             (true (default-arguments-match c (m:next c args) ty))
             (false false)))))))
 
-(base:function default-eligible ((c m:context) (generic u64) (args u64) (result u64) (ty u64)) bool
+(base:function default-eligible
+  ((c m:context) (generic u64) (args u64) (result u64) (ty u64)) bool
   (match (== (field (m:at c generic) kind) 62)
     (false false)
     (true
@@ -575,12 +747,21 @@
           (match
             (match result
               (0 true)
-              (_ (== result (num:default-result (field (m:at c generic) target) ty))))
+              (_
+                (==
+                  result
+                  (num:default-result (field (m:at c generic) target) ty))))
             (false false)
             (true (default-arguments-match c args ty))))))))
 
 (base:function default-literal-parameter
-  ((c m:context) (generic u64) (args u64) (stop u64) (result u64) (ty u64) (found u64)) u64
+  ((c m:context)
+   (generic u64)
+   (args u64)
+   (stop u64)
+   (result u64)
+   (ty u64)
+   (found u64)) u64
   (base:cond
     ((>= ty 14) found)
     ((== found (cast u64 18446744073709551615)) found)
@@ -589,17 +770,29 @@
        (0 (default-literal-parameter c generic args stop result (+ ty 1) ty))
        (_
          (match (== found ty)
-           (true (default-literal-parameter c generic args stop result (+ ty 1) found))
+           (true
+             (default-literal-parameter
+               c
+               generic
+               args
+               stop
+               result
+               (+ ty 1)
+               found))
            (false (cast u64 18446744073709551615))))))
     (true (default-literal-parameter c generic args stop result (+ ty 1) found))))
 
-(base:function default-selection ((c m:context) (generic u64) (args u64) (result u64) (found u64))
-  u64
+(base:function default-selection
+  ((c m:context) (generic u64) (args u64) (result u64) (found u64)) u64
   (match (default-eligible c generic args result (field (m:at c args) ty))
     (false found)
-    (true (match found (0 default-implementation) (_ (cast u64 18446744073709551615))))))
+    (true
+      (match found
+        (0 default-implementation)
+        (_ (cast u64 18446744073709551615))))))
 
-(base:function duplicate-default ((c m:context) (generic u64) (params u64) (result u64)) bool
+(base:function duplicate-default
+  ((c m:context) (generic u64) (params u64) (result u64)) bool
   (let
     ((ty u64 (field (m:at c (m:child c params)) ty))
      (other u64 (field (m:at c (m:child c (m:next c params))) ty)))
@@ -617,10 +810,12 @@
      (end u64 (+ (field v start) (field v length)))
      (split u64 (name-colon c name)))
     (match (== split end)
-      (true (match (find c all name) (0 (default-generic c name)) (found found)))
+      (true
+        (match (find c all name) (0 (default-generic c name)) (found found)))
       (false
         (match (base:is-null (field c session))
-          (true (do (m:report c name "unknown module alias (missing import)") 0))
+          (true
+            (do (m:report c name "unknown module alias (missing import)") 0))
           (false
             (let
               ((target
@@ -628,7 +823,9 @@
                  (import-target
                    c
                    (m:owner c name)
-                   (data:view (field (m:spelling c name) bytes) (- split (field v start)))
+                   (data:view
+                     (field (m:spelling c name) bytes)
+                     (- split (field v start)))
                    0)))
               (match target
                 (0
@@ -636,17 +833,25 @@
                     (missing-qualifier
                       c
                       name
-                      (data:view (field (m:spelling c name) bytes) (- split (field v start))))
+                      (data:view
+                        (field (m:spelling c name) bytes)
+                        (- split (field v start))))
                     0))
                 (_
                   (let
                     ((member
                        data:view
                        (data:view
-                         (pointer-offset (field (field c source) bytes) (+ split 1))
+                         (pointer-offset
+                           (field (field c source) bytes)
+                           (+ split 1))
                          (- end (+ split 1))))
                      (module m:module-info (m:file-info c (- target 1))))
-                    (match (exported c (m:next c (m:child c (field module exports))) member)
+                    (match
+                      (exported
+                        c
+                        (m:next c (m:child c (field module exports)))
+                        member)
                       (false
                         (do
                           (m:report
@@ -664,17 +869,21 @@
 
 ; Installed definitions are tagged in the tape. Only collection of a preceding
 ; form installs a definition, so lookup cannot see a later declaration.
-(base:function macro-range ((c m:context) (owner u64) (name data:view) (start u64) (count u64)) u64
+(base:function macro-range
+  ((c m:context) (owner u64) (name data:view) (start u64) (count u64)) u64
   (raw:macro-range c owner name start count))
 
 (base:function macro-in ((c m:context) (owner u64) (name data:view)) u64
   (raw:macro-in c owner name))
 
-(base:function export-names ((c m:context) (all u64) (owner u64) (names u64)) unit
+(base:function export-names ((c m:context) (all u64) (owner u64) (names u64))
+  unit
   (match names
     (0 unit)
     (_
-      (let ((name data:view (m:spelling c names)) (decl u64 (named-in c all owner name)))
+      (let
+        ((name data:view (m:spelling c names))
+         (decl u64 (named-in c all owner name)))
         (do
           (match (macro-in c owner name)
             (0
@@ -692,44 +901,74 @@
   (match (base:is-null (field c session))
     (true unit)
     (false
-      (let ((session m:module-session (deref (cast (pointer m:module-session) (field c session)))))
+      (let
+        ((session
+           m:module-session
+           (deref (cast (pointer m:module-session) (field c session)))))
         (match (>= i (m:modules-length (deref (field session files))))
           (true unit)
           (false
             (do
-              (export-names c all i (m:next c (m:child c (field (m:file-info c i) exports))))
+              (export-names
+                c
+                all
+                i
+                (m:next c (m:child c (field (m:file-info c i) exports))))
               (exports c all (+ i 1)))))))))
 
 ; Validate parameter shapes, names, types, uniqueness, and the parameter-count limit.
 ; Record types on parameter-name nodes while borrowing stack bindings for duplicate detection.
-(base:function parameters-inner ((c m:context) (param u64) (env (pointer void)) (count u64)) unit
+(base:function parameters-inner
+  ((c m:context) (param u64) (env (pointer void)) (count u64)) unit
   (match param
     (0 unit)
     (_
       (do
-        (require c param (< count constants:parameter-limit) "parameter limit (64) exceeded")
+        (require
+          c
+          param
+          (< count constants:parameter-limit)
+          "parameter limit (64) exceeded")
         (require c param (list c param) "expected parameter list")
-        (require c param (arity c (m:child c param) 2) "parameter requires name and type")
-        (let ((name u64 (m:child c param)) (ty u64 (type-name c (m:next c name))))
+        (require
+          c
+          param
+          (arity c (m:child c param) 2)
+          "parameter requires name and type")
+        (let
+          ((name u64 (m:child c param)) (ty u64 (type-name c (m:next c name))))
           (do
-            (require c name (plain-name c name) "expected identifier for local binding")
+            (require
+              c
+              name
+              (plain-name c name)
+              "expected identifier for local binding")
             (require c name (== (m:lookup c name env) 0) "duplicate parameter")
             (m:typed c name 0 ty 0 3)
             (let ((binding m:binding (m:binding name name 0 env)))
-              (parameters c (m:next c param) (cast (pointer void) (& binding)) (+ count 1)))))))))
+              (parameters
+                c
+                (m:next c param)
+                (cast (pointer void) (& binding))
+                (+ count 1)))))))))
 
-(base:function parameters-shape ((c m:context) (param u64) (env (pointer void)) (count u64)) unit
+(base:function parameters-shape
+  ((c m:context) (param u64) (env (pointer void)) (count u64)) unit
   (match param
     (0 unit)
     (_
-      (match (match (list c param) (false false) (true (arity c (m:child c param) 2)))
+      (match
+        (match (list c param)
+          (false false)
+          (true (arity c (m:child c param) 2)))
         (true (parameters-inner c param env count))
         (false
           (do
             (m:report c param "parameter requires name and type")
             (parameters c (m:next c param) env count)))))))
 
-(base:function parameters ((c m:context) (param u64) (env (pointer void)) (count u64)) unit
+(base:function parameters
+  ((c m:context) (param u64) (env (pointer void)) (count u64)) unit
   (match (>= count constants:parameter-limit)
     (true (require c param (== param 0) "parameter limit (64) exceeded"))
     (false (parameters-shape c param env count))))
@@ -790,16 +1029,29 @@
     ((m:is c id ">=") unit)
     (true (identifier c id))))
 
-(base:function generic-parameters ((c m:context) (param u64) (seen (pointer void)) (count u64)) unit
+(base:function generic-parameters
+  ((c m:context) (param u64) (seen (pointer void)) (count u64)) unit
   (match param
     (0 unit)
     (_
       (do
-        (require c param (< count constants:parameter-limit) "parameter limit (64) exceeded")
+        (require
+          c
+          param
+          (< count constants:parameter-limit)
+          "parameter limit (64) exceeded")
         (identifier c param)
-        (require c param (== (m:lookup c param seen) 0) "duplicate generic parameter")
+        (require
+          c
+          param
+          (== (m:lookup c param seen) 0)
+          "duplicate generic parameter")
         (let ((binding m:binding (m:binding param param 0 seen)))
-          (generic-parameters c (m:next c param) (cast (pointer void) (& binding)) (+ count 1)))))))
+          (generic-parameters
+            c
+            (m:next c param)
+            (cast (pointer void) (& binding))
+            (+ count 1)))))))
 
 (base:function register-generics ((c m:context) (id u64) (all u64)) unit
   (match id
@@ -814,11 +1066,27 @@
                (params u64 (m:next c name))
                (before u64 (deref (field c errors))))
               (do
-                (require c id (arity c head 3) "%generic requires a name and parameter list")
+                (require
+                  c
+                  id
+                  (arity c head 3)
+                  "%generic requires a name and parameter list")
                 (generic-name c name)
-                (require c params (list c params) "expected generic parameter list")
-                (require c name (== (find c all name) id) "duplicate generic or function")
-                (require c name (== (type-resolve c name) 0) "generic conflicts with type")
+                (require
+                  c
+                  params
+                  (list c params)
+                  "expected generic parameter list")
+                (require
+                  c
+                  name
+                  (== (find c all name) id)
+                  "duplicate generic or function")
+                (require
+                  c
+                  name
+                  (== (type-resolve c name) 0)
+                  "generic conflicts with type")
                 (require
                   c
                   name
@@ -828,7 +1096,9 @@
                 (m:typed
                   c
                   id
-                  (match (== before (deref (field c errors))) (true 37) (false 10))
+                  (match (== before (deref (field c errors)))
+                    (true 37)
+                    (false 10))
                   0
                   0
                   0)
@@ -843,7 +1113,10 @@
       (match right
         (0 false)
         (_
-          (match (== (field (m:at c (m:child c left)) ty) (field (m:at c (m:child c right)) ty))
+          (match
+            (==
+              (field (m:at c (m:child c left)) ty)
+              (field (m:at c (m:child c right)) ty))
             (true (parameter-types-equal c (m:next c left) (m:next c right)))
             (false false)))))))
 
@@ -857,7 +1130,8 @@
        (true
          (match (parameter-types-equal c params (m:child c (signature c all)))
            (true true)
-           (false (duplicate-implementation c id generic ty params (m:next c all)))))
+           (false
+             (duplicate-implementation c id generic ty params (m:next c all)))))
        (false (duplicate-implementation c id generic ty params (m:next c all)))))
     (true (duplicate-implementation c id generic ty params (m:next c all)))))
 
@@ -877,11 +1151,18 @@
         name
         (match (field (m:at c generic) kind) (37 true) (62 true) (_ false))
         "implementation requires a generic")
-      (require c params (list c params) "expected implementation parameter list")
       (require
         c
         params
-        (arity c (m:child c params) (chain-length c (m:child c (signature c generic))))
+        (list c params)
+        "expected implementation parameter list")
+      (require
+        c
+        params
+        (arity
+          c
+          (m:child c params)
+          (chain-length c (m:child c (signature c generic))))
         "implementation arity does not match generic")
       (parameters c (m:child c params) (m:empty-env) 0)
       (require
@@ -897,7 +1178,8 @@
       (m:typed c id 18 ty generic 0)
       unit)))
 
-(base:function operation-named ((c m:context) (name u64) (id u64) (method bool)) u64
+(base:function operation-named ((c m:context) (name u64) (id u64) (method bool))
+  u64
   (match id
     (0 0)
     (_
@@ -911,7 +1193,8 @@
 (base:function protocol-operations ((c m:context) (id u64)) u64
   (m:next c (signature c id)))
 
-(base:function validate-protocol-operations ((c m:context) (op u64) (types u64)) unit
+(base:function validate-protocol-operations ((c m:context) (op u64) (types u64))
+  unit
   (match op
     (0 unit)
     (_
@@ -928,12 +1211,21 @@
             op
             (== (operation-named c name (m:next c op) false) 0)
             "duplicate protocol operation")
-          (require c params (list c params) "expected protocol operation parameters")
-          (validate-protocol-parameters c (m:child c params) types (m:empty-env))
+          (require
+            c
+            params
+            (list c params)
+            "expected protocol operation parameters")
+          (validate-protocol-parameters
+            c
+            (m:child c params)
+            types
+            (m:empty-env))
           (validate-protocol-type c (m:next c params) types)
           (validate-protocol-operations c (m:next c op) types))))))
 
-(base:function type-parameter-index ((c m:context) (id u64) (params u64) (index u64)) u64
+(base:function type-parameter-index
+  ((c m:context) (id u64) (params u64) (index u64)) u64
   (match params
     (0 0)
     (_
@@ -947,11 +1239,16 @@
     ((m:is c (m:child c id) "array")
      (let ((head u64 (m:child c id)) (element u64 (m:next c head)))
        (do
-         (require c id (arity c head 3) "array requires an element type and length")
+         (require
+           c
+           id
+           (arity c head 3)
+           "array requires an element type and length")
          (validate-protocol-type c element types)
          (array-length-literal c (m:next c element))
          unit)))
-    ((m:is c (m:child c id) "tuple") (validate-protocol-types c (m:next c (m:child c id)) types))
+    ((m:is c (m:child c id) "tuple")
+     (validate-protocol-types c (m:next c (m:child c id)) types))
     ((m:is c (m:child c id) "pointer")
      (let ((pointee u64 (m:next c (m:child c id))))
        (do
@@ -964,7 +1261,10 @@
 (base:function validate-protocol-types ((c m:context) (id u64) (types u64)) unit
   (match id
     (0 unit)
-    (_ (do (validate-protocol-type c id types) (validate-protocol-types c (m:next c id) types)))))
+    (_
+      (do
+        (validate-protocol-type c id types)
+        (validate-protocol-types c (m:next c id) types)))))
 
 (base:function validate-protocol-parameters
   ((c m:context) (id u64) (types u64) (seen (pointer void))) unit
@@ -973,12 +1273,24 @@
     (_
       (let ((name u64 (m:child c id)))
         (do
-          (require c id (arity c name 2) "protocol parameter requires a name and a type")
+          (require
+            c
+            id
+            (arity c name 2)
+            "protocol parameter requires a name and a type")
           (identifier c name)
-          (require c name (== (m:lookup c name seen) 0) "duplicate protocol parameter")
+          (require
+            c
+            name
+            (== (m:lookup c name seen) 0)
+            "duplicate protocol parameter")
           (validate-protocol-type c (m:next c name) types)
           (let ((binding m:binding (m:binding name name 0 seen)))
-            (validate-protocol-parameters c (m:next c id) types (cast (pointer void) (& binding)))))))))
+            (validate-protocol-parameters
+              c
+              (m:next c id)
+              types
+              (cast (pointer void) (& binding)))))))))
 
 (base:function register-protocols ((c m:context) (id u64) (all u64)) unit
   (match id
@@ -988,14 +1300,31 @@
         (match (protocol-declaration c id)
           (true
             (let
-              ((head u64 (m:child c id)) (name u64 (m:next c head)) (params u64 (signature c id)))
+              ((head u64 (m:child c id))
+               (name u64 (m:next c head))
+               (params u64 (signature c id)))
               (do
                 (identifier c name)
-                (require c name (== (find c all name) id) "duplicate protocol declaration")
-                (require c name (== (type-resolve c name) 0) "protocol conflicts with type")
-                (require c params (list c params) "expected protocol type parameter list")
+                (require
+                  c
+                  name
+                  (== (find c all name) id)
+                  "duplicate protocol declaration")
+                (require
+                  c
+                  name
+                  (== (type-resolve c name) 0)
+                  "protocol conflicts with type")
+                (require
+                  c
+                  params
+                  (list c params)
+                  "expected protocol type parameter list")
                 (generic-parameters c (m:child c params) (m:empty-env) 0)
-                (validate-protocol-operations c (protocol-operations c id) (m:child c params))
+                (validate-protocol-operations
+                  c
+                  (protocol-operations c id)
+                  (m:child c params))
                 (m:typed c id 38 0 0 0)
                 unit)))
           (false unit))
@@ -1003,7 +1332,9 @@
 
 (base:function protocol-instance ((c m:context) (id u64)) bool
   (let ((head u64 (m:child c id)))
-    (match (m:is c head "%implementation") (true (list c (m:next c head))) (false false))))
+    (match (m:is c head "%implementation")
+      (true (list c (m:next c head)))
+      (false false))))
 
 (base:function protocol-arguments ((c m:context) (id u64)) u64
   (m:next c (m:child c (m:next c (m:child c id)))))
@@ -1019,26 +1350,43 @@
          (true
            (match (component-equal c args (protocol-arguments c all))
              (true true)
-             (false (duplicate-protocol-instance c id protocol args (m:next c all)))))
+             (false
+               (duplicate-protocol-instance c id protocol args (m:next c all)))))
          (false (duplicate-protocol-instance c id protocol args (m:next c all)))))
       (true (duplicate-protocol-instance c id protocol args (m:next c all))))))
 
 (base:function protocol-type-matches
   ((c m:context) (template u64) (params u64) (args u64) (actual u64)) bool
-  (let ((index u64 (type-parameter-index c template params 1)) (head u64 (m:child c template)))
+  (let
+    ((index u64 (type-parameter-index c template params 1))
+     (head u64 (m:child c template)))
     (base:cond
-      ((> index 0) (== actual (field (m:at c (component-at c args (- index 1))) ty)))
+      ((> index 0)
+       (== actual (field (m:at c (component-at c args (- index 1))) ty)))
       ((m:is c head "array")
        (match (array-template-shape c head actual)
-         (true (protocol-type-matches c (m:next c head) params args (array-element c actual)))
+         (true
+           (protocol-type-matches
+             c
+             (m:next c head)
+             params
+             args
+             (array-element c actual)))
          (false false)))
       ((m:is c head "tuple")
        (match (== (type-kind c actual) 22)
-         (true (protocol-types-match c (m:next c head) params args (type-components c actual)))
+         (true
+           (protocol-types-match
+             c
+             (m:next c head)
+             params
+             args
+             (type-components c actual)))
          (false false)))
       ((m:is c head "pointer")
        (base:cond
-         ((== actual 11) (protocol-type-matches c (m:next c head) params args 7))
+         ((== actual 11)
+          (protocol-type-matches c (m:next c head) params args 7))
          ((== (type-kind c actual) 34)
           (protocol-type-matches
             c
@@ -1057,8 +1405,20 @@
       (match actual
         (0 false)
         (_
-          (match (protocol-type-matches c template params args (field (m:at c actual) ty))
-            (true (protocol-types-match c (m:next c template) params args (m:next c actual)))
+          (match
+            (protocol-type-matches
+              c
+              template
+              params
+              args
+              (field (m:at c actual) ty))
+            (true
+              (protocol-types-match
+                c
+                (m:next c template)
+                params
+                args
+                (m:next c actual)))
             (false false)))))))
 
 (base:function protocol-parameters-match
@@ -1076,10 +1436,17 @@
               params
               args
               (field (m:at c (m:child c actual)) ty))
-            (true (protocol-parameters-match c (m:next c template) params args (m:next c actual)))
+            (true
+              (protocol-parameters-match
+                c
+                (m:next c template)
+                params
+                args
+                (m:next c actual)))
             (false false)))))))
 
-(base:function protocol-coverage ((c m:context) (site u64) (op u64) (methods u64)) unit
+(base:function protocol-coverage
+  ((c m:context) (site u64) (op u64) (methods u64)) unit
   (match op
     (0 unit)
     (_
@@ -1091,13 +1458,16 @@
           "missing protocol operation")
         (protocol-coverage c site (m:next c op) methods)))))
 
-(base:function protocol-methods ((c m:context) (id u64) (protocol u64) (args u64)) u64
+(base:function protocol-methods
+  ((c m:context) (id u64) (protocol u64) (args u64)) u64
   (let
     ((head u64 (m:child c id))
      (name u64 (m:next c head))
      (params u64 (signature c id))
      (next u64 (m:next c id))
-     (operation u64 (operation-named c name (protocol-operations c protocol) false))
+     (operation
+       u64
+       (operation-named c name (protocol-operations c protocol) false))
      (types u64 (m:child c (signature c protocol)))
      (expected u64 (m:next c (m:child c operation))))
     (do
@@ -1107,15 +1477,28 @@
         (match (m:is c head "function") (true (arity c head 5)) (false false))
         "protocol implementation requires function methods")
       (require c id (> operation 0) "unknown protocol operation")
-      (require c id (== (operation-named c name next true) 0) "duplicate protocol operation")
-      (require c params (list c params) "expected implementation parameter list")
+      (require
+        c
+        id
+        (== (operation-named c name next true) 0)
+        "duplicate protocol operation")
+      (require
+        c
+        params
+        (list c params)
+        "expected implementation parameter list")
       (parameters c (m:child c params) (m:empty-env) 0)
       (let ((ty u64 (type-name c (m:next c params))))
         (do
           (require
             c
             id
-            (protocol-parameters-match c (m:child c expected) types args (m:child c params))
+            (protocol-parameters-match
+              c
+              (m:child c expected)
+              types
+              args
+              (m:child c params))
             "protocol operation parameter type mismatch")
           (require
             c
@@ -1133,7 +1516,8 @@
         (m:typed c id (field (m:at c id) kind) (type-reference c id) 0 0)
         (protocol-argument-types c (m:next c id))))))
 
-(base:function register-protocol-instances ((c m:context) (id u64) (all u64)) unit
+(base:function register-protocol-instances ((c m:context) (id u64) (all u64))
+  unit
   (match id
     (0 unit)
     (_
@@ -1149,11 +1533,18 @@
                  (protocol u64 (resolve c all name))
                  (before u64 (deref (field c errors))))
                 (do
-                  (require c name (== (field (m:at c protocol) kind) 38) "unknown protocol")
+                  (require
+                    c
+                    name
+                    (== (field (m:at c protocol) kind) 38)
+                    "unknown protocol")
                   (require
                     c
                     id
-                    (arity c args (chain-length c (m:child c (signature c protocol))))
+                    (arity
+                      c
+                      args
+                      (chain-length c (m:child c (signature c protocol))))
                     "protocol argument count mismatch")
                   (protocol-argument-types c args)
                   (require
@@ -1163,7 +1554,11 @@
                       (true false)
                       (false true))
                     "duplicate protocol implementation")
-                  (protocol-coverage c id (protocol-operations c protocol) methods)
+                  (protocol-coverage
+                    c
+                    id
+                    (protocol-operations c protocol)
+                    methods)
                   (m:typed c id 39 0 protocol 0)
                   (match (== before (deref (field c errors)))
                     (false unit)
@@ -1171,7 +1566,10 @@
                       (match methods
                         (0 unit)
                         (_
-                          (let ((last u64 (protocol-methods c methods protocol args)))
+                          (let
+                            ((last
+                               u64
+                               (protocol-methods c methods protocol args)))
                             (do (m:link c id methods) (m:link c last next))))))))))
             (false unit))
           (register-protocol-instances c next all))))))
@@ -1184,10 +1582,12 @@
       (let ((before u64 (deref (field c errors))))
         (do
           (base:cond
-            ((m:is c (m:child c fn) "%external-function") (external-signature c fn all))
+            ((m:is c (m:child c fn) "%external-function")
+             (external-signature c fn all))
             ((constant-declaration c fn) (constant-signature c fn all))
             ((variable-declaration c fn) (variable-signature c fn all))
-            ((m:is c (m:child c fn) "native-export") (do (m:typed c fn 68 0 0 0) unit))
+            ((m:is c (m:child c fn) "native-export")
+             (do (m:typed c fn 68 0 0 0) unit))
             ((generic-declaration c fn) unit)
             ((== (field (m:at c fn) kind) 19) unit)
             ((>= (field (m:at c fn) kind) 20) unit)
@@ -1207,7 +1607,8 @@
 ; Accumulate decimal digits into an unsigned magnitude without exceeding limit.
 ; Check before multiplication/addition and split traversal to handle long zero-prefixed literals.
 (base:function integer-span
-  ((c m:context) (id u64) (i u64) (count u64) (value (pointer u64)) (limit u64)) unit
+  ((c m:context) (id u64) (i u64) (count u64) (value (pointer u64)) (limit u64))
+  unit
   (match count
     (0 unit)
     (1
@@ -1239,12 +1640,18 @@
      (negative bool (== (m:spelling-byte c id 0) 45))
      (first
        u64
-       (match (m:spelling-byte c id 0) (45 (+ start 1)) (43 (+ start 1)) (_ start)))
+       (match (m:spelling-byte c id 0)
+         (45 (+ start 1))
+         (43 (+ start 1))
+         (_ start)))
      (end u64 (+ start (field v length)))
      (limit
        u64
        (match (num:signed-type ty)
-         (true (match negative (true (num:sign-bit ty)) (false (- (num:sign-bit ty) 1))))
+         (true
+           (match negative
+             (true (num:sign-bit ty))
+             (false (- (num:sign-bit ty) 1))))
          (false (- (num:modulus ty) 1))))
      (magnitude u64 0))
     (do
@@ -1261,7 +1668,9 @@
         2
         ty
         0
-        (num:normalize ty (match negative (true (- 0 magnitude)) (false magnitude)))))))
+        (num:normalize
+          ty
+          (match negative (true (- 0 magnitude)) (false magnitude)))))))
 
 ; Require identical actual/expected type IDs and diagnose a mismatch at the expression.
 (base:function expect ((c m:context) (id u64) (actual u64) (expected u64)) unit
@@ -1280,7 +1689,8 @@
       unit)))
 
 ; Retain the declaration that established an expected type in diagnostics.
-(base:function expect-origin ((c m:context) (id u64) (actual u64) (expected u64) (origin u64)) unit
+(base:function expect-origin
+  ((c m:context) (id u64) (actual u64) (expected u64) (origin u64)) unit
   (let ((before u64 (deref (field c errors))))
     (do
       (expect c id actual expected)
@@ -1289,11 +1699,14 @@
         (false
           (do
             (m:location c (field (m:at c origin) start))
-            (m:text lconstants:STDERR-FILENO "note: expected type established here\n")
+            (m:text
+              lconstants:STDERR-FILENO
+              "note: expected type established here\n")
             unit))))))
 
 ; Check call arguments left to right against parameter types, including exact arity.
-(base:function arguments ((c m:context) (arg u64) (param u64) (env (pointer void)) (all u64)) unit
+(base:function arguments
+  ((c m:context) (arg u64) (param u64) (env (pointer void)) (all u64)) unit
   (match arg
     (0 (require c param (== param 0) "too few arguments"))
     (_
@@ -1308,13 +1721,17 @@
         (arguments c (m:next c arg) (m:next c param) env all)))))
 
 ; Only the last expression receives an enclosing expected type.
-(base:function sequence ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64)) u64
+(base:function sequence
+  ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64)) u64
   (match id
     (0 1)
     (_
       (match (m:next c id)
         (0 (expression-as c id env all expected))
-        (_ (do (expression c id env all) (sequence c (m:next c id) env all expected)))))))
+        (_
+          (do
+            (expression c id env all)
+            (sequence c (m:next c id) env all expected)))))))
 
 ; Check sequential immutable bindings, exposing each name only after its initializer.
 ; Reject duplicates within this list, allow outer-scope shadowing, and return the body type.
@@ -1334,19 +1751,37 @@
         (require
           c
           id
-          (match (arity c (m:child c id) 2) (true true) (false (arity c (m:child c id) 3)))
+          (match (arity c (m:child c id) 2)
+            (true true)
+            (false (arity c (m:child c id) 3)))
           "binding requires name and initializer, with optional type")
         (let
           ((name u64 (m:child c id))
            (annotated bool (arity c (m:child c id) 3))
-           (init u64 (match annotated (true (m:next c (m:next c name))) (false (m:next c name))))
-           (annotation u64 (match annotated (true (type-name c (m:next c name))) (false 0)))
+           (init
+             u64
+             (match annotated
+               (true (m:next c (m:next c name)))
+               (false (m:next c name))))
+           (annotation
+             u64
+             (match annotated (true (type-name c (m:next c name))) (false 0)))
            (inferred u64 (expression-as c init env all annotation))
            (ty u64 (match annotated (true annotation) (false inferred))))
           (do
-            (require c name (plain-name c name) "expected identifier for local binding")
-            (require c name (== (m:lookup c name local) 0) "duplicate local binding")
-            (match annotated (true (expect-origin c init inferred ty (m:next c name))) (false unit))
+            (require
+              c
+              name
+              (plain-name c name)
+              "expected identifier for local binding")
+            (require
+              c
+              name
+              (== (m:lookup c name local) 0)
+              "duplicate local binding")
+            (match annotated
+              (true (expect-origin c init inferred ty (m:next c name)))
+              (false unit))
             (m:typed c id 1 ty init 0)
             (m:typed c name 0 ty 0 1)
             (let
@@ -1375,11 +1810,17 @@
       (match
         (match (list c id)
           (false false)
-          (true (match (arity c (m:child c id) 2) (true true) (false (arity c (m:child c id) 3)))))
+          (true
+            (match (arity c (m:child c id) 2)
+              (true true)
+              (false (arity c (m:child c id) 3)))))
         (true (bindings-inner c id result env local all expected))
         (false
           (do
-            (m:report c id "binding requires name and initializer, with optional type")
+            (m:report
+              c
+              id
+              "binding requires name and initializer, with optional type")
             (bindings c (m:next c id) result env local all expected)))))))
 
 ; Match every operand whose type is known; literal operands remain unconstrained.
@@ -1397,7 +1838,8 @@
                 (true (typed-arguments-match c (m:next c arg) (m:next c param)))
                 (false false)))))))))
 
-(base:function eligible-implementation ((c m:context) (id u64) (generic u64) (args u64) (result u64)) bool
+(base:function eligible-implementation
+  ((c m:context) (id u64) (generic u64) (args u64) (result u64)) bool
   (base:cond
     ((implementation-for c id generic)
      (match result
@@ -1410,8 +1852,14 @@
 
 ; The maximum u64 is a conflict marker. Zero means no eligible candidate.
 (base:function literal-parameter
-  ((c m:context) (generic u64) (args u64) (stop u64) (index u64) (result u64) (id u64) (found u64))
-  u64
+  ((c m:context)
+   (generic u64)
+   (args u64)
+   (stop u64)
+   (index u64)
+   (result u64)
+   (id u64)
+   (found u64)) u64
   (base:cond
     ((== id 0) (default-literal-parameter c generic args stop result 3 found))
     ((eligible-implementation c id generic args result)
@@ -1419,12 +1867,23 @@
        ((param u64 (component-at c (m:child c (signature c id)) index))
         (ty u64 (field (m:at c (m:child c param)) ty)))
        (match found
-         (0 (literal-parameter c generic args stop index result (m:next c id) ty))
+         (0
+           (literal-parameter c generic args stop index result (m:next c id) ty))
          (_
            (match (== found ty)
-             (true (literal-parameter c generic args stop index result (m:next c id) found))
+             (true
+               (literal-parameter
+                 c
+                 generic
+                 args
+                 stop
+                 index
+                 result
+                 (m:next c id)
+                 found))
              (false (cast u64 18446744073709551615)))))))
-    (true (literal-parameter c generic args stop index result (m:next c id) found))))
+    (true
+      (literal-parameter c generic args stop index result (m:next c id) found))))
 
 (base:function generic-argument
   ((c m:context)
@@ -1435,14 +1894,17 @@
    (env (pointer void))
    (all u64)
    (expected u64)) u64
-  (do (expand:expression c arg) (generic-argument-inner c generic args arg index env all expected)))
+  (do
+    (expand:expression c arg)
+    (generic-argument-inner c generic args arg index env all expected)))
 
 ; Type non-literal operands before inferring any numeric literals. This gives a
 ; literal at the front of a call evidence from later, already-typeable operands.
 (base:function generic-known-argument
   ((c m:context) (arg u64) (env (pointer void)) (all u64)) u64
   (let ((expanded unit (expand:expression c arg)))
-    (match (match (raw:floating-node c arg) (true true) (false (integer-node c arg)))
+    (match
+      (match (raw:floating-node c arg) (true true) (false (integer-node c arg)))
       (true 1)
       (false (expression c arg env all)))))
 
@@ -1469,15 +1931,26 @@
       (false (expression c arg env all))
       (true
         (let
-          ((preferred u64 (literal-parameter c generic args arg index expected all 0))
+          ((preferred
+             u64
+             (literal-parameter c generic args arg index expected all 0))
            (ty
              u64
              (match preferred
                (0 (literal-parameter c generic args arg index 0 all 0))
                (_ preferred))))
-          (match (match decimal (true (num:float-type ty)) (false (num:integer-type ty)))
+          (match
+            (match decimal
+              (true (num:float-type ty))
+              (false (num:integer-type ty)))
             (true (expression-as c arg env all ty))
-            (false (do (m:report c arg "ambiguous numeric literal; supply a type with cast") 0))))))))
+            (false
+              (do
+                (m:report
+                  c
+                  arg
+                  "ambiguous numeric literal; supply a type with cast")
+                0))))))))
 
 (base:function generic-arguments
   ((c m:context)
@@ -1504,12 +1977,33 @@
   (match arg
     (0 true)
     (_
-      (match (match (raw:floating-node c arg) (true true) (false (integer-node c arg)))
+      (match
+        (match (raw:floating-node c arg)
+          (true true)
+          (false (integer-node c arg)))
         (true
           (match (generic-argument c generic args arg index env all expected)
             (0 false)
-            (_ (generic-literal-arguments c generic args (m:next c arg) (+ index 1) env all expected))))
-        (false (generic-literal-arguments c generic args (m:next c arg) (+ index 1) env all expected))))))
+            (_
+              (generic-literal-arguments
+                c
+                generic
+                args
+                (m:next c arg)
+                (+ index 1)
+                env
+                all
+                expected))))
+        (false
+          (generic-literal-arguments
+            c
+            generic
+            args
+            (m:next c arg)
+            (+ index 1)
+            env
+            all
+            expected))))))
 
 (base:function select-implementation
   ((c m:context) (generic u64) (args u64) (result u64) (id u64) (found u64)) u64
@@ -1521,12 +2015,15 @@
        (_ (cast u64 18446744073709551615))))
     (true (select-implementation c generic args result (m:next c id) found))))
 
-(base:function nullary-protocol-candidate ((c m:context) (id u64) (generic u64) (expected u64)) bool
+(base:function nullary-protocol-candidate
+  ((c m:context) (id u64) (generic u64) (expected u64)) bool
   (let ((v m:node (m:at c id)))
     (base:cond
       ((match (== (field v kind) 19) (true false) (false true)) false)
       ((> (m:child c (signature c id)) 0) false)
-      ((match (== (m:owner c (field v target)) (m:owner c generic)) (true false) (false true))
+      ((match (== (m:owner c (field v target)) (m:owner c generic))
+         (true false)
+         (false true))
        false)
       ((m:same c (m:next c (m:child c generic)) (m:next c (m:child c id)))
        (match expected (0 true) (_ (== expected (field v ty)))))
@@ -1554,27 +2051,40 @@
           (true
             (let ((ty u64 (field (m:at c args) ty)))
               (match
-                (base:and (pointer-value-type c ty) (== ty (field (m:at c (m:next c args)) ty)))
+                (base:and
+                  (pointer-value-type c ty)
+                  (== ty (field (m:at c (m:next c args)) ty)))
                 (true (match (m:is c name "==") (true 18) (false 19)))
                 (false 0)))))))))
 
 (base:function generic-call
-  ((c m:context) (id u64) (generic u64) (args u64) (env (pointer void)) (all u64) (expected u64))
-  u64
+  ((c m:context)
+   (id u64)
+   (generic u64)
+   (args u64)
+   (env (pointer void))
+   (all u64)
+   (expected u64)) u64
   (base:cond
     ((match (arity c args (chain-length c (m:child c (signature c generic))))
        (true false)
        (false true))
      (m:report c id "wrong generic argument count")
      0)
-    ((match (generic-arguments c generic args args 0 env all expected) (true false) (false true)) 0)
+    ((match (generic-arguments c generic args args 0 env all expected)
+       (true false)
+       (false true))
+     0)
     (true
       (let
         ((direct u64 (select-implementation c generic args 0 all 0))
          (found
            u64
            (match args
-             (0 (match direct (0 (nullary-protocol-method c generic expected all 0)) (_ direct)))
+             (0
+               (match direct
+                 (0 (nullary-protocol-method c generic expected all 0))
+                 (_ direct)))
              (_ direct)))
          (target
            u64
@@ -1592,13 +2102,17 @@
            (match (pointer-equality c generic args)
              (0 (do (m:report c id "no matching generic implementation") 0))
              (operation (m:typed c id 9 2 operation 0))))
-          ((== target (cast u64 18446744073709551615)) (m:report c id "ambiguous generic implementation") 0)
+          ((== target (cast u64 18446744073709551615))
+           (m:report c id "ambiguous generic implementation")
+           0)
           ((== target default-implementation)
            (m:typed
              c
              id
              9
-             (num:default-result (field (m:at c generic) target) (field (m:at c args) ty))
+             (num:default-result
+               (field (m:at c generic) target)
+               (field (m:at c args) ty))
              (field (m:at c generic) target)
              0))
           (true (m:typed c id 8 (field (m:at c target) ty) target 0)))))))
@@ -1632,7 +2146,11 @@
     (do
       (identifier c name)
       (require c name (== (find c all name) fn) "duplicate function")
-      (require c name (== (type-resolve c name) 0) "function conflicts with type constructor")
+      (require
+        c
+        name
+        (== (type-resolve c name) 0)
+        "function conflicts with type constructor")
       (require
         c
         fn
@@ -1642,7 +2160,12 @@
       (require c fn (list c (m:next c clause)) "expected type parameter list")
       (match constraints
         (0 unit)
-        (_ (require c constraints (list c constraints) "expected constraint list")))
+        (_
+          (require
+            c
+            constraints
+            (list c constraints)
+            "expected constraint list")))
       (require c params (list c params) "expected parameter list")
       (require
         c
@@ -1661,17 +2184,25 @@
       (m:typed c fn 41 0 0 0)
       unit)))
 
-(base:function validate-constraints ((c m:context) (id u64) (types u64) (all u64)) unit
+(base:function validate-constraints
+  ((c m:context) (id u64) (types u64) (all u64)) unit
   (match id
     (0 unit)
     (_
       (let ((name u64 (m:child c id)) (protocol u64 (resolve c all name)))
         (do
-          (require c id (== (field (m:at c protocol) kind) 38) "unknown protocol constraint")
           (require
             c
             id
-            (arity c (m:next c name) (chain-length c (m:child c (signature c protocol))))
+            (== (field (m:at c protocol) kind) 38)
+            "unknown protocol constraint")
+          (require
+            c
+            id
+            (arity
+              c
+              (m:next c name)
+              (chain-length c (m:child c (signature c protocol))))
             "protocol argument count mismatch")
           (validate-protocol-types c (m:next c name) types)
           (validate-constraints c (m:next c id) types all))))))
@@ -1693,7 +2224,9 @@
     (0 0)
     (_
       (let ((next u64 (make-substitution c (m:next c param))))
-        (m:add c (m:node 42 (field (m:at c param) start) 0 param next 0 0 0 0 0))))))
+        (m:add
+          c
+          (m:node 42 (field (m:at c param) start) 0 param next 0 0 0 0 0))))))
 
 (base:function unify-template ((c m:context) (template u64) (actual u64)) bool
   (let
@@ -1735,7 +2268,12 @@
             (false false)))))))
 
 (base:function infer-template-arguments
-  ((caller m:context) (scope m:context) (arg u64) (param u64) (env (pointer void)) (all u64)) bool
+  ((caller m:context)
+   (scope m:context)
+   (arg u64)
+   (param u64)
+   (env (pointer void))
+   (all u64)) bool
   (match arg
     (0 true)
     (_
@@ -1744,11 +2282,15 @@
          (template u64 (m:next scope (m:child scope param)))
          (contextual
            u64
-           (match (atom scope template) (true (type-reference scope template)) (false 0)))
+           (match (atom scope template)
+             (true (type-reference scope template))
+             (false 0)))
          (actual
            u64
            (base:cond
-             ((match (num:integer-type contextual) (true (integer-node caller arg)) (false false))
+             ((match (num:integer-type contextual)
+                (true (integer-node caller arg))
+                (false false))
               (expression-as caller arg env all contextual))
              ((match (num:float-type contextual)
                 (true (raw:floating-node caller arg))
@@ -1758,15 +2300,27 @@
         (base:cond
           ((== actual 0) false)
           ((unify-template scope template actual)
-           (infer-template-arguments caller scope (m:next caller arg) (m:next scope param) env all))
-          (true (m:report caller arg "conflicting type argument inference") false))))))
+           (infer-template-arguments
+             caller
+             scope
+             (m:next caller arg)
+             (m:next scope param)
+             env
+             all))
+          (true
+            (m:report caller arg "conflicting type argument inference")
+            false))))))
 
 (base:function substitution-complete ((c m:context) (id u64)) bool
   (match id
     (0 true)
-    (_ (match (field (m:at c id) ty) (0 false) (_ (substitution-complete c (m:next c id)))))))
+    (_
+      (match (field (m:at c id) ty)
+        (0 false)
+        (_ (substitution-complete c (m:next c id)))))))
 
-(base:function constraint-arguments-match ((c m:context) (template u64) (actual u64)) bool
+(base:function constraint-arguments-match
+  ((c m:context) (template u64) (actual u64)) bool
   (match template
     (0 (== actual 0))
     (_
@@ -1774,10 +2328,15 @@
         (0 false)
         (_
           (match (== (type-reference c template) (field (m:at c actual) ty))
-            (true (constraint-arguments-match c (m:next c template) (m:next c actual)))
+            (true
+              (constraint-arguments-match
+                c
+                (m:next c template)
+                (m:next c actual)))
             (false false)))))))
 
-(base:function constraint-instance ((c m:context) (protocol u64) (args u64) (id u64)) u64
+(base:function constraint-instance
+  ((c m:context) (protocol u64) (args u64) (id u64)) u64
   (match id
     (0 0)
     (_
@@ -1786,13 +2345,15 @@
           ((== (field v kind) 39)
            (match (== (field v target) protocol)
              (true
-               (match (constraint-arguments-match c args (protocol-arguments c id))
+               (match
+                 (constraint-arguments-match c args (protocol-arguments c id))
                  (true id)
                  (false (constraint-instance c protocol args (m:next c id)))))
              (false (constraint-instance c protocol args (m:next c id)))))
           (true (constraint-instance c protocol args (m:next c id))))))))
 
-(base:function constraint-evidence ((c m:context) (constraint u64) (all u64)) u64
+(base:function constraint-evidence ((c m:context) (constraint u64) (all u64))
+  u64
   (match constraint
     (0 (field c specialization))
     (_
@@ -1801,13 +2362,31 @@
          (protocol u64 (resolve c all name))
          (instance u64 (constraint-instance c protocol (m:next c name) all)))
         (match instance
-          (0 (do (m:report c constraint "missing protocol implementation for specialization") 0))
+          (0
+            (do
+              (m:report
+                c
+                constraint
+                "missing protocol implementation for specialization")
+              0))
           (_
             (let ((rest u64 (constraint-evidence c (m:next c constraint) all)))
               (match rest
                 (0 0)
                 (_
-                  (m:add c (m:node 43 (field (m:at c constraint) start) 0 instance rest 0 0 0 0 0)))))))))))
+                  (m:add
+                    c
+                    (m:node
+                      43
+                      (field (m:at c constraint) start)
+                      0
+                      instance
+                      rest
+                      0
+                      0
+                      0
+                      0
+                      0)))))))))))
 
 (base:function constrained-method ((c m:context) (name u64) (binding u64)) u64
   (let ((v m:node (m:at c name)))
@@ -1815,7 +2394,12 @@
       ((== (field c specialization) 0) 0)
       ((match binding
          (0 false)
-         (_ (match (field (m:at c binding) kind) (37 false) (38 false) (62 false) (_ true))))
+         (_
+           (match (field (m:at c binding) kind)
+             (37 false)
+             (38 false)
+             (62 false)
+             (_ true))))
        0)
       ((== (name-colon c name) (+ (field v start) (field v length)))
        (evidence-method c name (field c specialization)))
@@ -1825,7 +2409,9 @@
   (let ((v m:node (m:at c evidence)))
     (match (field v kind)
       (43
-        (let ((instance u64 (field v child)) (protocol u64 (field (m:at c instance) target)))
+        (let
+          ((instance u64 (field v child))
+           (protocol u64 (field (m:at c instance) target)))
           (match (operation-named c name (protocol-operations c protocol) false)
             (0 (evidence-method c name (field v next)))
             (_ (operation-named c name (m:next c instance) true)))))
@@ -1834,7 +2420,8 @@
 (base:function specialization-kind ((kind u64)) bool
   (match kind (40 true) (44 true) (_ false)))
 
-(base:function cached-specialization ((c m:context) (template u64) (bindings u64) (id u64)) u64
+(base:function cached-specialization
+  ((c m:context) (template u64) (bindings u64) (id u64)) u64
   (match id
     (0 0)
     (_
@@ -1843,20 +2430,27 @@
           ((specialization-kind (field v kind))
            (match (== (field v target) template)
              (true
-               (match (component-equal c bindings (base:convert (field v value)))
+               (match
+                 (component-equal c bindings (base:convert (field v value)))
                  (true id)
                  (false
                    (match (field v kind)
                      (44
                        (do
-                         (m:report c template "recursive specialization changes type arguments")
+                         (m:report
+                           c
+                           template
+                           "recursive specialization changes type arguments")
                          0))
-                     (_ (cached-specialization c template bindings (m:next c id)))))))
+                     (_
+                       (cached-specialization c template bindings (m:next c id)))))))
              (false (cached-specialization c template bindings (m:next c id)))))
           (true (cached-specialization c template bindings (m:next c id))))))))
 
 (base:function append-specialization ((c m:context) (tail u64) (fn u64)) unit
-  (match (m:next c tail) (0 (m:link c tail fn)) (_ (append-specialization c (m:next c tail) fn))))
+  (match (m:next c tail)
+    (0 (m:link c tail fn))
+    (_ (append-specialization c (m:next c tail) fn))))
 
 (base:function specialize ((scope m:context) (template u64) (all u64)) u64
   (let
@@ -1867,12 +2461,24 @@
       ((> cached 0) cached)
       ((> (deref (field scope errors)) before) 0)
       (true
-        (let ((evidence u64 (constraint-evidence scope (template-constraints scope template) all)))
+        (let
+          ((evidence
+             u64
+             (constraint-evidence
+               scope
+               (template-constraints scope template)
+               all)))
           (match evidence
             (0 0)
-            (_ (check-specialization (specialized-context scope evidence) template bindings all))))))))
+            (_
+              (check-specialization
+                (specialized-context scope evidence)
+                template
+                bindings
+                all))))))))
 
-(base:function check-specialization ((c m:context) (template u64) (bindings u64) (all u64)) u64
+(base:function check-specialization
+  ((c m:context) (template u64) (bindings u64) (all u64)) u64
   (let
     ((v m:node (m:at c template))
      (head m:node (m:at c (field v child)))
@@ -1932,7 +2538,8 @@
       fn)))
 
 (base:function specialize-call
-  ((c m:context) (id u64) (fn u64) (args u64) (env (pointer void)) (all u64)) u64
+  ((c m:context) (id u64) (fn u64) (args u64) (env (pointer void)) (all u64))
+  u64
   (let ((params u64 (m:child c (template-parameters c fn))))
     (match (arity c args (chain-length c params))
       (false (do (m:report c id "wrong parametric function argument count") 0))
@@ -1945,12 +2552,16 @@
                (true false)
                (false true))
              0)
-            ((match (substitution-complete c bindings) (true false) (false true))
+            ((match (substitution-complete c bindings)
+               (true false)
+               (false true))
              (m:report c id "cannot infer type parameter")
              0)
             (true
               (let ((target u64 (specialize scope fn all)))
-                (match target (0 0) (_ (m:typed c id 8 (field (m:at c target) ty) target 0)))))))))))
+                (match target
+                  (0 0)
+                  (_ (m:typed c id 8 (field (m:at c target) ty) target 0)))))))))))
 
 ; Report an unresolved call with its source spelling, including any module qualifier.
 (base:function unknown-function ((c m:context) (name u64)) unit
@@ -1964,7 +2575,13 @@
 
 ; Resolve the nearest namespace first; invalid declarations never supply a signature.
 (base:function direct-call
-  ((c m:context) (id u64) (head u64) (args u64) (env (pointer void)) (all u64) (expected u64)) u64
+  ((c m:context)
+   (id u64)
+   (head u64)
+   (args u64)
+   (env (pointer void))
+   (all u64)
+   (expected u64)) u64
   (match (== (m:lookup c head env) 0)
     (false (indirect-call c id head args env all))
     (true
@@ -1982,16 +2599,29 @@
               0))
           (_
             (base:cond
-              ((== (field (m:at c fn) kind) 41) (specialize-call c id fn args env all))
+              ((== (field (m:at c fn) kind) 41)
+               (specialize-call c id fn args env all))
               ((match (field (m:at c fn) kind) (37 true) (62 true) (_ false))
                (generic-call c id fn args env all expected))
-              ((== (field (m:at c fn) kind) 38) (m:report c head "protocol is not callable") 0)
-              ((constant-declaration c fn) (m:report c head "constant value is not callable") 0)
-              ((variable-declaration c fn) (m:report c head "variable value is not callable") 0)
+              ((== (field (m:at c fn) kind) 38)
+               (m:report c head "protocol is not callable")
+               0)
+              ((constant-declaration c fn)
+               (m:report c head "constant value is not callable")
+               0)
+              ((variable-declaration c fn)
+               (m:report c head "variable value is not callable")
+               0)
               ((== (field (m:at c fn) kind) 53)
                (do
                  (arguments c args (m:child c (signature c fn)) env all)
-                 (m:typed c id 54 (match (field (m:at c fn) ty) (14 1) (ty ty)) fn 0)))
+                 (m:typed
+                   c
+                   id
+                   54
+                   (match (field (m:at c fn) ty) (14 1) (ty ty))
+                   fn
+                   0)))
               ((== (field (m:at c fn) ty) 0) 0)
               (true
                 (do
@@ -2003,7 +2633,8 @@
   (let ((v m:node (m:at c id)))
     (match (field v kind)
       (64 3)
-      (5 (num:remainder (base:convert (field (m:at c (field v target)) value)) 4))
+      (5
+        (num:remainder (base:convert (field (m:at c (field v target)) value)) 4))
       (58 3)
       (14 (base:convert (field v value)))
       (50 (base:convert (field v value)))
@@ -2034,14 +2665,18 @@
       (50 (materialize-place c (m:next c (field v child))))
       (_ unit))))
 
-(base:function address-expression ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64))
-  u64
+(base:function address-expression
+  ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
   (match (arity c args 1)
     (false (do (m:report c id "& requires exactly one operand") 0))
     (true
       (let ((ty u64 (expression c args env all)))
         (do
-          (require c args (> (place-flags c args) 0) "expression is not addressable")
+          (require
+            c
+            args
+            (> (place-flags c args) 0)
+            "expression is not addressable")
           (materialize-place c args)
           (m:typed c id 57 (pointer-type c ty) 0 0))))))
 
@@ -2054,7 +2689,8 @@
           (match pointee
             (14 false)
             (_ (match (type-kind c pointee) (33 false) (46 false) (_ true))))
-          (false (do (m:report c id "pointer requires a complete object type") 0))
+          (false
+            (do (m:report c id "pointer requires a complete object type") 0))
           (true (do (resolve-value-layout c pointee) pointee)))))))
 
 (base:function dereference-expression
@@ -2062,13 +2698,21 @@
   (match (arity c args 1)
     (false (do (m:report c id "deref requires exactly one operand") 0))
     (true
-      (let ((ty u64 (expression c args env all)) (pointee u64 (complete-pointee c args ty)))
+      (let
+        ((ty u64 (expression c args env all))
+         (pointee u64 (complete-pointee c args ty)))
         (m:typed c id 58 pointee 0 3)))))
 
-(base:function offset-expression ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64))
-  u64
+(base:function offset-expression
+  ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
   (match (arity c args 2)
-    (false (do (m:report c id "pointer-offset requires a pointer and an integer offset") 0))
+    (false
+      (do
+        (m:report
+          c
+          id
+          "pointer-offset requires a pointer and an integer offset")
+        0))
     (true
       (let
         ((ty u64 (expression c args env all))
@@ -2081,17 +2725,25 @@
              (true (integer c offset 3))
              (false (expression c offset env all)))))
         (do
-          (require c offset (num:integer-type index) "pointer-offset requires an integer offset")
+          (require
+            c
+            offset
+            (num:integer-type index)
+            "pointer-offset requires an integer offset")
           (m:typed c id 59 ty pointee 0))))))
 
-(base:function store-expression ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64))
-  u64
+(base:function store-expression
+  ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
   (match (arity c args 2)
     (false (do (m:report c id "store requires a target and a value") 0))
     (true
       (let ((ty u64 (expression c args env all)) (value u64 (m:next c args)))
         (do
-          (require c args (== (place-flags c args) 3) "expression is not writable")
+          (require
+            c
+            args
+            (== (place-flags c args) 3)
+            "expression is not writable")
           (materialize-place c args)
           (expect c value (expression-as c value env all ty) ty)
           (m:typed c id 60 1 0 0))))))
@@ -2109,13 +2761,19 @@
       (require c id (atom c head) "expected operation or function name")
       (base:cond
         ((m:is c head "if")
-         (require c id (arity c args 3) "if requires condition and two branches")
+         (require
+           c
+           id
+           (arity c args 3)
+           "if requires condition and two branches")
          (expect c args (expression-as c args env all 2) 2)
          (let
            ((yes u64 (m:next c args))
             (no u64 (m:next c yes))
             (ty u64 (expression-as c yes env all expected)))
-           (do (expect-origin c no (expression-as c no env all ty) ty yes) (m:typed c id 6 ty 0 0))))
+           (do
+             (expect-origin c no (expression-as c no env all ty) ty yes)
+             (m:typed c id 6 ty 0 0))))
         ((base:or (m:is c head "&") (m:is c head "address-of"))
          (address-expression c id args env all))
         ((base:or (m:is c head "deref") (m:is c head "dereference"))
@@ -2123,12 +2781,22 @@
         ((m:is c head "pointer-offset") (offset-expression c id args env all))
         ((base:or (m:is c head "store") (m:is c head "assign"))
          (store-expression c id args env all))
-        ((m:is c head "do") (m:typed c id 56 (sequence c args env all expected) 0 0))
+        ((m:is c head "do")
+         (m:typed c id 56 (sequence c args env all expected) 0 0))
         ((m:is c head "let")
          (require c id (> (m:next c args) 0) "let requires bindings and a body")
          (require c args (list c args) "expected binding list")
          (let
-           ((ty u64 (bindings c (m:child c args) (m:next c args) env (m:empty-env) all expected)))
+           ((ty
+              u64
+              (bindings
+                c
+                (m:child c args)
+                (m:next c args)
+                env
+                (m:empty-env)
+                all
+                expected)))
            (m:typed c id 7 ty 0 0)))
         ((> op 0)
          (let ((input u64 (field primitive input)))
@@ -2144,7 +2812,12 @@
                (_ unit))
              (match (field primitive arity)
                (1 unit)
-               (_ (expect c (m:next c args) (expression-as c (m:next c args) env all input) input)))
+               (_
+                 (expect
+                   c
+                   (m:next c args)
+                   (expression-as c (m:next c args) env all input)
+                   input)))
              (m:typed c id 9 (field primitive result) op 0))))
         ((m:is c head "cast") (checked-cast c id args env all))
         ((m:is c head "array-of") (array-expression c id args env all expected))
@@ -2155,16 +2828,31 @@
            args
            env
            all
-           (match (== (type-kind c expected) 22) (true (type-components c expected)) (false 0)))
+           (match (== (type-kind c expected) 22)
+             (true (type-components c expected))
+             (false 0)))
          (m:typed c id 13 (tuple-type c args) 0 0))
         ((m:is c head "field") (access c id args env all false))
         ((m:is c head "tuple-get") (access c id args env all true))
         ((> (type-resolve c head) 0)
          (let ((decl u64 (type-resolve c head)))
            (do
-             (require c head (== (m:lookup c head env) 0) "local value is not callable")
-             (require c head (== (field (m:at c decl) kind) 20) "expected product constructor")
-             (components-check c args (type-components c (+ decl num:descriptor-base)) env all)
+             (require
+               c
+               head
+               (== (m:lookup c head env) 0)
+               "local value is not callable")
+             (require
+               c
+               head
+               (== (field (m:at c decl) kind) 20)
+               "expected product constructor")
+             (components-check
+               c
+               args
+               (type-components c (+ decl num:descriptor-base))
+               env
+               all)
              (m:typed c id 13 (+ decl num:descriptor-base) 0 0))))
         ((m:is c head "match") (match-expression c id args env all expected))
         (true
@@ -2173,11 +2861,16 @@
               (0 (direct-call c id head args env all expected))
               (_
                 (do
-                  (require c head (== (m:lookup c head env) 0) "local value is not callable")
+                  (require
+                    c
+                    head
+                    (== (m:lookup c head env) 0)
+                    "local value is not callable")
                   (components-check c args (m:next c (m:child c case)) env all)
                   (m:typed c id 15 (field (m:at c case) ty) case 0))))))))))
 
-(base:function checked-cast ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
+(base:function checked-cast
+  ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
   (let
     ((ty u64 (type-name c args))
      (literal u64 (m:next c args))
@@ -2185,13 +2878,31 @@
     (base:cond
       ((num:float-type ty)
        (match (field (m:at c literal) kind)
-         (35 (do (float:parse c literal ty) (m:typed c id 36 ty 0 (field (m:at c literal) value))))
-         (71 (do (float:parse c literal ty) (m:typed c id 36 ty 0 (field (m:at c literal) value))))
-         (_ (do (m:report c literal "numeric cast requires a floating-point literal") 0))))
+         (35
+           (do
+             (float:parse c literal ty)
+             (m:typed c id 36 ty 0 (field (m:at c literal) value))))
+         (71
+           (do
+             (float:parse c literal ty)
+             (m:typed c id 36 ty 0 (field (m:at c literal) value))))
+         (_
+           (do
+             (m:report
+               c
+               literal
+               "numeric cast requires a floating-point literal")
+             0))))
       ((num:integer-type ty)
        (match (integer-node c literal)
-         (true (do (integer c literal ty) (m:typed c id 2 ty 0 (field (m:at c literal) value))))
-         (false (do (m:report c literal "numeric cast requires an integer literal") 0))))
+         (true
+           (do
+             (integer c literal ty)
+             (m:typed c id 2 ty 0 (field (m:at c literal) value))))
+         (false
+           (do
+             (m:report c literal "numeric cast requires an integer literal")
+             0))))
       ((pointer-value-type c ty)
        (let ((from u64 (expression c literal env all)))
          (base:cond
@@ -2203,11 +2914,18 @@
                   (false (== (pointer-pointee c from) 14))))
               (false false))
             (m:typed c id 45 ty 0 0))
-           (true (m:report c id "cast permits only (pointer T) to or from (pointer void)") 0))))
-      (true (m:report c args "cast requires a numeric or pointer target type") 0))))
+           (true
+             (m:report
+               c
+               id
+               "cast permits only (pointer T) to or from (pointer void)")
+             0))))
+      (true
+        (m:report c args "cast requires a numeric or pointer target type")
+        0))))
 
-(base:function application ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64))
-  u64
+(base:function application
+  ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64)) u64
   (let ((head u64 (m:child c id)) (args u64 (m:next c head)))
     (match (atom c head)
       (false
@@ -2219,12 +2937,24 @@
           (do
             (base:cond
               ((m:is c head "if")
-               (require c id (arity c args 3) "if requires condition and two branches"))
+               (require
+                 c
+                 id
+                 (arity c args 3)
+                 "if requires condition and two branches"))
               ((m:is c head "let")
-               (require c id (> (m:next c args) 0) "let requires bindings and a body")
+               (require
+                 c
+                 id
+                 (> (m:next c args) 0)
+                 "let requires bindings and a body")
                (require c args (list c args) "expected binding list"))
               ((m:is c head "cast")
-               (require c id (arity c args 2) "cast requires a target type and one operand"))
+               (require
+                 c
+                 id
+                 (arity c args 2)
+                 "cast requires a target type and one operand"))
               ((> (field (num:primitive c head) code) 0)
                (let ((count u64 (field (num:primitive c head) arity)))
                  (require
@@ -2256,7 +2986,8 @@
    (count u64)) unit
   (raw:decode-data c out cursor escaped start count))
 
-(base:function append-byte ((out (pointer u8)) (cursor (pointer u64)) (b u64)) unit
+(base:function append-byte ((out (pointer u8)) (cursor (pointer u64)) (b u64))
+  unit
   (raw:append-byte out cursor b))
 
 (base:function data-literal ((c m:context) (id u64) (v m:node)) u64
@@ -2272,13 +3003,20 @@
 
 ; Resolve and type-check one expression, recording literal values and binder identities.
 ; Return its type ID; both branches of a conditional are checked by application.
-(base:function expression-inner ((c m:context) (id u64) (env (pointer void)) (all u64)) u64
+(base:function expression-inner
+  ((c m:context) (id u64) (env (pointer void)) (all u64)) u64
   (let ((v m:node (m:at c id)))
     (match (field v kind)
       (3 (m:typed c id 3 2 0 (field v value)))
       (1 (application c id env all 0))
-      (35 (do (m:report c id "ambiguous numeric literal; supply a type with cast") 0))
-      (71 (do (m:report c id "ambiguous numeric literal; supply a type with cast") 0))
+      (35
+        (do
+          (m:report c id "ambiguous numeric literal; supply a type with cast")
+          0))
+      (71
+        (do
+          (m:report c id "ambiguous numeric literal; supply a type with cast")
+          0))
       (25 (data-literal c id v))
       (26
         (m:typed
@@ -2289,13 +3027,18 @@
           0
           (base:convert
             (syntax:character-byte
-              (pointer-offset (field (field c source) bytes) (+ (field v start) 2))
+              (pointer-offset
+                (field (field c source) bytes)
+                (+ (field v start) 2))
               (- (field v length) 2)))))
       (_
         (base:cond
-          ((match (field v generated) (0 (m:is c id "true")) (_ false)) (m:typed c id 3 2 0 1))
-          ((match (field v generated) (0 (m:is c id "false")) (_ false)) (m:typed c id 3 2 0 0))
-          ((match (field v generated) (0 (m:is c id "unit")) (_ false)) (m:typed c id 4 1 0 0))
+          ((match (field v generated) (0 (m:is c id "true")) (_ false))
+           (m:typed c id 3 2 0 1))
+          ((match (field v generated) (0 (m:is c id "false")) (_ false))
+           (m:typed c id 3 2 0 0))
+          ((match (field v generated) (0 (m:is c id "unit")) (_ false))
+           (m:typed c id 4 1 0 0))
           ((integer-node c id)
            (m:report c id "ambiguous numeric literal; supply a type with cast")
            0)
@@ -2304,7 +3047,9 @@
               (do
                 (match binder
                   (0
-                    (let ((before u64 (deref (field c errors))) (decl u64 (resolve c all id)))
+                    (let
+                      ((before u64 (deref (field c errors)))
+                       (decl u64 (resolve c all id)))
                       (base:cond
                         ((constant-declaration c decl)
                          (m:typed c id 52 (field (m:at c decl) ty) decl 0))
@@ -2319,7 +3064,8 @@
                   (_ (m:typed c id 5 (field (m:at c binder) ty) binder 0)))))))))))
 
 ; Type zero is an internal error marker and never reaches either execution path.
-(base:function expression ((c m:context) (id u64) (env (pointer void)) (all u64)) u64
+(base:function expression
+  ((c m:context) (id u64) (env (pointer void)) (all u64)) u64
   (let
     ((expanded unit (expand:expression c id))
      (before u64 (deref (field c errors)))
@@ -2329,8 +3075,8 @@
       (false (m:typed c id (field (m:at c id) kind) 0 0 0)))))
 
 ; Introduce the function's typed parameters, then require its body to match its return type.
-(base:function function-body ((c m:context) (fn u64) (param u64) (env (pointer void)) (all u64))
-  unit
+(base:function function-body
+  ((c m:context) (fn u64) (param u64) (env (pointer void)) (all u64)) unit
   (match param
     (0
       (expect-origin
@@ -2340,8 +3086,15 @@
         (field (m:at c fn) ty)
         (m:next c (signature c fn))))
     (_
-      (let ((name u64 (m:child c param)) (binding m:binding (m:binding name name 0 env)))
-        (function-body c fn (m:next c param) (cast (pointer void) (& binding)) all)))))
+      (let
+        ((name u64 (m:child c param))
+         (binding m:binding (m:binding name name 0 env)))
+        (function-body
+          c
+          fn
+          (m:next c param)
+          (cast (pointer void) (& binding))
+          all)))))
 
 ; Check every function body, including functions that execution will never reach.
 (base:function bodies ((c m:context) (fn u64) (all u64)) unit
@@ -2358,7 +3111,13 @@
                 (true true)
                 (false (>= (field (m:at c fn) kind) 20)))
               (true unit)
-              (false (function-body c fn (m:child c (signature c fn)) (m:empty-env) all)))))
+              (false
+                (function-body
+                  c
+                  fn
+                  (m:child c (signature c fn))
+                  (m:empty-env)
+                  all)))))
         (bodies c (m:next c fn) all)))))
 
 (base:function variable-body ((c m:context) (id u64) (all u64)) unit
@@ -2368,7 +3127,13 @@
       (require
         c
         init
-        (match (field (m:at c init) kind) (2 true) (3 true) (4 true) (17 true) (36 true) (_ false))
+        (match (field (m:at c init) kind)
+          (2 true)
+          (3 true)
+          (4 true)
+          (17 true)
+          (36 true)
+          (_ false))
         "variable initializer must be a scalar or data literal"))))
 
 (base:function constant-body ((c m:context) (id u64) (all u64)) unit
@@ -2378,7 +3143,13 @@
       (require
         c
         init
-        (match (field (m:at c init) kind) (2 true) (3 true) (4 true) (17 true) (36 true) (_ false))
+        (match (field (m:at c init) kind)
+          (2 true)
+          (3 true)
+          (4 true)
+          (17 true)
+          (36 true)
+          (_ false))
         "constant initializer must be a scalar or data literal"))))
 
 ; Find the root function named main, or return zero for library roots.
@@ -2402,7 +3173,9 @@
     (match (arity c params 2)
       (false false)
       (true
-        (let ((argc u64 (parameter-type c params)) (argv u64 (parameter-type c (m:next c params))))
+        (let
+          ((argc u64 (parameter-type c params))
+           (argv u64 (parameter-type c (m:next c params))))
           (match (== argc 6)
             (false false)
             (true
@@ -2425,7 +3198,11 @@
     (exports c functions 0)
     (let ((main u64 (match entry (true (main-function c functions)) (false 0))))
       (do
-        (require c 0 (base:or-else (base:not entry) (> main 0)) "missing main function")
+        (require
+          c
+          0
+          (base:or-else (base:not entry) (> main 0))
+          "missing main function")
         (match (== (field (m:at c main) ty) 0)
           (true unit)
           (false
@@ -2457,7 +3234,8 @@
 (base:function native-export-name ((c m:context) (id u64)) (pointer u8)
   (external-name c id))
 
-(base:function native-export-duplicates ((c m:context) (id u64) (other u64)) unit
+(base:function native-export-duplicates ((c m:context) (id u64) (other u64))
+  unit
   (match (base:or-else (== other 0) (== id other))
     (true unit)
     (false
@@ -2470,7 +3248,10 @@
                 (require
                   c
                   id
-                  (match (cstring:strcmp (native-export-name c id) (native-export-name c other))
+                  (match
+                    (cstring:strcmp
+                      (native-export-name c id)
+                      (native-export-name c other))
                     (0 false)
                     (_ true))
                   "duplicate native C export name"))))
@@ -2488,12 +3269,21 @@
         (c-parameters c (m:next c id))))))
 
 (base:function native-export-signature ((c m:context) (id u64) (all u64)) unit
-  (let ((head u64 (m:child c id)) (name u64 (m:next c head)) (symbol u64 (m:next c name)))
+  (let
+    ((head u64 (m:child c id))
+     (name u64 (m:next c head))
+     (symbol u64 (m:next c name)))
     (base:cond
       ((base:not (base:or (arity c head 2) (arity c head 3)))
-       (m:report c id "native-export requires a local function name and optional data name"))
-      ((base:not (atom c name)) (m:report c name "native-export requires a local function name"))
-      ((base:and-then (> symbol 0) (base:not (== (field (m:at c symbol) kind) 25)))
+       (m:report
+         c
+         id
+         "native-export requires a local function name and optional data name"))
+      ((base:not (atom c name))
+       (m:report c name "native-export requires a local function name"))
+      ((base:and-then
+         (> symbol 0)
+         (base:not (== (field (m:at c symbol) kind) 25)))
        (m:report c symbol "native export name must be data"))
       (true
         (let ((fn u64 (named-in c all (m:owner c id) (m:spelling c name))))
@@ -2511,9 +3301,13 @@
                    u64
                    (match symbol
                      (0
-                       (let ((text data:data (data:empty (arena:allocator (field c memory)))))
+                       (let
+                         ((text
+                            data:data
+                            (data:empty (arena:allocator (field c memory)))))
                          (do
-                           (m:storage (data:assign-bytes (& text) (m:spelling c name)))
+                           (m:storage
+                             (data:assign-bytes (& text) (m:spelling c name)))
                            (m:storage (data:append (& text) 0))
                            (m:add
                              c
@@ -2524,7 +3318,8 @@
                                0
                                0
                                11
-                               (m:address (cast (pointer void) (data:bytes text)))
+                               (m:address
+                                 (cast (pointer void) (data:bytes text)))
                                0
                                0
                                0)))))
@@ -2541,7 +3336,9 @@
                       (require
                         c
                         id
-                        (match (cstring:strcmp (native-export-name c id) "main") (0 false) (_ true))
+                        (match (cstring:strcmp (native-export-name c id) "main")
+                          (0 false)
+                          (_ true))
                         "native symbol main is reserved for the entry point")
                       (native-export-duplicates c id all)))
                   (_ unit))))))))))
@@ -2551,7 +3348,9 @@
     (0 unit)
     (_
       (do
-        (match (field (m:at c id) kind) (68 (native-export-signature c id all)) (_ unit))
+        (match (field (m:at c id) kind)
+          (68 (native-export-signature c id all))
+          (_ unit))
         (native-exports c (m:next c id) all)))))
 
 ; Structured type IDs are descriptor tape IDs plus descriptor-base; scalars retain 1..3.
@@ -2573,7 +3372,8 @@
 (base:function type-in ((c m:context) (owner u64) (name data:view) (i u64)) u64
   (type-range c owner name i (- (m:nodes-length (deref (field c items))) i)))
 
-(base:function type-range ((c m:context) (owner u64) (name data:view) (start u64) (count u64)) u64
+(base:function type-range
+  ((c m:context) (owner u64) (name data:view) (start u64) (count u64)) u64
   (match count
     (0 0)
     (1
@@ -2581,7 +3381,8 @@
         ((declared-type (field (m:at c start) kind))
          (match (== (m:owner c start) owner)
            (true
-             (match (data:equal name (m:spelling c (m:next c (m:child c start))))
+             (match
+               (data:equal name (m:spelling c (m:next c (m:child c start))))
                (true start)
                (false 0)))
            (false 0)))
@@ -2609,7 +3410,9 @@
                  (import-target
                    c
                    (m:owner c name)
-                   (data:view (field (m:spelling c name) bytes) (- split (field v start)))
+                   (data:view
+                     (field (m:spelling c name) bytes)
+                     (- split (field v start)))
                    0)))
               (match target
                 (0 0)
@@ -2618,10 +3421,16 @@
                     ((member
                        data:view
                        (data:view
-                         (pointer-offset (field (field c source) bytes) (+ split 1))
+                         (pointer-offset
+                           (field (field c source) bytes)
+                           (+ split 1))
                          (- end (+ split 1))))
                      (module m:module-info (m:file-info c (- target 1))))
-                    (match (exported c (m:next c (m:child c (field module exports))) member)
+                    (match
+                      (exported
+                        c
+                        (m:next c (m:child c (field module exports)))
+                        member)
                       (false 0)
                       (true (type-in c (- target 1) member 1)))))))))))))
 
@@ -2636,7 +3445,9 @@
         (let
           ((qualifier
              data:view
-             (data:view (field (m:spelling c name) bytes) (- split (field v start)))))
+             (data:view
+               (field (m:spelling c name) bytes)
+               (- split (field v start)))))
           (match (base:is-null (field c session))
             (true (missing-qualifier c name qualifier))
             (false
@@ -2648,7 +3459,9 @@
                       ((member
                          data:view
                          (data:view
-                           (pointer-offset (field (field c source) bytes) (+ split 1))
+                           (pointer-offset
+                             (field (field c source) bytes)
+                             (+ split 1))
                            (- end (+ split 1)))))
                       (m:report
                         c
@@ -2670,7 +3483,9 @@
          (require
            c
            repr
-           (match (arity c head 2) (true (m:is c (m:next c head) "opaque")) (false false))
+           (match (arity c head 2)
+             (true (m:is c (m:next c head) "opaque"))
+             (false false))
            "expected (:type opaque)")
          33))
       ((m:is c head "product") 20)
@@ -2693,7 +3508,9 @@
                 (require
                   c
                   id
-                  (match repr (0 (arity c (m:child c id) 2)) (_ (arity c (m:child c id) 3)))
+                  (match repr
+                    (0 (arity c (m:child c id) 2))
+                    (_ (arity c (m:child c id) 3)))
                   "%type requires a name and optional type")
                 (identifier c name)
                 (require
@@ -2701,7 +3518,13 @@
                   name
                   (== (type-in c (m:owner c id) (m:spelling c name) 1) 0)
                   "duplicate type")
-                (m:typed c id kind (match kind (23 0) (_ (+ id num:descriptor-base))) 0 0)
+                (m:typed
+                  c
+                  id
+                  kind
+                  (match kind (23 0) (_ (+ id num:descriptor-base)))
+                  0
+                  0)
                 unit))))
         (register-types c (m:next c id))))))
 
@@ -2754,7 +3577,11 @@
         (do
           (m:typed c id (field v kind) (field v ty) 1 0)
           (match (field v kind)
-            (20 (layout-fields c (type-components c (+ id num:descriptor-base)) (m:empty-env)))
+            (20
+              (layout-fields
+                c
+                (type-components c (+ id num:descriptor-base))
+                (m:empty-env)))
             (_
               (do
                 (require
@@ -2774,28 +3601,44 @@
 ; Alias resolution caches the canonical type ID. The active state detects
 ; cycles through both alias chains and type expressions such as tuples.
 (base:function resolve-alias ((c m:context) (id u64)) u64
-  (let ((v m:node (m:at c id)) (target u64 (m:next c (m:next c (m:child c id)))))
+  (let
+    ((v m:node (m:at c id)) (target u64 (m:next c (m:next c (m:child c id)))))
     (match (field v target)
       (2 (field v ty))
       (1 (do (m:report c id "type alias cycle") 0))
       (_
         (do
           (m:typed c id 23 0 1 0)
-          (let ((before u64 (deref (field c errors))) (ty u64 (type-reference c target)))
-            (m:typed c id 23 (match (== before (deref (field c errors))) (true ty) (false 0)) 2 0)))))))
+          (let
+            ((before u64 (deref (field c errors)))
+             (ty u64 (type-reference c target)))
+            (m:typed
+              c
+              id
+              23
+              (match (== before (deref (field c errors))) (true ty) (false 0))
+              2
+              0)))))))
 
 (base:function resolve-declared-type ((c m:context) (id u64)) u64
-  (match (field (m:at c id) kind) (23 (resolve-alias c id)) (_ (field (m:at c id) ty))))
+  (match (field (m:at c id) kind)
+    (23 (resolve-alias c id))
+    (_ (field (m:at c id) ty))))
 
 (base:function callback-signature ((c m:context) (ty u64)) u64
   (match (== (type-kind c ty) 34)
     (false 0)
     (true
       (let ((pointee u64 (pointer-pointee c ty)))
-        (match (== (type-kind c pointee) 46) (true (- pointee num:descriptor-base)) (false 0))))))
+        (match (== (type-kind c pointee) 46)
+          (true (- pointee num:descriptor-base))
+          (false 0))))))
 
 (base:function callback-type ((c m:context) (id u64)) u64
-  (let ((head u64 (m:child c id)) (params u64 (m:next c head)) (result u64 (m:next c params)))
+  (let
+    ((head u64 (m:child c id))
+     (params u64 (m:next c head))
+     (result u64 (m:next c params)))
     (base:cond
       ((match (arity c head 3)
          (true (match (list c params) (true false) (false true)))
@@ -2816,17 +3659,33 @@
             (let
               ((found
                  u64
-                 (callback-range c args ty 1 (- (m:nodes-length (deref (field c items))) 1))))
+                 (callback-range
+                   c
+                   args
+                   ty
+                   1
+                   (- (m:nodes-length (deref (field c items))) 1))))
               (+
                 num:descriptor-base
                 (match found
                   (0
                     (m:add
                       c
-                      (m:node 46 (field (m:at c id) start) 0 (copy-components c args) 0 0 ty 0 0 0)))
+                      (m:node
+                        46
+                        (field (m:at c id) start)
+                        0
+                        (copy-components c args)
+                        0
+                        0
+                        ty
+                        0
+                        0
+                        0)))
                   (_ found))))))))))
 
-(base:function callback-range ((c m:context) (params u64) (result u64) (start u64) (count u64)) u64
+(base:function callback-range
+  ((c m:context) (params u64) (result u64) (start u64) (count u64)) u64
   (match count
     (0 0)
     (1
@@ -2834,7 +3693,10 @@
         (match (field v kind)
           (46
             (match (== (field v target) result)
-              (true (match (component-equal c params (field v child)) (true start) (false 0)))
+              (true
+                (match (component-equal c params (field v child))
+                  (true start)
+                  (false 0)))
               (false 0)))
           (_ 0))))
     (_
@@ -2843,22 +3705,28 @@
           (0 (callback-range c params result (+ start half) (- count half)))
           (found found))))))
 
-(base:function function-designator ((c m:context) (id u64) (expected u64) (env (pointer void))) bool
+(base:function function-designator
+  ((c m:context) (id u64) (expected u64) (env (pointer void))) bool
   (base:cond
     ((== (callback-signature c expected) 0) false)
     ((integer-node c id) false)
     ((atom c id) (== (m:lookup c id env) 0))
     (true false)))
 
-(base:function callback-parameters-match ((c m:context) (params u64) (actual u64)) bool
+(base:function callback-parameters-match
+  ((c m:context) (params u64) (actual u64)) bool
   (match params
     (0 (== actual 0))
     (_
       (match actual
         (0 false)
         (_
-          (match (== (field (m:at c params) ty) (field (m:at c (m:child c actual)) ty))
-            (true (callback-parameters-match c (m:next c params) (m:next c actual)))
+          (match
+            (==
+              (field (m:at c params) ty)
+              (field (m:at c (m:child c actual)) ty))
+            (true
+              (callback-parameters-match c (m:next c params) (m:next c actual)))
             (false false)))))))
 
 (base:function callback-matches ((c m:context) (descriptor u64) (fn u64)) bool
@@ -2866,7 +3734,11 @@
     (base:cond
       ((callable-shape c fn)
        (match (== (field v target) (field (m:at c fn) ty))
-         (true (callback-parameters-match c (field v child) (m:child c (signature c fn))))
+         (true
+           (callback-parameters-match
+             c
+             (field v child)
+             (m:child c (signature c fn))))
          (false false)))
       (true false))))
 
@@ -2875,7 +3747,8 @@
     (base:cond
       ((> (deref (field c errors)) before) 0)
       ((== fn 0) (m:report c id "unknown function designator") 0)
-      ((callback-matches c (callback-signature c ty) fn) (m:typed c id 47 ty fn 0))
+      ((callback-matches c (callback-signature c ty) fn)
+       (m:typed c id 47 ty fn 0))
       (true (m:report c id "function pointer signature mismatch") 0))))
 
 (base:function callback-arguments
@@ -2890,7 +3763,8 @@
           (callback-arguments c (m:next c arg) (m:next c param) env all))))))
 
 (base:function indirect-call
-  ((c m:context) (id u64) (head u64) (args u64) (env (pointer void)) (all u64)) u64
+  ((c m:context) (id u64) (head u64) (args u64) (env (pointer void)) (all u64))
+  u64
   (let
     ((ty u64 (expression c head env all))
      (descriptor u64 (callback-signature c ty))
@@ -2898,14 +3772,22 @@
     (base:cond
       ((== ty 0) 0)
       ((== descriptor 0) (m:report c head "local value is not callable") 0)
-      ((match (arity c args (chain-length c (field v child))) (true false) (false true))
+      ((match (arity c args (chain-length c (field v child)))
+         (true false)
+         (false true))
        (m:report c id "wrong function pointer argument count")
        0)
       (true
         (do
           (callback-arguments c args (field v child) env all)
           (resolve-value-layout c (field v target))
-          (m:typed c id 48 (match (field v target) (14 1) (result result)) descriptor 0))))))
+          (m:typed
+            c
+            id
+            48
+            (match (field v target) (14 1) (result result))
+            descriptor
+            0))))))
 
 (base:function pointer-value-type ((c m:context) (ty u64)) bool
   (match ty (11 true) (_ (== (type-kind c ty) 34))))
@@ -2913,7 +3795,8 @@
 (base:function pointer-pointee ((c m:context) (ty u64)) u64
   (match ty (11 7) (_ (field (m:at c (- ty num:descriptor-base)) target))))
 
-(base:function pointer-range ((c m:context) (pointee u64) (start u64) (count u64)) u64
+(base:function pointer-range
+  ((c m:context) (pointee u64) (start u64) (count u64)) u64
   (match count
     (0 0)
     (1
@@ -2934,10 +3817,18 @@
     (7 11)
     (_
       (let
-        ((found u64 (pointer-range c pointee 1 (- (m:nodes-length (deref (field c items))) 1))))
+        ((found
+           u64
+           (pointer-range
+             c
+             pointee
+             1
+             (- (m:nodes-length (deref (field c items))) 1))))
         (+
           num:descriptor-base
-          (match found (0 (m:add c (m:node 34 0 0 0 0 0 pointee 0 0 0))) (_ found)))))))
+          (match found
+            (0 (m:add c (m:node 34 0 0 0 0 0 pointee 0 0 0)))
+            (_ found)))))))
 
 (base:function array-element ((c m:context) (ty u64)) u64
   (field (m:at c (- ty num:descriptor-base)) target))
@@ -2948,7 +3839,10 @@
 (base:function array-length-literal ((c m:context) (id u64)) u64
   (let ((original m:node (m:at c id)))
     (match (integer-node c id)
-      (false (do (m:report c id "array length must be a non-negative integer literal") 0))
+      (false
+        (do
+          (m:report c id "array length must be a non-negative integer literal")
+          0))
       (true
         (do
           (integer c id 10)
@@ -2957,7 +3851,10 @@
 
 (base:function array-template-shape ((c m:context) (head u64) (ty u64)) bool
   (match (== (type-kind c ty) 49)
-    (true (== (array-length c ty) (array-length-literal c (m:next c (m:next c head)))))
+    (true
+      (==
+        (array-length c ty)
+        (array-length-literal c (m:next c (m:next c head)))))
     (false false)))
 
 (base:function array-type-reference ((c m:context) (id u64)) u64
@@ -2981,12 +3878,22 @@
 
 (base:function array-type ((c m:context) (element u64) (length u64)) u64
   (let
-    ((found u64 (array-range c element length 1 (- (m:nodes-length (deref (field c items))) 1))))
+    ((found
+       u64
+       (array-range
+         c
+         element
+         length
+         1
+         (- (m:nodes-length (deref (field c items))) 1))))
     (+
       num:descriptor-base
-      (match found (0 (m:add c (m:node 49 0 0 0 0 0 element (base:convert length) 0 0))) (_ found)))))
+      (match found
+        (0 (m:add c (m:node 49 0 0 0 0 0 element (base:convert length) 0 0)))
+        (_ found)))))
 
-(base:function array-range ((c m:context) (element u64) (length u64) (start u64) (count u64)) u64
+(base:function array-range
+  ((c m:context) (element u64) (length u64) (start u64) (count u64)) u64
   (match count
     (0 0)
     (1
@@ -3014,15 +3921,26 @@
         (array-elements c (m:next c args) env all element)))))
 
 (base:function array-expression
-  ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64) (expected u64)) u64
+  ((c m:context)
+   (id u64)
+   (args u64)
+   (env (pointer void))
+   (all u64)
+   (expected u64)) u64
   (let ((length u64 (chain-length c args)))
     (base:cond
       ((== (type-kind c expected) 49)
        (do
-         (require c id (== length (array-length c expected)) "array-of element count mismatch")
+         (require
+           c
+           id
+           (== length (array-length c expected))
+           "array-of element count mismatch")
          (array-elements c args env all (array-element c expected))
          (m:typed c id 13 expected 0 0)))
-      ((> expected 0) (m:report c id "array-of requires an expected array type") 0)
+      ((> expected 0)
+       (m:report c id "array-of requires an expected array type")
+       0)
       ((== length 0) (m:report c id "cannot infer empty array element type") 0)
       (true
         (let ((element u64 (expression c args env all)))
@@ -3033,7 +3951,8 @@
                 (array-elements c (m:next c args) env all element)
                 (m:typed c id 13 (array-type c element length) 0 0)))))))))
 
-(base:function array-index ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
+(base:function array-index
+  ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
   (match (arity c args 2)
     (false (do (m:report c id "index requires an array and index") 0))
     (true
@@ -3047,9 +3966,19 @@
                   (match (field v kind)
                     (2
                       (let ((index u64 (base:convert (field v value))))
-                        (require c offset (< index (array-length c ty)) "array index out of bounds")))
+                        (require
+                          c
+                          offset
+                          (< index (array-length c ty))
+                          "array index out of bounds")))
                     (_ unit))
-                  (m:typed c id 50 (array-element c ty) ty (base:convert (place-flags c args)))))))
+                  (m:typed
+                    c
+                    id
+                    50
+                    (array-element c ty)
+                    ty
+                    (base:convert (place-flags c args)))))))
           (_ (do (m:report c args "index requires an array") 0)))))))
 
 (base:function tuple-reference-types ((c m:context) (id u64)) unit
@@ -3086,7 +4015,8 @@
 (base:function tuple-find ((c m:context) (args u64) (i u64)) u64
   (tuple-range c args i (- (m:nodes-length (deref (field c items))) i)))
 
-(base:function tuple-range ((c m:context) (args u64) (start u64) (count u64)) u64
+(base:function tuple-range ((c m:context) (args u64) (start u64) (count u64))
+  u64
   (match count
     (0 0)
     (1
@@ -3107,7 +4037,19 @@
     (0 0)
     (_
       (let ((rest u64 (copy-components c (m:next c args))))
-        (m:add c (m:node 24 (field (m:at c args) start) 0 0 rest (field (m:at c args) ty) 0 0 0 0))))))
+        (m:add
+          c
+          (m:node
+            24
+            (field (m:at c args) start)
+            0
+            0
+            rest
+            (field (m:at c args) ty)
+            0
+            0
+            0
+            0))))))
 
 (base:function tuple-type ((c m:context) (args u64)) u64
   (let ((found u64 (tuple-find c args 1)))
@@ -3141,7 +4083,8 @@
           fields)
         (components-check c (m:next c args) (m:next c fields) env all)))))
 
-(base:function field-index ((c m:context) (fields u64) (name u64) (index u64)) u64
+(base:function field-index ((c m:context) (fields u64) (name u64) (index u64))
+  u64
   (match fields
     (0 (do (m:report c name "unknown product field") 0))
     (_
@@ -3152,13 +4095,21 @@
 (base:function component-at ((c m:context) (fields u64) (index u64)) u64
   (match fields
     (0 0)
-    (_ (match index (0 fields) (_ (component-at c (m:next c fields) (- index 1)))))))
+    (_
+      (match index
+        (0 fields)
+        (_ (component-at c (m:next c fields) (- index 1)))))))
 
 (base:function index-value ((value i64)) u64
   (base:convert value))
 
 (base:function access
-  ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64) (tuple bool)) u64
+  ((c m:context)
+   (id u64)
+   (args u64)
+   (env (pointer void))
+   (all u64)
+   (tuple bool)) u64
   (do
     (require c id (arity c args 2) "access requires value and field or index")
     (let
@@ -3178,11 +4129,19 @@
              (match tuple
                (false
                  (do
-                   (require c name (plain-name c name) "expected product field name")
+                   (require
+                     c
+                     name
+                     (plain-name c name)
+                     "expected product field name")
                    (field-index c fields name 0)))
                (true
                  (do
-                   (require c name (integer-node c name) "tuple index must be an integer literal")
+                   (require
+                     c
+                     name
+                     (integer-node c name)
+                     "tuple index must be an integer literal")
                    (integer c name 3)
                    (index-value (field (m:at c name) value))))))
            (component u64 (component-at c fields index)))
@@ -3197,15 +4156,18 @@
               (base:convert (place-flags c args)))))))))
 
 ; Expected types guide sum constructor selection without changing nominal identity.
-(base:function expression-as ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64))
-  u64
+(base:function expression-as
+  ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64)) u64
   (do (expand:expression c id) (expression-as-inner c id env all expected)))
 
 (base:function expression-as-inner
   ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64)) u64
   (base:cond
-    ((function-designator c id expected env) (function-address c id expected all))
-    ((match (num:float-type expected) (true (raw:floating-node c id)) (false false))
+    ((function-designator c id expected env)
+     (function-address c id expected all))
+    ((match (num:float-type expected)
+       (true (raw:floating-node c id))
+       (false false))
      (float:parse c id expected))
     (true
       (match (list c id)
@@ -3217,29 +4179,46 @@
                 ((before u64 (deref (field c errors)))
                  (ty
                    u64
-                   (integer c id (match (num:integer-type expected) (true expected) (false 3)))))
+                   (integer
+                     c
+                     id
+                     (match (num:integer-type expected)
+                       (true expected)
+                       (false 3)))))
                 (match (== before (deref (field c errors)))
                   (true ty)
                   (false (m:typed c id 2 0 0 0)))))))
         (true
-          (let ((before u64 (deref (field c errors))) (ty u64 (application c id env all expected)))
+          (let
+            ((before u64 (deref (field c errors)))
+             (ty u64 (application c id env all expected)))
             (match (== before (deref (field c errors)))
               (true ty)
               (false (m:typed c id (field (m:at c id) kind) 0 0 0)))))))))
 
-(base:function layout-cases ((c m:context) (id u64) (ty u64) (index u64) (seen (pointer void))) unit
+(base:function layout-cases
+  ((c m:context) (id u64) (ty u64) (index u64) (seen (pointer void))) unit
   (match id
     (0 unit)
     (_
       (let ((name u64 (m:child c id)))
         (do
-          (require c id (match (list c id) (true (> name 0)) (false false)) "expected sum case")
+          (require
+            c
+            id
+            (match (list c id) (true (> name 0)) (false false))
+            "expected sum case")
           (identifier c name)
           (require c name (== (m:lookup c name seen) 0) "duplicate sum case")
           (tuple-types c (m:next c name))
           (m:typed c id 1 ty index 0)
           (let ((binding m:binding (m:binding name name 0 seen)))
-            (layout-cases c (m:next c id) ty (+ index 1) (cast (pointer void) (& binding)))))))))
+            (layout-cases
+              c
+              (m:next c id)
+              ty
+              (+ index 1)
+              (cast (pointer void) (& binding)))))))))
 
 (base:function case-in ((c m:context) (id u64) (name data:view)) u64
   (match id
@@ -3252,11 +4231,23 @@
 (base:function visible-type ((c m:context) (site u64) (id u64)) bool
   (match (== (m:owner c site) (m:owner c id)) (true true) (false false)))
 
-(base:function cases-find ((c m:context) (site u64) (name data:view) (i u64) (found u64)) u64
-  (case-range c site name i (- (m:nodes-length (deref (field c items))) i) found))
+(base:function cases-find
+  ((c m:context) (site u64) (name data:view) (i u64) (found u64)) u64
+  (case-range
+    c
+    site
+    name
+    i
+    (- (m:nodes-length (deref (field c items))) i)
+    found))
 
 (base:function case-range
-  ((c m:context) (site u64) (name data:view) (start u64) (count u64) (found u64)) u64
+  ((c m:context)
+   (site u64)
+   (name data:view)
+   (start u64)
+   (count u64)
+   (found u64)) u64
   (match count
     (0 found)
     (1
@@ -3266,7 +4257,11 @@
            (match (field (m:at c start) kind)
              (21
                (match (visible-type c site start)
-                 (true (case-in c (type-components c (+ start num:descriptor-base)) name))
+                 (true
+                   (case-in
+                     c
+                     (type-components c (+ start num:descriptor-base))
+                     name))
                  (false 0)))
              (_ 0))))
         (match candidate
@@ -3275,10 +4270,16 @@
             (do
               (match found
                 (0 unit)
-                (_ (m:report c site "ambiguous sum constructor; qualify with Type:case")))
+                (_
+                  (m:report
+                    c
+                    site
+                    "ambiguous sum constructor; qualify with Type:case")))
               candidate)))))
     (_
-      (let ((half u64 (/ count 2)) (left u64 (case-range c site name start half found)))
+      (let
+        ((half u64 (/ count 2))
+         (left u64 (case-range c site name start half found)))
         (case-range c site name (+ start half) (- count half) left)))))
 
 ; Explicit qualification is Type:case or module:Type:case. A qualified type
@@ -3287,7 +4288,9 @@
   (match (== start end)
     (true end)
     (false
-      (match (m:byte c (- end 1)) (58 (- end 1)) (_ (last-colon c start (- end 1)))))))
+      (match (m:byte c (- end 1))
+        (58 (- end 1))
+        (_ (last-colon c start (- end 1)))))))
 
 (base:function case-resolve ((c m:context) (name u64) (expected u64)) u64
   (let
@@ -3295,7 +4298,9 @@
      (end u64 (+ (field v start) (field v length)))
      (split
        u64
-       (match (field v generated) (0 (last-colon c (field v start) end)) (_ (field v start)))))
+       (match (field v generated)
+         (0 (last-colon c (field v start) end))
+         (_ (field v start)))))
     (match (== split (field v start))
       (true
         (match (== (type-kind c expected) 21)
@@ -3305,7 +4310,19 @@
         (let
           ((prefix
              u64
-             (m:add c (m:node 0 (field v start) (- split (field v start)) 0 0 0 0 0 0 0)))
+             (m:add
+               c
+               (m:node
+                 0
+                 (field v start)
+                 (- split (field v start))
+                 0
+                 0
+                 0
+                 0
+                 0
+                 0
+                 0)))
            (decl u64 (type-resolve c prefix)))
           (match (== (field (m:at c decl) kind) 21)
             (false 0)
@@ -3322,7 +4339,12 @@
 
 ; Catch-all names bind the complete scrutinee only within their arm.
 (base:function catch-all-body
-  ((c m:context) (arm u64) (ty u64) (env (pointer void)) (all u64) (expected u64)) u64
+  ((c m:context)
+   (arm u64)
+   (ty u64)
+   (env (pointer void))
+   (all u64)
+   (expected u64)) u64
   (let ((pattern u64 (m:child c arm)) (body u64 (m:next c pattern)))
     (match (m:is c pattern "_")
       (true (expression-as c body env all expected))
@@ -3330,7 +4352,12 @@
         (do
           (m:typed c pattern 0 ty 0 0)
           (let ((binding m:binding (m:binding pattern pattern 0 env)))
-            (expression-as c body (cast (pointer void) (& binding)) all expected)))))))
+            (expression-as
+              c
+              body
+              (cast (pointer void) (& binding))
+              all
+              expected)))))))
 
 (base:function catch-all-id ((c m:context) (pattern u64)) i64
   (match (m:is c pattern "_") (true 0) (false (base:convert pattern))))
@@ -3349,7 +4376,11 @@
     (base:cond
       ((== (field v kind) 26)
        (do
-         (require c id (num:integer-type ty) "character pattern requires an integer scrutinee")
+         (require
+           c
+           id
+           (num:integer-type ty)
+           "character pattern requires an integer scrutinee")
          (m:typed
            c
            id
@@ -3358,13 +4389,21 @@
            0
            (base:convert
              (syntax:character-byte
-               (pointer-offset (field (field c source) bytes) (+ (field v start) 2))
+               (pointer-offset
+                 (field (field c source) bytes)
+                 (+ (field v start) 2))
                (- (field v length) 2))))
          unit))
       ((integer-node c id)
        (do
-         (require c id (num:integer-type ty) "integer pattern requires an integer scrutinee")
-         (match (num:integer-type ty) (true (do (integer c id ty) unit)) (false unit))))
+         (require
+           c
+           id
+           (num:integer-type ty)
+           "integer pattern requires an integer scrutinee")
+         (match (num:integer-type ty)
+           (true (do (integer c id ty) unit))
+           (false unit))))
       ((match (field v generated)
          (0 (match (m:is c id "true") (true true) (false (m:is c id "false"))))
          (_ false))
@@ -3372,7 +4411,11 @@
          (require c id (== ty 2) "boolean pattern requires a boolean scrutinee")
          (m:typed c id 3 2 0 (match (m:is c id "true") (true 1) (false 0)))
          unit))
-      (true (m:report c id "expected boolean, integer, character, binding, or wildcard pattern")))))
+      (true
+        (m:report
+          c
+          id
+          "expected boolean, integer, character, binding, or wildcard pattern")))))
 
 (base:function literal-covered ((value i64) (seen (pointer void))) bool
   (match (base:is-null seen)
@@ -3400,7 +4443,9 @@
         (require
           c
           site
-          (match wild (true true) (false (match ty (2 (== covered 2)) (_ false))))
+          (match wild
+            (true true)
+            (false (match ty (2 (== covered 2)) (_ false))))
           "non-exhaustive match")
         expected))
     (_
@@ -3411,14 +4456,28 @@
             arm
             (match (list c arm) (true (arity c pattern 2)) (false false))
             "match arm requires pattern and body")
-          (require c arm (match wild (true false) (false true)) "unreachable match arm")
+          (require
+            c
+            arm
+            (match wild (true false) (false true))
+            "unreachable match arm")
           (match (plain-name c pattern)
             (true
               (let ((result u64 (catch-all-body c arm ty env all expected)))
                 (do
                   (expect c body result expected)
                   (m:typed c arm 1 result 0 (catch-all-id c pattern))
-                  (scalar-arms c site (m:next c arm) ty env all result seen covered true))))
+                  (scalar-arms
+                    c
+                    site
+                    (m:next c arm)
+                    ty
+                    env
+                    all
+                    result
+                    seen
+                    covered
+                    true))))
             (false
               (do
                 (literal-pattern c pattern ty)
@@ -3430,7 +4489,9 @@
                     (require
                       c
                       pattern
-                      (match (literal-covered value seen) (true false) (false true))
+                      (match (literal-covered value seen)
+                        (true false)
+                        (false true))
                       "duplicate match pattern")
                     (expect c body result expected)
                     (m:typed c arm 1 result 1 value)
@@ -3451,7 +4512,10 @@
 (base:function complete-pattern-components ((c m:context) (id u64)) bool
   (match id
     (0 true)
-    (_ (match (plain-name c id) (false false) (true (complete-pattern-components c (m:next c id)))))))
+    (_
+      (match (plain-name c id)
+        (false false)
+        (true (complete-pattern-components c (m:next c id)))))))
 
 (base:function pattern-bindings
   ((c m:context)
@@ -3474,10 +4538,22 @@
           (true
             (match (m:is c names "_")
               (true
-                (pattern-bindings c (m:next c names) (m:next c types) body env seen all expected))
+                (pattern-bindings
+                  c
+                  (m:next c names)
+                  (m:next c types)
+                  body
+                  env
+                  seen
+                  all
+                  expected))
               (false
                 (do
-                  (require c names (== (m:lookup c names seen) 0) "duplicate payload binding")
+                  (require
+                    c
+                    names
+                    (== (m:lookup c names seen) 0)
+                    "duplicate payload binding")
                   (m:typed c names 0 (field (m:at c types) ty) 0 0)
                   (let
                     ((binding m:binding (m:binding names names 0 env))
@@ -3494,9 +4570,21 @@
           (false
             (do
               (match (list c names)
-                (true (m:report c names "nested structured patterns are not supported"))
+                (true
+                  (m:report
+                    c
+                    names
+                    "nested structured patterns are not supported"))
                 (false (literal-pattern c names (field (m:at c types) ty))))
-              (pattern-bindings c (m:next c names) (m:next c types) body env seen all expected))))))))
+              (pattern-bindings
+                c
+                (m:next c names)
+                (m:next c types)
+                body
+                env
+                seen
+                all
+                expected))))))))
 
 (base:function tuple-arms
   ((c m:context)
@@ -3511,7 +4599,11 @@
   (match arm
     (0
       (do
-        (require c site (match complete (true true) (false wild)) "non-exhaustive match")
+        (require
+          c
+          site
+          (match complete (true true) (false wild))
+          "non-exhaustive match")
         expected))
     (_
       (let ((pattern u64 (m:child c arm)) (body u64 (m:next c pattern)))
@@ -3521,14 +4613,27 @@
             arm
             (match (list c arm) (true (arity c pattern 2)) (false false))
             "match arm requires pattern and body")
-          (require c arm (match wild (true false) (false true)) "unreachable match arm")
+          (require
+            c
+            arm
+            (match wild (true false) (false true))
+            "unreachable match arm")
           (match (plain-name c pattern)
             (true
               (let ((result u64 (catch-all-body c arm ty env all expected)))
                 (do
                   (expect c body result expected)
                   (m:typed c arm 1 result 0 (catch-all-id c pattern))
-                  (tuple-arms c site (m:next c arm) ty env all result complete true))))
+                  (tuple-arms
+                    c
+                    site
+                    (m:next c arm)
+                    ty
+                    env
+                    all
+                    result
+                    complete
+                    true))))
             (false
               (let ((head u64 (m:child c pattern)) (names u64 (m:next c head)))
                 (do
@@ -3540,7 +4645,9 @@
                   (require
                     c
                     pattern
-                    (match (list c pattern) (true (m:is c head "tuple")) (false false))
+                    (match (list c pattern)
+                      (true (m:is c head "tuple"))
+                      (false false))
                     "expected tuple pattern or catch-all")
                   (let
                     ((result
@@ -3584,7 +4691,9 @@
         (require
           c
           (- sum num:descriptor-base)
-          (match wild (true true) (false (== covered (chain-length c (type-components c sum)))))
+          (match wild
+            (true true)
+            (false (== covered (chain-length c (type-components c sum)))))
           "non-exhaustive match")
         expected))
     (_
@@ -3595,7 +4704,11 @@
             arm
             (match (list c arm) (true (arity c pattern 2)) (false false))
             "match arm requires pattern and body")
-          (require c arm (match wild (true false) (false true)) "unreachable match arm")
+          (require
+            c
+            arm
+            (match wild (true false) (false true))
+            "unreachable match arm")
           (match (plain-name c pattern)
             (true
               (let ((ty u64 (catch-all-body c arm sum env all expected)))
@@ -3609,9 +4722,15 @@
                   (m:typed c arm 1 ty 0 (catch-all-id c pattern))
                   (match-arms c (m:next c arm) sum env seen all ty covered true))))
             (false
-              (let ((head u64 (m:child c pattern)) (case u64 (case-resolve c head sum)))
+              (let
+                ((head u64 (m:child c pattern))
+                 (case u64 (case-resolve c head sum)))
                 (do
-                  (require c pattern (list c pattern) "expected sum-case pattern or wildcard")
+                  (require
+                    c
+                    pattern
+                    (list c pattern)
+                    "expected sum-case pattern or wildcard")
                   (require c pattern (> case 0) "unknown sum case in pattern")
                   (require
                     c
@@ -3635,8 +4754,12 @@
                          (m:empty-env)
                          all
                          expected))
-                     (complete bool (complete-pattern-components c (m:next c head)))
-                     (binding m:binding (m:binding (m:child c case) case 0 seen)))
+                     (complete
+                       bool
+                       (complete-pattern-components c (m:next c head)))
+                     (binding
+                       m:binding
+                       (m:binding (m:child c case) case 0 seen)))
                     (do
                       (expect c body ty expected)
                       (m:typed c arm 1 ty (+ (field (m:at c case) target) 1) 0)
@@ -3645,14 +4768,21 @@
                         (m:next c arm)
                         sum
                         env
-                        (match complete (true (cast (pointer void) (& binding))) (false seen))
+                        (match complete
+                          (true (cast (pointer void) (& binding)))
+                          (false seen))
                         all
                         ty
                         (match complete (true (+ covered 1)) (false covered))
                         wild))))))))))))
 
 (base:function match-expression
-  ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64) (expected u64)) u64
+  ((c m:context)
+   (id u64)
+   (args u64)
+   (env (pointer void))
+   (all u64)
+   (expected u64)) u64
   (let ((ty u64 (expression c args env all)))
     (do
       (require c id (> (m:next c args) 0) "match requires arms")
@@ -3661,7 +4791,19 @@
         (_
           (match (type-kind c ty)
             (22
-              (let ((result u64 (tuple-arms c id (m:next c args) ty env all expected false false)))
+              (let
+                ((result
+                   u64
+                   (tuple-arms
+                     c
+                     id
+                     (m:next c args)
+                     ty
+                     env
+                     all
+                     expected
+                     false
+                     false)))
                 (m:typed c id 61 result 0 0)))
             (_
               (match (== (type-kind c ty) 21)
@@ -3669,13 +4811,32 @@
                   (let
                     ((result
                        u64
-                       (scalar-arms c id (m:next c args) ty env all expected (m:empty-env) 0 false)))
+                       (scalar-arms
+                         c
+                         id
+                         (m:next c args)
+                         ty
+                         env
+                         all
+                         expected
+                         (m:empty-env)
+                         0
+                         false)))
                     (m:typed c id 55 result 0 0)))
                 (true
                   (let
                     ((result
                        u64
-                       (match-arms c (m:next c args) ty env (m:empty-env) all expected 0 false)))
+                       (match-arms
+                         c
+                         (m:next c args)
+                         ty
+                         env
+                         (m:empty-env)
+                         all
+                         expected
+                         0
+                         false)))
                     (m:typed c id 16 result 0 0)))))))))))
 
 (base:function write-type-components ((c m:context) (id u64)) unit
@@ -3696,14 +4857,17 @@
     (11 (m:text lconstants:STDERR-FILENO "(pointer u8)"))
     (14 (m:text lconstants:STDERR-FILENO "void"))
     (_
-      (match (match (num:integer-type ty) (true true) (false (num:float-type ty)))
+      (match
+        (match (num:integer-type ty) (true true) (false (num:float-type ty)))
         (true (m:text lconstants:STDERR-FILENO (num:name ty)))
         (false
           (match (type-kind c ty)
             (34
               (do
                 (m:text lconstants:STDERR-FILENO "(pointer ")
-                (write-type c (field (m:at c (- ty num:descriptor-base)) target))
+                (write-type
+                  c
+                  (field (m:at c (- ty num:descriptor-base)) target))
                 (m:text lconstants:STDERR-FILENO ")")))
             (49
               (do

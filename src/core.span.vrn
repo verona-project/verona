@@ -15,6 +15,8 @@
 (base:type span-array (tuple (pointer span) u64 u64 array:layout))
 
 (base:function empty ((backing allocator:backend)) span-array
-  (spans-empty (cast (pointer span) (cast (pointer void) "")) (array:layout 32 8 backing)))
+  (spans-empty
+    (cast (pointer span) (cast (pointer void) ""))
+    (array:layout 32 8 backing)))
 
 (export span span-array empty spans-append spans-length spans-destroy)

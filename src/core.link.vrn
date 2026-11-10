@@ -13,14 +13,19 @@
 (base:type strings-array (tuple (pointer (pointer u8)) u64 u64 array:layout))
 
 (base:function strings-new ((backing allocator:backend)) strings-array
-  (strings-empty (cast (pointer (pointer u8)) (m:empty-env)) (array:layout 8 8 backing)))
+  (strings-empty
+    (cast (pointer (pointer u8)) (m:empty-env))
+    (array:layout 8 8 backing)))
 
 (base:function strings-at ((items strings-array) (index u64)) (pointer u8)
   (deref (pointer-offset (tuple-get items 0) index)))
 
 ; Options borrow process argv strings. Destroy each owner once after compilation.
 (base:type options
-  (product (libraries strings-array) (paths strings-array) (frameworks strings-array)))
+  (product
+    (libraries strings-array)
+    (paths strings-array)
+    (frameworks strings-array)))
 
 (base:type option-kind (sum (library) (search-path) (framework)))
 
@@ -29,7 +34,9 @@
 
 ; A caller must select one of the three owned option collections explicitly.
 ; This makes an invalid numeric routing value unrepresentable.
-(base:function add-option ((owner (pointer options)) (kind option-kind) (value (pointer u8))) error:status
+(base:function add-option
+  ((owner (pointer options)) (kind option-kind) (value (pointer u8)))
+  error:status
   (let
     ((v options (deref owner))
      (items
@@ -69,7 +76,8 @@
 
 ; Retain the first allocation error and stop appending after it.
 (base:function append-value
-  ((args (pointer strings-array)) (status error:status) (value (pointer u8))) error:status
+  ((args (pointer strings-array)) (status error:status) (value (pointer u8)))
+  error:status
   (match status ((ok) (strings-append args value)) (reason reason)))
 
 (base:function append-pairs
@@ -85,7 +93,9 @@
        (false
          (let
            ((first error:status (strings-append args flag))
-            (second error:status (append-value args first (strings-at items index))))
+            (second
+              error:status
+              (append-value args first (strings-at items index))))
            (append-pairs args second flag items (+ index 1))))))
     (reason reason)))
 
@@ -100,7 +110,9 @@
      (match (== index (strings-length items))
        (true (error:success))
        (false
-         (let ((name (pointer u8) (strings-at items index)) (length u64 (cstring:strlen name)))
+         (let
+           ((name (pointer u8) (strings-at items index))
+            (length u64 (cstring:strlen name)))
            (match (allocator:checked-add-size length 3)
              ((tuple false _) (error:too-large))
              ((tuple valid size)
@@ -143,11 +155,20 @@
       (let
         ((start error:status (strings-append args tool))
          (object error:status (append-value args start input))
-         (paths error:status (append-pairs args object "-L" (field config paths) 0))
-         (libraries error:status (append-libraries args memory paths (field config libraries) 0))
+         (paths
+           error:status
+           (append-pairs args object "-L" (field config paths) 0))
+         (libraries
+           error:status
+           (append-libraries args memory paths (field config libraries) 0))
          (frameworks
            error:status
-           (append-pairs args libraries "-framework" (field config frameworks) 0))
+           (append-pairs
+             args
+             libraries
+             "-framework"
+             (field config frameworks)
+             0))
          (flag error:status (append-value args frameworks "-o"))
          (result error:status (append-value args flag output)))
         (append-value args result (cast (pointer u8) (m:empty-env)))))))
@@ -183,7 +204,14 @@
           (let
             ((status
                error:status
-               (build-arguments-for args memory tool input output config platform)))
+               (build-arguments-for
+                 args
+                 memory
+                 tool
+                 input
+                 output
+                 config
+                 platform)))
             (match status
               ((ok)
                ; Keep TOOL as argv[0], then the platform flag, before the object.
@@ -194,7 +222,9 @@
                       (shift-arguments (deref args) count)
                       (store
                         (deref (pointer-offset (tuple-get (deref args) 0) 1))
-                        (match (cstring:strcmp platform "darwin") (0 "-dynamiclib") (_ "-shared")))
+                        (match (cstring:strcmp platform "darwin")
+                          (0 "-dynamiclib")
+                          (_ "-shared")))
                       (error:success)))
                    (reason reason))))
               (reason reason))))
@@ -205,7 +235,9 @@
     (false unit)
     (true
       (do
-        (store (deref (pointer-offset (tuple-get args 0) index)) (strings-at args (- index 1)))
+        (store
+          (deref (pointer-offset (tuple-get args 0) index))
+          (strings-at args (- index 1)))
         (shift-arguments args (- index 1))))))
 
 (base:function native-platform () (pointer u8)
@@ -228,7 +260,15 @@
    (output (pointer u8))
    (config options)
    (kind (pointer u8))) error:status
-  (artifact-arguments-for args memory tool input output config kind (native-platform)))
+  (artifact-arguments-for
+    args
+    memory
+    tool
+    input
+    output
+    config
+    kind
+    (native-platform)))
 
 (export
   artifact-arguments-for

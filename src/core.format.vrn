@@ -7,7 +7,8 @@
 (import error)
 (import libc.string :as cstring)
 
-(base:function append-view ((out (pointer data:data)) (value data:view) (start u64) (count u64))
+(base:function append-view
+  ((out (pointer data:data)) (value data:view) (start u64) (count u64))
   error:status
   (match count
     (0 (error:success))
@@ -19,7 +20,12 @@
           (reason reason))))))
 
 (base:function append ((out (pointer data:data)) (text (pointer u8))) unit
-  (m:storage (append-view out (data:view text (cstring:strlen text)) 0 (cstring:strlen text))))
+  (m:storage
+    (append-view
+      out
+      (data:view text (cstring:strlen text))
+      0
+      (cstring:strlen text))))
 
 (base:function digits ((out (pointer data:data)) (value u64)) unit
   (do
@@ -37,7 +43,9 @@
         (_
           (let ((id u64 (- ty num:descriptor-base)))
             (do
-              (append (& out) (match (check:type-kind c ty) (20 "product:") (_ "sum:")))
+              (append
+                (& out)
+                (match (check:type-kind c ty) (20 "product:") (_ "sum:")))
               (digits (& out) (m:owner c id))
               (append (& out) ":")
               (m:storage

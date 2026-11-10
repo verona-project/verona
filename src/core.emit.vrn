@@ -38,7 +38,8 @@
 (base:function put ((b backend) (id u64) (value t:value-ref)) t:value-ref
   (do (store (deref (pointer-offset (field b slots) id)) value) value))
 
-(base:function bind-binder ((c m:context) (b backend) (id u64) (value t:value-ref)) unit
+(base:function bind-binder
+  ((c m:context) (b backend) (id u64) (value t:value-ref)) unit
   (match (check:stored-binder c id)
     (false (do (put b id value) unit))
     (true
@@ -90,8 +91,12 @@
           ((address t:value-ref (place-address c b args))
            (index t:value-ref (expression c b (m:next c args)))
            (fn t:value-ref (ir:block-parent (ir:builder-block builder)))
-           (yes t:block-ref (ir:block-append (field owner context) fn "index.address"))
-           (no t:block-ref (ir:block-append (field owner context) fn "index.address.oob")))
+           (yes
+             t:block-ref
+             (ir:block-append (field owner context) fn "index.address"))
+           (no
+             t:block-ref
+             (ir:block-append (field owner context) fn "index.address.oob")))
           (do
             (ir:build-cond-br
               builder
@@ -99,7 +104,10 @@
                 builder
                 enum:int-ult
                 index
-                (ir:const-int (layout:integer-type owner) (check:array-length c (field v target)) 0)
+                (ir:const-int
+                  (layout:integer-type owner)
+                  (check:array-length c (field v target))
+                  0)
                 "")
               yes
               no)
@@ -135,7 +143,8 @@
 (base:function word ((owner llvm:session) (ty u64) (value i64)) t:value-ref
   (ir:const-int (layout:scalar-type owner ty) (base:convert value) 0))
 
-(base:function construct ((c m:context) (b backend) (args u64) (value t:value-ref) (index u32))
+(base:function construct
+  ((c m:context) (b backend) (args u64) (value t:value-ref) (index u32))
   t:value-ref
   (match args
     (0 value)
@@ -143,7 +152,12 @@
       (let
         ((next
            t:value-ref
-           (ir:build-insert (field (field b owner) builder) value (expression c b args) index ""))
+           (ir:build-insert
+             (field (field b owner) builder)
+             value
+             (expression c b args)
+             index
+             ""))
          (i u32 (+ index (cast u32 1))))
         (construct c b (m:next c args) next i)))))
 
@@ -175,13 +189,19 @@
       (llvm:call-3
         builder
         write
-        (ir:const-int (ir:int-type (field owner context) constants:native-int-width) 2 0)
+        (ir:const-int
+          (ir:int-type (field owner context) constants:native-int-width)
+          2
+          0)
         location
         (llvm:call-1 builder strlen location))
       (llvm:call-3
         builder
         write
-        (ir:const-int (ir:int-type (field owner context) constants:native-int-width) 2 0)
+        (ir:const-int
+          (ir:int-type (field owner context) constants:native-int-width)
+          2
+          0)
         text
         (ir:const-int (layout:integer-type owner) (cstring:strlen message) 0))
       (llvm:call-1
@@ -196,7 +216,8 @@
 
 ; Declare native write/exit and build the internal guarded signed-division helper.
 ; Return the module-owned helper function handle for lowering division expressions.
-(base:function runtime ((c m:context) (owner llvm:session)) (pointer t:value-ref)
+(base:function runtime ((c m:context) (owner llvm:session))
+  (pointer t:value-ref)
   (let
     ((context t:context-ref (field owner context))
      (module t:module-ref (field owner module))
@@ -218,22 +239,33 @@
            0)))
      (exit
        t:value-ref
-       (ir:function-add module "exit" (ir:function-type (ir:void-type context) (& c-int-type) 1 0)))
+       (ir:function-add
+         module
+         "exit"
+         (ir:function-type (ir:void-type context) (& c-int-type) 1 0)))
      (pointer-type t:type-ref (ir:pointer-type context 0))
      (strlen
        t:value-ref
-       (ir:function-add module "strlen" (ir:function-type word-type (& pointer-type) 1 0)))
+       (ir:function-add
+         module
+         "strlen"
+         (ir:function-type word-type (& pointer-type) 1 0)))
      ; Slots zero and one hold strlen and the array failure helper.
      ; Slots 3 through 10 are indexed by integer type.
      (helpers (pointer t:value-ref) (layout:values c 11)))
     (do
       (store (deref helpers) strlen)
-      (store (deref (pointer-offset helpers 1)) (array-failure owner write exit strlen))
+      (store
+        (deref (pointer-offset helpers 1))
+        (array-failure owner write exit strlen))
       (division-helpers owner helpers write exit strlen 3)
       helpers)))
 
 (base:function array-failure
-  ((owner llvm:session) (write t:value-ref) (exit t:value-ref) (strlen t:value-ref)) t:value-ref
+  ((owner llvm:session)
+   (write t:value-ref)
+   (exit t:value-ref)
+   (strlen t:value-ref)) t:value-ref
   (let
     ((context t:context-ref (field owner context))
      (pointer-type t:type-ref (ir:pointer-type context 0))
@@ -246,7 +278,13 @@
     (do
       (ir:linkage-set fn enum:linkage-internal)
       (entry owner fn)
-      (failure owner write exit strlen (ir:function-param fn 0) "array index out of bounds\n")
+      (failure
+        owner
+        write
+        exit
+        strlen
+        (ir:function-param fn 0)
+        "array index out of bounds\n")
       fn)))
 
 (base:function division-helpers
@@ -260,19 +298,26 @@
     (true unit)
     (false
       (do
-        (store (deref (pointer-offset helpers ty)) (division-helper owner write exit strlen ty))
+        (store
+          (deref (pointer-offset helpers ty))
+          (division-helper owner write exit strlen ty))
         (division-helpers owner helpers write exit strlen (+ ty 1))))))
 
 (base:function division-helper
-  ((owner llvm:session) (write t:value-ref) (exit t:value-ref) (strlen t:value-ref) (ty u64))
-  t:value-ref
+  ((owner llvm:session)
+   (write t:value-ref)
+   (exit t:value-ref)
+   (strlen t:value-ref)
+   (ty u64)) t:value-ref
   (let
     ((context t:context-ref (field owner context))
      (module t:module-ref (field owner module))
      (builder t:builder-ref (field owner builder))
      (word-type t:type-ref (layout:integer-type owner))
      (pointer-type t:type-ref (ir:pointer-type context 0))
-     (params (tuple t:type-ref t:type-ref t:type-ref) (tuple word-type word-type pointer-type))
+     (params
+       (tuple t:type-ref t:type-ref t:type-ref)
+       (tuple word-type word-type pointer-type))
      (divide
        t:value-ref
        (ir:function-add
@@ -306,14 +351,26 @@
         (true
           (let
             ((minimum i64 (num:normalize ty (num:sign-bit ty)))
-             (is-min t:value-ref (ir:build-icmp builder enum:int-eq x (integer owner minimum) ""))
-             (is-minus t:value-ref (ir:build-icmp builder enum:int-eq y (integer owner -1) ""))
+             (is-min
+               t:value-ref
+               (ir:build-icmp builder enum:int-eq x (integer owner minimum) ""))
+             (is-minus
+               t:value-ref
+               (ir:build-icmp builder enum:int-eq y (integer owner -1) ""))
              (bad t:value-ref (ir:build-and builder is-min is-minus ""))
-             (fail t:block-ref (ir:block-append context divide "signed.overflow")))
+             (fail
+               t:block-ref
+               (ir:block-append context divide "signed.overflow")))
             (do
               (ir:build-cond-br builder bad fail ok)
               (ir:builder-position builder fail)
-              (failure owner write exit strlen location "signed division overflow\n")))))
+              (failure
+                owner
+                write
+                exit
+                strlen
+                location
+                "signed division overflow\n")))))
       (ir:builder-position builder ok)
       (ir:build-ret
         builder
@@ -324,7 +381,11 @@
 
 ; Fill an LLVM parameter-type buffer with the core integer type; return the total count.
 (base:function parameter-types
-  ((c m:context) (owner llvm:session) (param u64) (out (pointer t:type-ref)) (count u64)) u64
+  ((c m:context)
+   (owner llvm:session)
+   (param u64)
+   (out (pointer t:type-ref))
+   (count u64)) u64
   (match param
     (0 count)
     (_
@@ -347,7 +408,9 @@
            (cast
              (pointer t:type-ref)
              (cast (pointer void) (layout:values c constants:parameter-limit))))
-         (count u64 (parameter-types c owner (m:child c (check:signature c fn)) params 0))
+         (count
+           u64
+           (parameter-types c owner (m:child c (check:signature c fn)) params 0))
          (size u32 (base:convert count))
          (name data:data (data:empty (arena:allocator (field c memory)))))
         (do
@@ -358,19 +421,27 @@
                (ir:function-add
                  (field owner module)
                  (data:bytes name)
-                 (ir:function-type (layout:value-type c owner (field (m:at c fn) ty)) params size 0))))
+                 (ir:function-type
+                   (layout:value-type c owner (field (m:at c fn) ty))
+                   params
+                   size
+                   0))))
             (do
               (ir:linkage-set function enum:linkage-internal)
               (put b fn function)
               ; The declaration name's otherwise unused slot caches its native
               ; callback entry point. Every address of this function shares it.
-              (put b (m:next c (m:child c fn)) (cast t:value-ref (target:null-pointer)))
+              (put
+                b
+                (m:next c (m:child c fn))
+                (cast t:value-ref (target:null-pointer)))
               unit))
           (declarations c b (m:next c fn)))))))
 
 ; Lower call arguments left to right into the supplied handle buffer; return the final count.
 (base:function arguments
-  ((c m:context) (b backend) (arg u64) (out (pointer t:value-ref)) (index u64)) u64
+  ((c m:context) (b backend) (arg u64) (out (pointer t:value-ref)) (index u64))
+  u64
   (match arg
     (0 index)
     (_
@@ -387,12 +458,15 @@
         (match (m:next c id) (0 value) (next (sequence c b next)))))))
 
 ; Lower sequential let initializers, associate binder IDs with their LLVM values, then lower the body.
-(base:function bindings ((c m:context) (b backend) (id u64) (body u64)) t:value-ref
+(base:function bindings ((c m:context) (b backend) (id u64) (body u64))
+  t:value-ref
   (match id
     (0 (sequence c b body))
     (_
       (let ((name u64 (m:child c id)) (init u64 (field (m:at c id) target)))
-        (do (bind-binder c b name (expression c b init)) (bindings c b (m:next c id) body))))))
+        (do
+          (bind-binder c b name (expression c b init))
+          (bindings c b (m:next c id) body))))))
 
 ; Build branches and a phi for a checked if expression.
 ; Use each branch's actual final block so nested conditionals produce valid incoming edges.
@@ -402,8 +476,12 @@
      (builder t:builder-ref (field owner builder))
      (condition t:value-ref (expression c b args))
      (function t:value-ref (ir:block-parent (ir:builder-block builder)))
-     (yes-block t:block-ref (ir:block-append (field owner context) function "then"))
-     (no-block t:block-ref (ir:block-append (field owner context) function "else"))
+     (yes-block
+       t:block-ref
+       (ir:block-append (field owner context) function "then"))
+     (no-block
+       t:block-ref
+       (ir:block-append (field owner context) function "else"))
      (end t:block-ref (ir:block-append (field owner context) function "merge")))
     (do
       (ir:build-cond-br
@@ -429,9 +507,15 @@
                    t:value-ref
                    (ir:build-phi
                      builder
-                     (layout:value-type c owner (field (m:at c (m:next c args)) ty))
+                     (layout:value-type
+                       c
+                       owner
+                       (field (m:at c (m:next c args)) ty))
                      "")))
-                (do (llvm:incoming phi yes yes-end) (llvm:incoming phi no no-end) phi)))))))))
+                (do
+                  (llvm:incoming phi yes yes-end)
+                  (llvm:incoming phi no no-end)
+                  phi)))))))))
 
 ; Append source-location digits without resetting the existing string.
 (base:function append-number ((out (pointer data:data)) (v u64)) unit
@@ -445,7 +529,9 @@
     ((out data:data (data:empty (arena:allocator (field c memory))))
      (pos m:position (m:position 1 1 false)))
     (do
-      (let ((offset u64 (field (m:at c id) start)) (start u64 (m:source-start c offset)))
+      (let
+        ((offset u64 (field (m:at c id) start))
+         (start u64 (m:source-start c offset)))
         (m:locate c start (- offset start) (& pos)))
       (m:storage
         (data:assign-bytes
@@ -460,21 +546,25 @@
       (m:storage (data:append (& out) 58))
       (m:storage (data:append (& out) 32))
       (m:storage (data:append (& out) 0))
-      (ir:build-global-string (field (field b owner) builder) (data:bytes out) "location"))))
+      (ir:build-global-string
+        (field (field b owner) builder)
+        (data:bytes out)
+        "location"))))
 
-(base:function integer-conversion ((owner llvm:session) (from u64) (to u64) (value t:value-ref))
-  t:value-ref
+(base:function integer-conversion
+  ((owner llvm:session) (from u64) (to u64) (value t:value-ref)) t:value-ref
   (let
     ((builder t:builder-ref (field owner builder))
      (target t:type-ref (layout:scalar-type owner to)))
     (base:cond
       ((== (num:width from) (num:width to)) value)
-      ((> (num:width from) (num:width to)) (ir:build-trunc builder value target ""))
+      ((> (num:width from) (num:width to))
+       (ir:build-trunc builder value target ""))
       ((num:signed-type from) (ir:build-sext builder value target ""))
       (true (ir:build-zext builder value target "")))))
 
-(base:function numeric-conversion ((owner llvm:session) (from u64) (to u64) (value t:value-ref))
-  t:value-ref
+(base:function numeric-conversion
+  ((owner llvm:session) (from u64) (to u64) (value t:value-ref)) t:value-ref
   (let
     ((builder t:builder-ref (field owner builder))
      (target t:type-ref (layout:scalar-type owner to)))
@@ -496,7 +586,8 @@
   (match op (5 1) (6 4) (7 5) (8 2) (9 3) (_ 14)))
 
 (base:function float-primitive
-  ((owner llvm:session) (op u64) (left t:value-ref) (right t:value-ref)) t:value-ref
+  ((owner llvm:session) (op u64) (left t:value-ref) (right t:value-ref))
+  t:value-ref
   (let ((builder t:builder-ref (field owner builder)))
     (match op
       (1 (ir:build-fadd builder left right ""))
@@ -522,9 +613,16 @@
     (_ (match signed (true enum:int-sge) (false enum:int-uge)))))
 
 (base:function primitive
-  ((c m:context) (b backend) (id u64) (op u64) (ty u64) (left t:value-ref) (right t:value-ref))
-  t:value-ref
-  (let ((owner llvm:session (field b owner)) (builder t:builder-ref (field owner builder)))
+  ((c m:context)
+   (b backend)
+   (id u64)
+   (op u64)
+   (ty u64)
+   (left t:value-ref)
+   (right t:value-ref)) t:value-ref
+  (let
+    ((owner llvm:session (field b owner))
+     (builder t:builder-ref (field owner builder)))
     (match op
       (1 (ir:build-add builder left right ""))
       (2 (ir:build-sub builder left right ""))
@@ -552,33 +650,56 @@
       (_
         (ir:build-zext
           builder
-          (ir:build-icmp builder (predicate op (num:signed-type ty)) left right "")
+          (ir:build-icmp
+            builder
+            (predicate op (num:signed-type ty))
+            left
+            right
+            "")
           (layout:integer-type owner)
           "")))))
 
-(base:function shift-count ((owner llvm:session) (ty u64) (value t:value-ref)) t:value-ref
-  (ir:build-urem (field owner builder) value (word owner ty (base:convert (num:width ty))) ""))
+(base:function shift-count ((owner llvm:session) (ty u64) (value t:value-ref))
+  t:value-ref
+  (ir:build-urem
+    (field owner builder)
+    value
+    (word owner ty (base:convert (num:width ty)))
+    ""))
 
-(base:function indirect-call ((c m:context) (b backend) (v m:node) (args u64)) t:value-ref
+(base:function indirect-call ((c m:context) (b backend) (v m:node) (args u64))
+  t:value-ref
   (match (cabi:compatible c (field v target))
     (false (indirect-private c b v args))
     (true
       (let
         ((descriptor m:node (m:at c (field v target)))
          (callee t:value-ref (expression c b (field v child)))
-         (buffer (pointer t:value-ref) (layout:values c constants:parameter-limit))
+         (buffer
+           (pointer t:value-ref)
+           (layout:values c constants:parameter-limit))
          (count u64 (arguments c b args buffer 0)))
-        (cabi:call (field b abi) callee (field descriptor child) (field descriptor target) buffer)))))
+        (cabi:call
+          (field b abi)
+          callee
+          (field descriptor child)
+          (field descriptor target)
+          buffer)))))
 
-(base:function indirect-private ((c m:context) (b backend) (v m:node) (args u64)) t:value-ref
+(base:function indirect-private
+  ((c m:context) (b backend) (v m:node) (args u64)) t:value-ref
   (let
     ((owner llvm:session (field b owner))
      (descriptor m:node (m:at c (field v target)))
      (callee t:value-ref (expression c b (field v child)))
      (params
        (pointer t:type-ref)
-       (cast (pointer t:type-ref) (cast (pointer void) (layout:values c constants:parameter-limit))))
-     (types u32 (layout:component-types c owner (field descriptor child) params 0))
+       (cast
+         (pointer t:type-ref)
+         (cast (pointer void) (layout:values c constants:parameter-limit))))
+     (types
+       u32
+       (layout:component-types c owner (field descriptor child) params 0))
      (result
        t:type-ref
        (match (field descriptor target)
@@ -587,10 +708,13 @@
      (signature t:type-ref (ir:function-type result params types 0))
      (buffer (pointer t:value-ref) (layout:values c constants:parameter-limit))
      (count u32 (base:convert (arguments c b args buffer 0)))
-     (value t:value-ref (ir:build-call (field owner builder) signature callee buffer count "")))
+     (value
+       t:value-ref
+       (ir:build-call (field owner builder) signature callee buffer count "")))
     (match (field descriptor target) (14 (integer owner 0)) (_ value))))
 
-(base:function array-storage ((owner llvm:session) (ty t:type-ref) (value t:value-ref)) t:value-ref
+(base:function array-storage
+  ((owner llvm:session) (ty t:type-ref) (value t:value-ref)) t:value-ref
   (let
     ((builder t:builder-ref (field owner builder))
      (address t:value-ref (ir:build-alloca builder ty "")))
@@ -617,23 +741,38 @@
         "")
       "")))
 
-(base:function array-index ((c m:context) (b backend) (id u64) (v m:node) (args u64)) t:value-ref
+(base:function array-index
+  ((c m:context) (b backend) (id u64) (v m:node) (args u64)) t:value-ref
   (let
     ((owner llvm:session (field b owner))
      (builder t:builder-ref (field owner builder))
      (value t:value-ref (expression c b args))
      (offset t:value-ref (expression c b (m:next c args)))
      (fn t:value-ref (ir:block-parent (ir:builder-block builder)))
-     (access t:block-ref (ir:block-append (field owner context) fn "array.index.ok"))
-     (bad t:block-ref (ir:block-append (field owner context) fn "array.index.oob"))
+     (access
+       t:block-ref
+       (ir:block-append (field owner context) fn "array.index.ok"))
+     (bad
+       t:block-ref
+       (ir:block-append (field owner context) fn "array.index.oob"))
      (ty t:type-ref (layout:value-type c owner (field v target)))
      (length
        t:value-ref
-       (ir:const-int (layout:integer-type owner) (check:array-length c (field v target)) 0)))
+       (ir:const-int
+         (layout:integer-type owner)
+         (check:array-length c (field v target))
+         0)))
     (do
-      (ir:build-cond-br builder (ir:build-icmp builder enum:int-ult offset length "") access bad)
+      (ir:build-cond-br
+        builder
+        (ir:build-icmp builder enum:int-ult offset length "")
+        access
+        bad)
       (ir:builder-position builder bad)
-      (llvm:call-1 builder (deref (pointer-offset (field b helpers) 1)) (source-location c b id))
+      (llvm:call-1
+        builder
+        (deref (pointer-offset (field b helpers) 1))
+        (source-location c b id))
       (ir:build-unreachable builder)
       (ir:builder-position builder access)
       (array-load
@@ -692,7 +831,9 @@
         (47 (get b id))
         (54
           (let
-            ((buffer (pointer t:value-ref) (layout:values c constants:parameter-limit))
+            ((buffer
+               (pointer t:value-ref)
+               (layout:values c constants:parameter-limit))
              (count u64 (arguments c b args buffer 0))
              (fn u64 (field v target)))
             (cabi:call
@@ -703,14 +844,25 @@
               buffer)))
         (48 (indirect-call c b v args))
         (50
-          (match (uses-storage c id) (true (load-place c b id)) (false (array-index c b id v args))))
-        (17 (ir:build-global-string (field (field b owner) builder) (m:literal-bytes c id) "data"))
-        (5 (match (uses-storage c id) (true (load-place c b id)) (false (get b (field v target)))))
+          (match (uses-storage c id)
+            (true (load-place c b id))
+            (false (array-index c b id v args))))
+        (17
+          (ir:build-global-string
+            (field (field b owner) builder)
+            (m:literal-bytes c id)
+            "data"))
+        (5
+          (match (uses-storage c id)
+            (true (load-place c b id))
+            (false (get b (field v target)))))
         (6 (conditional c b args))
         (7 (bindings c b (m:child c args) (m:next c args)))
         (8
           (let
-            ((buffer (pointer t:value-ref) (layout:values c constants:parameter-limit))
+            ((buffer
+               (pointer t:value-ref)
+               (layout:values c constants:parameter-limit))
              (count u64 (arguments c b args buffer 0))
              (size u32 (base:convert count))
              (function t:value-ref (get b (field v target))))
@@ -727,7 +879,12 @@
         (61 (match-value c b id args false))
         (56 (sequence c b args))
         (13
-          (construct c b args (ir:const-null (layout:value-type c (field b owner) (field v ty))) 0))
+          (construct
+            c
+            b
+            args
+            (ir:const-null (layout:value-type c (field b owner) (field v ty)))
+            0))
         (14
           (match (uses-storage c id)
             (true (load-place c b id))
@@ -738,11 +895,17 @@
                 (base:convert (field v target))
                 ""))))
         (9
-          (let ((left t:value-ref (expression c b args)) (ty u64 (field (m:at c args) ty)))
+          (let
+            ((left t:value-ref (expression c b args))
+             (ty u64 (field (m:at c args) ty)))
             (match (field v target)
               (16 (numeric-conversion (field b owner) ty (field v ty) left))
               (17
-                (ir:build-xor (field (field b owner) builder) left (integer (field b owner) 1) ""))
+                (ir:build-xor
+                  (field (field b owner) builder)
+                  left
+                  (integer (field b owner) 1)
+                  ""))
               (20
                 (ir:build-zext
                   (field (field b owner) builder)
@@ -757,7 +920,12 @@
               (_
                 (let ((right t:value-ref (expression c b (m:next c args))))
                   (match (num:float-type ty)
-                    (true (float-primitive (field b owner) (field v target) left right))
+                    (true
+                      (float-primitive
+                        (field b owner)
+                        (field v target)
+                        left
+                        right))
                     (false (primitive c b id (field v target) ty left right))))))))
         (36
           (ir:const-real
@@ -770,7 +938,8 @@
 ; The private sum ABI is {i64 tag, case0-payload, case1-payload, ...}.
 ; LLVM lays out every payload struct, including empty and nested structs. This
 ; deliberately trades compactness for a layout without casts or guessed alignment.
-(base:function sum-construct ((c m:context) (b backend) (id u64) (args u64)) t:value-ref
+(base:function sum-construct ((c m:context) (b backend) (id u64) (args u64))
+  t:value-ref
   (let
     ((owner llvm:session (field b owner))
      (builder t:builder-ref (field owner builder))
@@ -782,11 +951,20 @@
          (pointer t:type-ref)
          (cast
            (pointer void)
-           (layout:values c (+ 1 (check:chain-length c (m:next c (field case child))))))))
-     (count u32 (layout:component-types c owner (m:next c (field case child)) buffer 0))
+           (layout:values
+             c
+             (+ 1 (check:chain-length c (m:next c (field case child))))))))
+     (count
+       u32
+       (layout:component-types c owner (m:next c (field case child)) buffer 0))
      (payload
        t:value-ref
-       (construct c b args (ir:const-null (ir:struct-type (field owner context) buffer count 0)) 0))
+       (construct
+         c
+         b
+         args
+         (ir:const-null (ir:struct-type (field owner context) buffer count 0))
+         0))
      (tagged
        t:value-ref
        (ir:build-insert
@@ -795,7 +973,12 @@
          (ir:const-int (layout:integer-type owner) (field case target) 0)
          0
          "")))
-    (ir:build-insert builder tagged payload (base:convert (+ (field case target) 1)) "")))
+    (ir:build-insert
+      builder
+      tagged
+      payload
+      (base:convert (+ (field case target) 1))
+      "")))
 
 (base:function payload-bindings
   ((c m:context) (b backend) (names u64) (payload t:value-ref) (index u32)) unit
@@ -809,7 +992,14 @@
               (0 unit)
               (_
                 (do
-                  (put b names (ir:build-extract (field (field b owner) builder) payload index ""))
+                  (put
+                    b
+                    names
+                    (ir:build-extract
+                      (field (field b owner) builder)
+                      payload
+                      index
+                      ""))
                   unit))))
           (_ unit))
         (let ((next u32 (+ index (cast u32 1))))
@@ -824,7 +1014,9 @@
    (index u32)
    (yes t:block-ref)
    (no t:block-ref)) unit
-  (let ((owner llvm:session (field b owner)) (builder t:builder-ref (field owner builder)))
+  (let
+    ((owner llvm:session (field b owner))
+     (builder t:builder-ref (field owner builder)))
     (match names
       (0 (do (ir:build-br builder yes) unit))
       (_
@@ -846,7 +1038,10 @@
                       builder
                       enum:int-eq
                       (ir:build-extract builder payload index "")
-                      (word owner (field (m:at c names) ty) (field (m:at c names) value))
+                      (word
+                        owner
+                        (field (m:at c names) ty)
+                        (field (m:at c names) value))
                       "")
                     next
                     no)
@@ -870,27 +1065,45 @@
    (phi t:value-ref)
    (sum bool)
    (tuple bool)) unit
-  (let ((owner llvm:session (field b owner)) (builder t:builder-ref (field owner builder)))
+  (let
+    ((owner llvm:session (field b owner))
+     (builder t:builder-ref (field owner builder)))
     (match arm
       (0 (do (ir:build-unreachable builder) unit))
       (_
         (let
           ((target u64 (field (m:at c arm) target))
            (function t:value-ref (ir:block-parent (ir:builder-block builder)))
-           (yes t:block-ref (ir:block-append (field owner context) function "case"))
-           (no t:block-ref (ir:block-append (field owner context) function "next.case")))
+           (yes
+             t:block-ref
+             (ir:block-append (field owner context) function "case"))
+           (no
+             t:block-ref
+             (ir:block-append (field owner context) function "next.case")))
           (do
             (match target
               (0 (do (ir:build-br builder yes) unit))
               (_
                 (match tuple
-                  (true (component-tests c b (m:next c (m:child c (m:child c arm))) value 0 yes no))
+                  (true
+                    (component-tests
+                      c
+                      b
+                      (m:next c (m:child c (m:child c arm)))
+                      value
+                      0
+                      yes
+                      no))
                   (false
                     (let
                       ((constant
                          t:value-ref
                          (match sum
-                           (true (ir:const-int (layout:integer-type owner) (- target 1) 0))
+                           (true
+                             (ir:const-int
+                               (layout:integer-type owner)
+                               (- target 1)
+                               0))
                            (false
                              (word
                                owner
@@ -901,7 +1114,12 @@
                           (do
                             (ir:build-cond-br
                               builder
-                              (ir:build-icmp builder enum:int-eq tag constant "")
+                              (ir:build-icmp
+                                builder
+                                enum:int-eq
+                                tag
+                                constant
+                                "")
                               yes
                               no)
                             unit))
@@ -909,11 +1127,19 @@
                           (let
                             ((payload-test
                                t:block-ref
-                               (ir:block-append (field owner context) function "pattern.payload")))
+                               (ir:block-append
+                                 (field owner context)
+                                 function
+                                 "pattern.payload")))
                             (do
                               (ir:build-cond-br
                                 builder
-                                (ir:build-icmp builder enum:int-eq tag constant "")
+                                (ir:build-icmp
+                                  builder
+                                  enum:int-eq
+                                  tag
+                                  constant
+                                  "")
                                 payload-test
                                 no)
                               (ir:builder-position builder payload-test)
@@ -921,7 +1147,11 @@
                                 c
                                 b
                                 (m:next c (m:child c (m:child c arm)))
-                                (ir:build-extract builder value (base:convert target) "")
+                                (ir:build-extract
+                                  builder
+                                  value
+                                  (base:convert target)
+                                  "")
                                 0
                                 yes
                                 no))))))))))
@@ -933,7 +1163,13 @@
                   (binder (do (put b (base:convert binder) value) unit))))
               (_
                 (match tuple
-                  (true (payload-bindings c b (m:next c (m:child c (m:child c arm))) value 0))
+                  (true
+                    (payload-bindings
+                      c
+                      b
+                      (m:next c (m:child c (m:child c arm)))
+                      value
+                      0))
                   (false
                     (match sum
                       (true
@@ -941,7 +1177,11 @@
                           c
                           b
                           (m:next c (m:child c (m:child c arm)))
-                          (ir:build-extract builder value (base:convert target) "")
+                          (ir:build-extract
+                            builder
+                            value
+                            (base:convert target)
+                            "")
                           0))
                       (false unit))))))
             (let
@@ -951,22 +1191,30 @@
             (ir:builder-position builder no)
             (lower-arms c b (m:next c arm) value tag end phi sum tuple)))))))
 
-(base:function match-value ((c m:context) (b backend) (id u64) (args u64) (sum bool)) t:value-ref
+(base:function match-value
+  ((c m:context) (b backend) (id u64) (args u64) (sum bool)) t:value-ref
   (let
     ((owner llvm:session (field b owner))
      (builder t:builder-ref (field owner builder))
      (value t:value-ref (expression c b args))
      (tuple bool (== (check:type-kind c (field (m:at c args) ty)) 22))
-     (tag t:value-ref (match sum (true (ir:build-extract builder value 0 "")) (false value)))
+     (tag
+       t:value-ref
+       (match sum (true (ir:build-extract builder value 0 "")) (false value)))
      (start t:block-ref (ir:builder-block builder))
      (function t:value-ref (ir:block-parent start))
-     (end t:block-ref (ir:block-append (field owner context) function "match.end")))
+     (end
+       t:block-ref
+       (ir:block-append (field owner context) function "match.end")))
     (do
       (ir:builder-position builder end)
       (let
         ((phi
            t:value-ref
-           (ir:build-phi builder (layout:value-type c owner (field (m:at c id) ty)) "")))
+           (ir:build-phi
+             builder
+             (layout:value-type c owner (field (m:at c id) ty))
+             "")))
         (do
           (ir:builder-position builder start)
           (lower-arms c b (m:next c args) value tag end phi sum tuple)
@@ -974,7 +1222,8 @@
           phi)))))
 
 ; Associate checked parameter-name IDs with the function's borrowed LLVM parameter handles.
-(base:function parameters ((c m:context) (b backend) (function t:value-ref) (param u64) (index u32))
+(base:function parameters
+  ((c m:context) (b backend) (function t:value-ref) (param u64) (index u32))
   unit
   (match param
     (0 unit)
@@ -989,11 +1238,14 @@
   (match fn
     (0 unit)
     (_
-      (let ((function t:value-ref (get b fn)) (owner llvm:session (field b owner)))
+      (let
+        ((function t:value-ref (get b fn)) (owner llvm:session (field b owner)))
         (do
           (entry owner function)
           (parameters c b function (m:child c (check:signature c fn)) 0)
-          (ir:build-ret (field owner builder) (expression c b (check:body c fn)))
+          (ir:build-ret
+            (field owner builder)
+            (expression c b (check:body c fn)))
           (bodies c b (m:next c fn)))))))
 
 (base:function declarations ((c m:context) (b backend) (fn u64)) unit
@@ -1058,8 +1310,11 @@
 
 ; C-compatible function pointers always carry native entry points. Private
 ; direct calls retain their existing representation, including tuple callbacks.
-(base:function callback-adapter ((c m:context) (b backend) (function u64) (site u64)) t:value-ref
-  (let ((slot u64 (m:next c (m:child c function))) (cached t:value-ref (get b slot)))
+(base:function callback-adapter
+  ((c m:context) (b backend) (function u64) (site u64)) t:value-ref
+  (let
+    ((slot u64 (m:next c (m:child c function)))
+     (cached t:value-ref (get b slot)))
     (match (base:is-null (cast (pointer void) cached))
       (false cached)
       (true
@@ -1078,7 +1333,8 @@
                 (m:child c (check:signature c function))
                 (field (m:at c function) ty)))))))))
 
-(base:function callback-addresses ((c m:context) (b backend) (start u64) (count u64)) unit
+(base:function callback-addresses
+  ((c m:context) (b backend) (start u64) (count u64)) unit
   (match count
     (0 unit)
     (1
@@ -1089,9 +1345,12 @@
               ((target u64 (field v target))
                (descriptor u64 (check:callback-signature c (field v ty))))
               (match
-                (match (field (m:at c target) kind) (53 false) (_ (cabi:compatible c descriptor)))
+                (match (field (m:at c target) kind)
+                  (53 false)
+                  (_ (cabi:compatible c descriptor)))
                 (false (do (put b start (get b target)) unit))
-                (true (do (put b start (callback-adapter c b target start)) unit)))))
+                (true
+                  (do (put b start (callback-adapter c b target start)) unit)))))
           (_ unit))))
     (_
       (let ((half u64 (/ count 2)))
@@ -1106,12 +1365,20 @@
       (let
         ((owner llvm:session (field b owner))
          (bytes (pointer u8) (m:literal-bytes c id))
-         (value t:value-ref (ir:const-string (field owner context) bytes (cstring:strlen bytes) 0))
+         (value
+           t:value-ref
+           (ir:const-string
+             (field owner context)
+             bytes
+             (cstring:strlen bytes)
+             0))
          (global
            t:value-ref
            (ir:global-add
              (field owner module)
-             (ir:array-type (ir:int-type (field owner context) 8) (+ (cstring:strlen bytes) 1))
+             (ir:array-type
+               (ir:int-type (field owner context) 8)
+               (+ (cstring:strlen bytes) 1))
              "data")))
         (do
           (ir:linkage-set global enum:linkage-internal)
@@ -1187,11 +1454,15 @@
   (match fn
     (0 unit)
     (_
-      (match (match (field (m:at c fn) kind) (53 false) (_ (check:callable-shape c fn)))
+      (match
+        (match (field (m:at c fn) kind)
+          (53 false)
+          (_ (check:callable-shape c fn)))
         (true (bodies-inner c b fn))
         (false (bodies c b (m:next c fn)))))))
 
-(base:function report-text ((b backend) (print t:value-ref) (text (pointer u8))) unit
+(base:function report-text ((b backend) (print t:value-ref) (text (pointer u8)))
+  unit
   (do
     (llvm:call-1
       (field (field b owner) builder)
@@ -1200,7 +1471,12 @@
     unit))
 
 (base:function report-components
-  ((c m:context) (b backend) (print t:value-ref) (fields u64) (value t:value-ref) (index u32)) unit
+  ((c m:context)
+   (b backend)
+   (print t:value-ref)
+   (fields u64)
+   (value t:value-ref)
+   (index u32)) unit
   (match fields
     (0 unit)
     (_
@@ -1224,14 +1500,20 @@
    (value t:value-ref)
    (tag t:value-ref)
    (end t:block-ref)) unit
-  (let ((owner llvm:session (field b owner)) (builder t:builder-ref (field owner builder)))
+  (let
+    ((owner llvm:session (field b owner))
+     (builder t:builder-ref (field owner builder)))
     (match case
       (0 (do (ir:build-unreachable builder) unit))
       (_
         (let
           ((function t:value-ref (ir:block-parent (ir:builder-block builder)))
-           (yes t:block-ref (ir:block-append (field owner context) function "report.case"))
-           (no t:block-ref (ir:block-append (field owner context) function "report.next"))
+           (yes
+             t:block-ref
+             (ir:block-append (field owner context) function "report.case"))
+           (no
+             t:block-ref
+             (ir:block-append (field owner context) function "report.next"))
            (index u64 (field (m:at c case) target)))
           (do
             (ir:build-cond-br
@@ -1259,12 +1541,15 @@
             (ir:builder-position builder no)
             (report-cases c b print ty (m:next c case) value tag end)))))))
 
-(base:function report-float ((b backend) (print t:value-ref) (ty u64) (value t:value-ref)) unit
+(base:function report-float
+  ((b backend) (print t:value-ref) (ty u64) (value t:value-ref)) unit
   (let
     ((owner llvm:session (field b owner))
      (builder t:builder-ref (field owner builder))
      (integer u64 (match ty (12 9) (_ 10)))
-     (bits t:value-ref (ir:build-bitcast builder value (layout:scalar-type owner integer) "")))
+     (bits
+       t:value-ref
+       (ir:build-bitcast builder value (layout:scalar-type owner integer) "")))
     (do
       (report-text b print (num:name ty))
       (llvm:call-2
@@ -1275,7 +1560,8 @@
       unit)))
 
 (base:function report-array
-  ((c m:context) (b backend) (print t:value-ref) (ty u64) (value t:value-ref)) unit
+  ((c m:context) (b backend) (print t:value-ref) (ty u64) (value t:value-ref))
+  unit
   (let
     ((owner llvm:session (field b owner))
      (builder t:builder-ref (field owner builder))
@@ -1283,13 +1569,23 @@
      (element u64 (check:array-element c ty))
      (element-type t:type-ref (layout:value-type c owner element))
      (address t:value-ref (array-storage owner array value))
-     (length t:value-ref (ir:const-int (layout:integer-type owner) (check:array-length c ty) 0))
+     (length
+       t:value-ref
+       (ir:const-int (layout:integer-type owner) (check:array-length c ty) 0))
      (start t:block-ref (ir:builder-block builder))
      (fn t:value-ref (ir:block-parent start))
-     (loop-block t:block-ref (ir:block-append (field owner context) fn "array.report.loop"))
-     (separator t:block-ref (ir:block-append (field owner context) fn "array.report.separator"))
-     (item t:block-ref (ir:block-append (field owner context) fn "array.report.item"))
-     (end t:block-ref (ir:block-append (field owner context) fn "array.report.end")))
+     (loop-block
+       t:block-ref
+       (ir:block-append (field owner context) fn "array.report.loop"))
+     (separator
+       t:block-ref
+       (ir:block-append (field owner context) fn "array.report.separator"))
+     (item
+       t:block-ref
+       (ir:block-append (field owner context) fn "array.report.item"))
+     (end
+       t:block-ref
+       (ir:block-append (field owner context) fn "array.report.end")))
     (do
       (report-text b print "array(")
       (ir:build-cond-br
@@ -1298,7 +1594,10 @@
         end
         loop-block)
       (ir:builder-position builder loop-block)
-      (let ((index t:value-ref (ir:build-phi builder (layout:integer-type owner) "")))
+      (let
+        ((index
+           t:value-ref
+           (ir:build-phi builder (layout:integer-type owner) "")))
         (do
           (llvm:incoming index (integer owner 0) start)
           (ir:build-cond-br
@@ -1310,9 +1609,16 @@
           (report-text b print ",")
           (ir:build-br builder item)
           (ir:builder-position builder item)
-          (report-value c b print element (array-load owner array element-type address index))
+          (report-value
+            c
+            b
+            print
+            element
+            (array-load owner array element-type address index))
           (let
-            ((next t:value-ref (ir:build-add builder index (integer owner 1) ""))
+            ((next
+               t:value-ref
+               (ir:build-add builder index (integer owner 1) ""))
              (last t:block-ref (ir:builder-block builder)))
             (do
               (ir:build-cond-br
@@ -1325,17 +1631,28 @@
           (report-text b print ")"))))))
 
 (base:function report-value
-  ((c m:context) (b backend) (print t:value-ref) (ty u64) (value t:value-ref)) unit
-  (let ((owner llvm:session (field b owner)) (builder t:builder-ref (field owner builder)))
+  ((c m:context) (b backend) (print t:value-ref) (ty u64) (value t:value-ref))
+  unit
+  (let
+    ((owner llvm:session (field b owner))
+     (builder t:builder-ref (field owner builder)))
     (match ty
       (1 (report-text b print "unit"))
       (2
         (do
-          (llvm:call-2 builder print (ir:build-global-string builder "bool:%lld" "format") value)
+          (llvm:call-2
+            builder
+            print
+            (ir:build-global-string builder "bool:%lld" "format")
+            value)
           unit))
       (3
         (do
-          (llvm:call-2 builder print (ir:build-global-string builder "i64:%lld" "format") value)
+          (llvm:call-2
+            builder
+            print
+            (ir:build-global-string builder "i64:%lld" "format")
+            value)
           unit))
       (11
         (do
@@ -1361,7 +1678,11 @@
                   builder
                   (match (num:signed-type ty) (true "%lld") (false "%llu"))
                   "format")
-                (integer-conversion owner ty (match (num:signed-type ty) (true 3) (false 10)) value))
+                (integer-conversion
+                  owner
+                  ty
+                  (match (num:signed-type ty) (true 3) (false 10))
+                  value))
               unit))
           (false
             (match (check:type-kind c ty)
@@ -1369,8 +1690,14 @@
               (49 (report-array c b print ty value))
               (21
                 (let
-                  ((function t:value-ref (ir:block-parent (ir:builder-block builder)))
-                   (end t:block-ref (ir:block-append (field owner context) function "report.end")))
+                  ((function t:value-ref
+                     (ir:block-parent (ir:builder-block builder)))
+                   (end
+                     t:block-ref
+                     (ir:block-append
+                       (field owner context)
+                       function
+                       "report.end")))
                   (do
                     (report-cases
                       c
@@ -1386,13 +1713,20 @@
                 (let ((head data:data (format:prefix c ty 0)))
                   (do
                     (report-text b print (data:bytes head))
-                    (report-components c b print (check:type-components c ty) value 0)
+                    (report-components
+                      c
+                      b
+                      print
+                      (check:type-components c ty)
+                      value
+                      0)
                     (report-text b print ")")))))))))))
 
 ; Build a module containing runtime helpers, checked functions, and a native main wrapper.
 ; The wrapper either reports the full result or returns its low byte.
 ; The caller owns and must destroy the returned session.
-(base:function build ((c m:context) (all u64) (main u64) (report bool)) llvm:session
+(base:function build ((c m:context) (all u64) (main u64) (report bool))
+  llvm:session
   (let
     ((owner llvm:session (llvm:create "verona.core"))
      (b
@@ -1413,7 +1747,9 @@
         (0 unit)
         (_
           (let
-            ((i32 t:type-ref (ir:int-type (field owner context) constants:native-int-width))
+            ((i32
+               t:type-ref
+               (ir:int-type (field owner context) constants:native-int-width))
              (command-line bool (check:command-line-main c main))
              (params
                (tuple t:type-ref t:type-ref)
@@ -1444,14 +1780,18 @@
                 (match report
                   (true
                     (let
-                      ((pointer-type t:type-ref (ir:pointer-type (field owner context) 0))
+                      ((pointer-type
+                         t:type-ref
+                         (ir:pointer-type (field owner context) 0))
                        (print
                          t:value-ref
                          (cabi:native-function
                            (field b abi)
                            "printf"
                            (ir:function-type i32 (& pointer-type) 1 1)))
-                       (format t:value-ref (ir:build-global-string builder "\n" "result")))
+                       (format
+                         t:value-ref
+                         (ir:build-global-string builder "\n" "result")))
                       (do
                         (report-value c b print (field (m:at c main) ty) result)
                         (llvm:call-1 builder print format)

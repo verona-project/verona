@@ -56,7 +56,9 @@
     (0 1)
     (_
       (let ((half u64 (pow2 (/ exponent 2))) (square u64 (* half half)))
-        (match (== (* (/ exponent 2) 2) exponent) (true square) (false (* square 2)))))))
+        (match (== (* (/ exponent 2) 2) exponent)
+          (true square)
+          (false (* square 2)))))))
 
 (base:function modulus ((ty u64)) u64
   (pow2 (width ty)))
@@ -76,7 +78,8 @@
     (base:convert
       (match (signed-type ty)
         (false low)
-        (true (match (>= low (sign-bit ty)) (false low) (true (- low (modulus ty)))))))))
+        (true
+          (match (>= low (sign-bit ty)) (false low) (true (- low (modulus ty)))))))))
 
 (base:function remainder ((value u64) (divisor u64)) u64
   (- value (* (/ value divisor) divisor)))
@@ -170,11 +173,14 @@
   (base:cond
     ((float-type from)
      (base:cond
-       ((float-type to) (match from (12 "%fext-primitive") (_ "%ftrunc-primitive")))
+       ((float-type to)
+        (match from (12 "%fext-primitive") (_ "%ftrunc-primitive")))
        ((signed-type to) "%fptosi-primitive")
        (true "%fptoui-primitive")))
     ((float-type to)
-     (match (signed-type from) (true "%sitofp-primitive") (false "%uitofp-primitive")))
+     (match (signed-type from)
+       (true "%sitofp-primitive")
+       (false "%uitofp-primitive")))
     ((> (width from) (width to)) "%trunc-primitive")
     ((== (width from) (width to)) "%reinterpret-primitive")
     ((signed-type from) "%sext-primitive")
@@ -188,7 +194,8 @@
       ((== earlier 0) (operation 0 0 0 0))
       ((== from 0) (operation 0 0 0 0))
       ((== from to) (operation 0 0 0 0))
-      ((text-is (slice value 0 earlier) (conversion-prefix from to)) (operation 16 from to 1))
+      ((text-is (slice value 0 earlier) (conversion-prefix from to))
+       (operation 16 from to 1))
       (true (operation 0 0 0 0)))))
 
 (base:function boolean-primitive ((prefix data:view)) operation
@@ -219,12 +226,15 @@
             (boolean-primitive (slice value 0 split)))
            ((== ty 0) (operation 0 0 0 0))
            ((== code 0) (conversion value split ty))
-           ((match (float-type ty) (true (> code 10)) (false false)) (operation 0 0 0 0))
+           ((match (float-type ty) (true (> code 10)) (false false))
+            (operation 0 0 0 0))
            (true
              (operation
                code
                ty
-               (match (>= code 5) (false ty) (true (match (<= code 10) (true 2) (false ty))))
+               (match (>= code 5)
+                 (false ty)
+                 (true (match (<= code 10) (true 2) (false ty))))
                2)))))
       (true (operation 0 0 0 0)))))
 

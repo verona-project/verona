@@ -4,7 +4,8 @@
 (import formatter.model :as m)
 (import formatter.writer :as w)
 
-(base:function named ((source data:view) (node m:node) (text (pointer u8)) (size u64)) bool
+(base:function named
+  ((source data:view) (node m:node) (text (pointer u8)) (size u64)) bool
   (match (== (field node kind) 0)
     (false false)
     (true
@@ -36,7 +37,9 @@
           (let
             ((middle u64 (+ i (/ (- end i) 2)))
              (found u64 (next-noncomment items i middle)))
-            (match (< found middle) (true found) (false (next-noncomment items middle end)))))))))
+            (match (< found middle)
+              (true found)
+              (false (next-noncomment items middle end)))))))))
 
 (base:function nth-child-at ((items m:tape) (i u64) (end u64) (ordinal u64)) u64
   (match (>= i end)
@@ -47,12 +50,14 @@
         (_
           (match (== ordinal 0)
             (true i)
-            (false (nth-child-at items (field (m:at items i) next) end (- ordinal 1)))))))))
+            (false
+              (nth-child-at items (field (m:at items i) next) end (- ordinal 1)))))))))
 
 (base:function child ((items m:tape) (i u64) (ordinal u64)) u64
   (nth-child-at items (+ i 1) (- (field (m:at items i) next) 1) ordinal))
 
-(base:function head-is ((source data:view) (items m:tape) (i u64) (text (pointer u8)) (size u64))
+(base:function head-is
+  ((source data:view) (items m:tape) (i u64) (text (pointer u8)) (size u64))
   bool
   (match (>= i (m:nodes-length items))
     (true false)
@@ -66,7 +71,8 @@
         (_ false)))))
 
 ; Header child count, always-break declaration, anonymous list.
-(base:function style ((source data:view) (items m:tape) (i u64)) (tuple u64 bool bool)
+(base:function style ((source data:view) (items m:tape) (i u64))
+  (tuple u64 bool bool)
   (let ((first u64 (child items i 0)))
     (match (>= first (- (field (m:at items i) next) 1))
       (true (tuple 0 false false))
@@ -77,7 +83,9 @@
               (match (named source head "function" 8)
                 (true
                   (tuple
-                    (match (head-is source items (child items i 2) "for" 3) (true 5) (false 4))
+                    (match (head-is source items (child items i 2) "for" 3)
+                      (true 5)
+                      (false 4))
                     true
                     false))
                 (false
@@ -96,7 +104,10 @@
                                   (match (named source head "implementation" 14)
                                     (true
                                       (tuple
-                                        (match (field (m:at items (child items i 1)) kind)
+                                        (match
+                                          (field
+                                            (m:at items (child items i 1))
+                                            kind)
                                           (1 2)
                                           (_ 4))
                                         true
@@ -108,12 +119,19 @@
                                           (match (named source head "match" 5)
                                             (true (tuple 2 false false))
                                             (false
-                                              (match (named source head "type" 4)
+                                              (match
+                                                (named source head "type" 4)
                                                 (true (tuple 2 false false))
                                                 (false
-                                                  (match (named source head "with-fixture" 12)
+                                                  (match
+                                                    (named
+                                                      source
+                                                      head
+                                                      "with-fixture"
+                                                      12)
                                                     (true (tuple 2 false false))
-                                                    (false (tuple 1 false false))))))))))))))))))))))
+                                                    (false
+                                                      (tuple 1 false false))))))))))))))))))))))
             (_ (tuple 1 false true))))))))
 
 (base:type cursor
@@ -133,8 +151,11 @@
     (previous-import bool)))
 
 (base:function advance
-  ((context (pointer cursor)) (next u64) (count u64) (previous bool) (previous-import bool))
-  m:status
+  ((context (pointer cursor))
+   (next u64)
+   (count u64)
+   (previous bool)
+   (previous-import bool)) m:status
   (let ((state cursor (deref context)))
     (do
       (store
@@ -178,30 +199,63 @@
   (let
     ((state
        cursor
-       (cursor source items i end 100 out column 0 0 (match first (true 0) (false 1)) 0 false false)))
+       (cursor
+         source
+         items
+         i
+         end
+         100
+         out
+         column
+         0
+         0
+         (match first (true 0) (false 1))
+         0
+         false
+         false)))
     (walk-cursor (& state) (- end i))))
 
 (base:function flat-step ((context (pointer cursor))) m:status
   (let
-    ((state cursor (deref context)) (i u64 (field state index)) (items m:tape (field state items)))
+    ((state cursor (deref context))
+     (i u64 (field state index))
+     (items m:tape (field state items)))
     (m:steps
       (match (== (field state count) 0)
         (true (m:success))
         (false (w:spaces (field state out) (field state column) 1)))
       (flat (field state source) items i (field state out) (field state column))
-      (advance context (field (m:at items i) next) (+ (field state count) 1) false false))))
+      (advance
+        context
+        (field (m:at items i) next)
+        (+ (field state count) 1)
+        false
+        false))))
 
 (base:function flat
-  ((source data:view) (items m:tape) (i u64) (out (pointer data:data)) (column (pointer u64)))
-  m:status
+  ((source data:view)
+   (items m:tape)
+   (i u64)
+   (out (pointer data:data))
+   (column (pointer u64))) m:status
   (let ((node m:node (m:at items i)))
     (match (field node kind)
       (1
         (m:steps
           (w:byte out column 40)
-          (flat-children source items (+ i 1) (- (field node next) 1) out column true)
+          (flat-children
+            source
+            items
+            (+ i 1)
+            (- (field node next) 1)
+            out
+            column
+            true)
           (w:byte out column 41)))
-      (4 (m:steps (w:token source node out column) (flat source items (+ i 1) out column)))
+      (4
+        (m:steps
+          (w:token source node out column)
+          (flat source items (+ i 1) out column)))
       (5
         (m:steps
           (w:token source node out column)
@@ -210,15 +264,23 @@
       (_ (w:token source node out column)))))
 
 (base:function comment
-  ((source data:view) (node m:node) (out (pointer data:data)) (column (pointer u64)) (indent u64))
-  m:status
+  ((source data:view)
+   (node m:node)
+   (out (pointer data:data))
+   (column (pointer u64))
+   (indent u64)) m:status
   (m:steps
     (match (field node inline)
       (true
         (match (== (deref column) 0)
           (true (w:spaces out column indent))
           (false
-            (match (== (m:byte (data:borrow (deref out)) (- (data:length (deref out)) 1)) 32)
+            (match
+              (==
+                (m:byte
+                  (data:borrow (deref out))
+                  (- (data:length (deref out)) 1))
+                32)
               (true (m:success))
               (false (w:spaces out column 1))))))
       (false (w:line out column indent)))
@@ -234,7 +296,10 @@
    (out (pointer data:data))
    (column (pointer u64))
    (indent u64)) m:status
-  (let ((state cursor (cursor source items i end width out column indent 0 0 3 false false)))
+  (let
+    ((state
+       cursor
+       (cursor source items i end width out column indent 0 0 3 false false)))
     (walk-cursor (& state) (- end i))))
 
 (base:function prefix-step ((context (pointer cursor))) m:status
@@ -269,7 +334,22 @@
    (header u64)
    (count u64)) m:status
   (let
-    ((state cursor (cursor source items i end width out column indent header count 1 false false)))
+    ((state
+       cursor
+       (cursor
+         source
+         items
+         i
+         end
+         width
+         out
+         column
+         indent
+         header
+         count
+         1
+         false
+         false)))
     (walk-cursor (& state) (- end i))))
 
 (base:function multiline-step ((context (pointer cursor))) m:status
@@ -302,7 +382,8 @@
                   (match (== (deref column) 0)
                     (true (w:spaces out column indent))
                     (false
-                      (match (<= (+ (deref column) (+ 1 (field node flat))) width)
+                      (match
+                        (<= (+ (deref column) (+ 1 (field node flat))) width)
                         (true (w:spaces out column 1))
                         (false (w:line out column indent))))))
                 (false (w:line out column indent)))))
@@ -350,12 +431,28 @@
       (4
         (m:steps
           (w:token source node out column)
-          (prefix-body source items (+ i 1) (field node next) width out column base)))
+          (prefix-body
+            source
+            items
+            (+ i 1)
+            (field node next)
+            width
+            out
+            column
+            base)))
       (5
         (m:steps
           (w:token source node out column)
           (w:spaces out column 1)
-          (prefix-body source items (+ i 1) (field node next) width out column base)))
+          (prefix-body
+            source
+            items
+            (+ i 1)
+            (field node next)
+            width
+            out
+            column
+            base)))
       (_ (w:token source node out column)))))
 
 (base:function top-step ((context (pointer cursor))) m:status
@@ -374,7 +471,8 @@
         (m:steps
           (match (field node inline)
             (true (m:success))
-            (false (match previous (true (w:blank out column)) (false (m:success)))))
+            (false
+              (match previous (true (w:blank out column)) (false (m:success)))))
           (comment source node out column 0)
           (advance
             context
@@ -389,7 +487,10 @@
               (false (w:line out column 0))
               (true
                 (match previous-import
-                  (true (match is-import (true (w:line out column 0)) (false (w:blank out column))))
+                  (true
+                    (match is-import
+                      (true (w:line out column 0))
+                      (false (w:blank out column))))
                   (false (w:blank out column)))))
             (render source items i (field state width) out column)
             (advance context (field node next) 0 true is-import)))))))
@@ -420,9 +521,12 @@
          2
          previous
          previous-import)))
-    (m:steps (walk-cursor (& state) (- (m:nodes-length items) i)) (w:line out column 0))))
+    (m:steps
+      (walk-cursor (& state) (- (m:nodes-length items) i))
+      (w:line out column 0))))
 
-(base:function format ((source data:view) (items m:tape) (width u64) (out (pointer data:data)))
+(base:function format
+  ((source data:view) (items m:tape) (width u64) (out (pointer data:data)))
   m:status
   (let ((column u64 0)) (top source items 0 width out (& column) false false)))
 

@@ -13,14 +13,19 @@
 (import libc.string :as cstring)
 
 ; Native data layout is owned here; the LLVM module and checked tape are borrowed.
-(base:type context (product (program m:context) (owner llvm:session) (data t:layout-ref)))
+(base:type context
+  (product (program m:context) (owner llvm:session) (data t:layout-ref)))
 
 (base:function create ((p m:context) (owner llvm:session)) context
   (let
     ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
      (machine
        t:machine-ref
-       (backend-target:configured-machine p (field owner module) enum:codegen-default (& message))))
+       (backend-target:configured-machine
+         p
+         (field owner module)
+         enum:codegen-default
+         (& message))))
     (do
       (match (base:is-null machine)
         (true (m:fatal "cannot create native C ABI data layout"))
@@ -53,9 +58,12 @@
   (base:convert (target:abi-align (field c data) ty)))
 
 (base:function types ((c context) (count u64)) (pointer t:type-ref)
-  (cast (pointer t:type-ref) (cast (pointer void) (layout:values (field c program) count))))
+  (cast
+    (pointer t:type-ref)
+    (cast (pointer void) (layout:values (field c program) count))))
 
-(base:function components ((c context) (id u64) (out (pointer t:type-ref)) (index u64)) u32
+(base:function components
+  ((c context) (id u64) (out (pointer t:type-ref)) (index u64)) u32
   (match id
     (0 (base:convert index))
     (_
@@ -67,13 +75,17 @@
 
 (base:function record-type ((c context) (id u64)) t:type-ref
   (let
-    ((buffer (pointer t:type-ref) (types c (check:chain-length (field c program) id)))
+    ((buffer
+       (pointer t:type-ref)
+       (types c (check:chain-length (field c program) id)))
      (count u32 (components c id buffer 0)))
     (ir:struct-type (field (field c owner) context) buffer count 0)))
 
-(base:type union-layout (product (anchor t:type-ref) (anchor-size u64) (size u64) (alignment u64)))
+(base:type union-layout
+  (product (anchor t:type-ref) (anchor-size u64) (size u64) (alignment u64)))
 
-(base:function union-layout-of ((c context) (id u64) (best union-layout)) union-layout
+(base:function union-layout-of ((c context) (id u64) (best union-layout))
+  union-layout
   (match id
     (0 best)
     (_
@@ -85,7 +97,8 @@
          (next
            union-layout
            (match (> align (field best alignment))
-             (true (union-layout ty length (maximum length (field best size)) align))
+             (true
+               (union-layout ty length (maximum length (field best size)) align))
              (false
                (union-layout
                  (field best anchor)
@@ -96,7 +109,10 @@
 
 (base:function sum-layout ((c context) (ty u64)) union-layout
   (let ((empty t:type-ref (record-type c 0)))
-    (union-layout-of c (check:type-components (field c program) ty) (union-layout empty 0 0 0))))
+    (union-layout-of
+      c
+      (check:type-components (field c program) ty)
+      (union-layout empty 0 0 0))))
 
 (base:function storage-type ((c context) (ty u64)) t:type-ref
   (let ((p m:context (field c program)) (owner llvm:session (field c owner)))
@@ -109,10 +125,14 @@
        (let
          ((array
             t:type-ref
-            (ir:array-type (storage-type c (check:array-element p ty)) (check:array-length p ty))))
+            (ir:array-type
+              (storage-type c (check:array-element p ty))
+              (check:array-length p ty))))
          (ir:struct-type (field owner context) (& array) 1 0)))
       ((== (check:type-kind p ty) 21)
-       (let ((union union-layout (sum-layout c ty)) (buffer (pointer t:type-ref) (types c 2)))
+       (let
+         ((union union-layout (sum-layout c ty))
+          (buffer (pointer t:type-ref) (types c 2)))
          (do
            (store (deref buffer) (integer c 32))
            (match (field union size)
@@ -123,10 +143,16 @@
                   (tail u64 (- (field union size) (field union anchor-size))))
                  (do
                    (store (deref members) (field union anchor))
-                   (store (deref (pointer-offset members 1)) (ir:array-type (integer c 8) tail))
+                   (store
+                     (deref (pointer-offset members 1))
+                     (ir:array-type (integer c 8) tail))
                    (store
                      (deref (pointer-offset buffer 1))
-                     (ir:struct-type (field owner context) members (match tail (0 1) (_ 2)) 0))
+                     (ir:struct-type
+                       (field owner context)
+                       members
+                       (match tail (0 1) (_ 2))
+                       0))
                    (ir:struct-type (field owner context) buffer 2 0))))))))
       (true (layout:value-type p owner ty)))))
 
@@ -134,7 +160,8 @@
   (== (m:address (cast (pointer void) a)) (m:address (cast (pointer void) b))))
 
 ; Allocate padded, zeroed storage when register coercions exceed an object's size.
-(base:function repack ((c context) (value t:value-ref) (to t:type-ref)) t:value-ref
+(base:function repack ((c context) (value t:value-ref) (to t:type-ref))
+  t:value-ref
   (match (same-type (ir:value-type value) to)
     (true value)
     (false
@@ -149,8 +176,12 @@
           (ir:build-load builder to address ""))))))
 
 (base:function convert-components
-  ((c context) (fields u64) (source t:value-ref) (out t:value-ref) (index u32) (to-c bool))
-  t:value-ref
+  ((c context)
+   (fields u64)
+   (source t:value-ref)
+   (out t:value-ref)
+   (index u32)
+   (to-c bool)) t:value-ref
   (match fields
     (0 out)
     (_
@@ -173,7 +204,8 @@
           (+ index (cast u32 1))
           to-c)))))
 
-(base:function convert-array ((c context) (ty u64) (value t:value-ref) (to-c bool)) t:value-ref
+(base:function convert-array
+  ((c context) (ty u64) (value t:value-ref) (to-c bool)) t:value-ref
   (let
     ((p m:context (field c program))
      (owner llvm:session (field c owner))
@@ -182,14 +214,22 @@
      (length u64 (check:array-length p ty))
      (out-type
        t:type-ref
-       (match to-c (true (storage-type c ty)) (false (layout:value-type p owner ty))))
+       (match to-c
+         (true (storage-type c ty))
+         (false (layout:value-type p owner ty))))
      (in-element
        t:type-ref
-       (match to-c (true (layout:value-type p owner element)) (false (storage-type c element))))
+       (match to-c
+         (true (layout:value-type p owner element))
+         (false (storage-type c element))))
      (out-element
        t:type-ref
-       (match to-c (true (storage-type c element)) (false (layout:value-type p owner element))))
-     (source t:value-ref (ir:build-alloca builder (ir:value-type value) "abi.array.in"))
+       (match to-c
+         (true (storage-type c element))
+         (false (layout:value-type p owner element))))
+     (source
+       t:value-ref
+       (ir:build-alloca builder (ir:value-type value) "abi.array.in"))
      (out t:value-ref (ir:build-alloca builder out-type "abi.array.out")))
     (do
       (ir:build-store builder value source)
@@ -200,25 +240,41 @@
           (let
             ((start t:block-ref (ir:builder-block builder))
              (fn t:value-ref (ir:block-parent start))
-             (loop t:block-ref (ir:block-append (field owner context) fn "abi.array"))
-             (end t:block-ref (ir:block-append (field owner context) fn "abi.array.end")))
+             (loop
+               t:block-ref
+               (ir:block-append (field owner context) fn "abi.array"))
+             (end
+               t:block-ref
+               (ir:block-append (field owner context) fn "abi.array.end")))
             (do
               (ir:build-br builder loop)
               (ir:builder-position builder loop)
               (let
                 ((index t:value-ref (ir:build-phi builder (integer c 64) ""))
-                 (input t:value-ref (ir:build-gep builder in-element source (& index) 1 ""))
-                 (output t:value-ref (ir:build-gep builder out-element out (& index) 1 "")))
+                 (input
+                   t:value-ref
+                   (ir:build-gep builder in-element source (& index) 1 ""))
+                 (output
+                   t:value-ref
+                   (ir:build-gep builder out-element out (& index) 1 "")))
                 (do
                   (llvm:incoming index (ir:const-int (integer c 64) 0 0) start)
                   (ir:build-store
                     builder
-                    (convert c element (ir:build-load builder in-element input "") to-c)
+                    (convert
+                      c
+                      element
+                      (ir:build-load builder in-element input "")
+                      to-c)
                     output)
                   (let
                     ((next
                        t:value-ref
-                       (ir:build-add builder index (ir:const-int (integer c 64) 1 0) ""))
+                       (ir:build-add
+                         builder
+                         index
+                         (ir:const-int (integer c 64) 1 0)
+                         ""))
                      (last t:block-ref (ir:builder-block builder)))
                     (do
                       (ir:build-cond-br
@@ -257,11 +313,18 @@
          (payload t:type-ref (record-type c fields))
          (fn t:value-ref (ir:block-parent (ir:builder-block builder)))
          (yes t:block-ref (ir:block-append (field owner context) fn "abi.case"))
-         (no t:block-ref (ir:block-append (field owner context) fn "abi.case.next")))
+         (no
+           t:block-ref
+           (ir:block-append (field owner context) fn "abi.case.next")))
         (do
           (ir:build-cond-br
             builder
-            (ir:build-icmp builder enum:int-eq tag (ir:const-int (integer c 64) index 0) "")
+            (ir:build-icmp
+              builder
+              enum:int-eq
+              tag
+              (ir:const-int (integer c 64) index 0)
+              "")
             yes
             no)
           (ir:builder-position builder yes)
@@ -273,24 +336,54 @@
                   (let
                     ((value
                        t:value-ref
-                       (ir:build-extract builder source (base:convert (+ index 1)) ""))
+                       (ir:build-extract
+                         builder
+                         source
+                         (base:convert (+ index 1))
+                         ""))
                      (converted
                        t:value-ref
-                       (convert-components c fields value (ir:const-null payload) 0 true))
-                     (address t:value-ref (ir:struct-gep builder (storage-type c ty) out 1 "")))
+                       (convert-components
+                         c
+                         fields
+                         value
+                         (ir:const-null payload)
+                         0
+                         true))
+                     (address
+                       t:value-ref
+                       (ir:struct-gep builder (storage-type c ty) out 1 "")))
                     (do (ir:build-store builder converted address) unit)))
                 (false
                   (let
-                    ((address t:value-ref (ir:struct-gep builder (storage-type c ty) source 1 ""))
-                     (value t:value-ref (ir:build-load builder payload address ""))
-                     (internal-types (pointer t:type-ref) (types c (check:chain-length p fields)))
-                     (count u32 (layout:component-types p owner fields internal-types 0))
+                    ((address
+                       t:value-ref
+                       (ir:struct-gep builder (storage-type c ty) source 1 ""))
+                     (value
+                       t:value-ref
+                       (ir:build-load builder payload address ""))
+                     (internal-types
+                       (pointer t:type-ref)
+                       (types c (check:chain-length p fields)))
+                     (count
+                       u32
+                       (layout:component-types p owner fields internal-types 0))
                      (internal
                        t:type-ref
-                       (ir:struct-type (field owner context) internal-types count 0))
+                       (ir:struct-type
+                         (field owner context)
+                         internal-types
+                         count
+                         0))
                      (converted
                        t:value-ref
-                       (convert-components c fields value (ir:const-null internal) 0 false))
+                       (convert-components
+                         c
+                         fields
+                         value
+                         (ir:const-null internal)
+                         0
+                         false))
                      (whole t:type-ref (layout:value-type p owner ty))
                      (result
                        t:value-ref
@@ -305,7 +398,8 @@
           (ir:builder-position builder no)
           (convert-cases c ty (field v next) tag source out to-c end))))))
 
-(base:function convert-sum ((c context) (ty u64) (value t:value-ref) (to-c bool)) t:value-ref
+(base:function convert-sum
+  ((c context) (ty u64) (value t:value-ref) (to-c bool)) t:value-ref
   (let
     ((p m:context (field c program))
      (owner llvm:session (field c owner))
@@ -315,7 +409,11 @@
      (out-type t:type-ref (match to-c (true external) (false internal)))
      (out t:value-ref (ir:build-alloca builder out-type "abi.sum"))
      (raw t:value-ref (ir:build-extract builder value 0 ""))
-     (tag t:value-ref (match to-c (true raw) (false (ir:build-zext builder raw (integer c 64) ""))))
+     (tag
+       t:value-ref
+       (match to-c
+         (true raw)
+         (false (ir:build-zext builder raw (integer c 64) ""))))
      (source
        t:value-ref
        (match to-c
@@ -325,7 +423,9 @@
              (do (ir:build-store builder value address) address)))))
      (stored-tag
        t:value-ref
-       (match to-c (true (ir:build-trunc builder tag (integer c 32) "")) (false tag)))
+       (match to-c
+         (true (ir:build-trunc builder tag (integer c 32) ""))
+         (false tag)))
      (fn t:value-ref (ir:block-parent (ir:builder-block builder)))
      (end t:block-ref (ir:block-append (field owner context) fn "abi.sum.end")))
     (do
@@ -337,7 +437,8 @@
       (ir:builder-position builder end)
       (ir:build-load builder out-type out ""))))
 
-(base:function convert ((c context) (ty u64) (value t:value-ref) (to-c bool)) t:value-ref
+(base:function convert ((c context) (ty u64) (value t:value-ref) (to-c bool))
+  t:value-ref
   (let
     ((p m:context (field c program))
      (owner llvm:session (field c owner))
@@ -353,7 +454,9 @@
             (let
               ((out-type
                  t:type-ref
-                 (match to-c (true (storage-type c ty)) (false (layout:value-type p owner ty)))))
+                 (match to-c
+                   (true (storage-type c ty))
+                   (false (layout:value-type p owner ty)))))
               (convert-components
                 c
                 (check:type-components p ty)
@@ -365,7 +468,9 @@
             (let
               ((out-type
                  t:type-ref
-                 (match to-c (true (storage-type c ty)) (false (layout:value-type p owner ty)))))
+                 (match to-c
+                   (true (storage-type c ty))
+                   (false (layout:value-type p owner ty)))))
               (convert-components
                 c
                 (check:type-components p ty)
@@ -384,7 +489,9 @@
   (match id
     (0 best)
     (_
-      (let ((p m:context (field c program)) (part homogeneous (hfa c (check:parameter-type p id))))
+      (let
+        ((p m:context (field c program))
+         (part homogeneous (hfa c (check:parameter-type p id))))
         (match (== (size c (storage-type c (check:parameter-type p id))) 0)
           (true (hfa-fields c (m:next p id) best))
           (false
@@ -394,13 +501,18 @@
                 (false
                   (match (field best count)
                     (0 false)
-                    (_ (match (== (field best ty) (field part ty)) (true false) (false true))))))
+                    (_
+                      (match (== (field best ty) (field part ty))
+                        (true false)
+                        (false true))))))
               (true (homogeneous 0 0))
               (false
                 (hfa-fields
                   c
                   (m:next p id)
-                  (homogeneous (field part ty) (+ (field best count) (field part count))))))))))))
+                  (homogeneous
+                    (field part ty)
+                    (+ (field best count) (field part count))))))))))))
 
 (base:function hfa ((c context) (ty u64)) homogeneous
   (let ((p m:context (field c program)))
@@ -419,26 +531,38 @@
 
 ; SysV merges every eightbyte touched by an integer/pointer field into INTEGER;
 ; a chunk containing only floating fields is SSE. Large objects use memory.
-(base:function classify-chunk ((classes (pointer u64)) (offset u64) (length u64) (kind u64)) unit
+(base:function classify-chunk
+  ((classes (pointer u64)) (offset u64) (length u64) (kind u64)) unit
   (match length
     (0 unit)
     (_
-      (let ((index u64 (/ offset 8)) (old u64 (deref (pointer-offset classes index))))
+      (let
+        ((index u64 (/ offset 8))
+         (old u64 (deref (pointer-offset classes index))))
         (do
-          (store (deref (pointer-offset classes index)) (match old (1 1) (_ kind)))
+          (store
+            (deref (pointer-offset classes index))
+            (match old (1 1) (_ kind)))
           (match (> (+ (num:remainder offset 8) length) 8)
             (true (store (deref (pointer-offset classes (+ index 1))) kind))
             (false unit))
           unit)))))
 
 (base:function classify-fields
-  ((c context) (fields u64) (ty t:type-ref) (offset u64) (index u32) (classes (pointer u64))) unit
+  ((c context)
+   (fields u64)
+   (ty t:type-ref)
+   (offset u64)
+   (index u32)
+   (classes (pointer u64))) unit
   (match fields
     (0 unit)
     (_
       (let
         ((p m:context (field c program))
-         (position u64 (+ offset (target:element-offset (field c data) ty index))))
+         (position
+           u64
+           (+ offset (target:element-offset (field c data) ty index))))
         (do
           (classify c (check:parameter-type p fields) position classes)
           (classify-fields
@@ -450,7 +574,12 @@
             classes))))))
 
 (base:function classify-elements
-  ((c context) (ty u64) (offset u64) (length u64) (stride u64) (classes (pointer u64))) unit
+  ((c context)
+   (ty u64)
+   (offset u64)
+   (length u64)
+   (stride u64)
+   (classes (pointer u64))) unit
   (match length
     (0 unit)
     (_
@@ -458,19 +587,30 @@
         (classify c ty offset classes)
         (classify-elements c ty (+ offset stride) (- length 1) stride classes)))))
 
-(base:function classify-cases ((c context) (id u64) (offset u64) (classes (pointer u64))) unit
+(base:function classify-cases
+  ((c context) (id u64) (offset u64) (classes (pointer u64))) unit
   (match id
     (0 unit)
     (_
-      (let ((p m:context (field c program)) (fields u64 (m:next p (m:child p id))))
+      (let
+        ((p m:context (field c program)) (fields u64 (m:next p (m:child p id))))
         (do
           (classify-fields c fields (record-type c fields) offset 0 classes)
           (classify-cases c (m:next p id) offset classes))))))
 
-(base:function classify ((c context) (ty u64) (offset u64) (classes (pointer u64))) unit
-  (let ((p m:context (field c program)) (storage t:type-ref (storage-type c ty)))
+(base:function classify
+  ((c context) (ty u64) (offset u64) (classes (pointer u64))) unit
+  (let
+    ((p m:context (field c program)) (storage t:type-ref (storage-type c ty)))
     (match (check:type-kind p ty)
-      (20 (classify-fields c (check:type-components p ty) storage offset 0 classes))
+      (20
+        (classify-fields
+          c
+          (check:type-components p ty)
+          storage
+          offset
+          0
+          classes))
       (21
         (do
           (classify-chunk classes offset 4 1)
@@ -513,7 +653,10 @@
     ((indirect representation) representation)))
 
 (base:function passing-pieces ((value passing)) u64
-  (match value ((ignored _) 0) ((registers _ pieces _ _) pieces) ((indirect _) 1)))
+  (match value
+    ((ignored _) 0)
+    ((registers _ pieces _ _) pieces)
+    ((indirect _) 1)))
 
 (base:function passing-ints ((value passing)) u64
   (match value ((registers _ _ ints _) ints) (_ 0)))
@@ -525,7 +668,11 @@
   (match value ((indirect _) 1) (_ 0)))
 
 (base:function aggregate ((c context) (ty u64)) bool
-  (match (check:type-kind (field c program) ty) (20 true) (21 true) (49 true) (_ false)))
+  (match (check:type-kind (field c program) ty)
+    (20 true)
+    (21 true)
+    (49 true)
+    (_ false)))
 
 (base:function chunk-type ((c context) (kind u64) (length u64)) t:type-ref
   (match kind
@@ -535,8 +682,11 @@
         (false (ir:double-type (field (field c owner) context)))))
     (_ (integer c (base:convert (* length 8))))))
 
-(base:function passing-for ((c context) (ty u64) (return bool) (ints u64) (floats u64)) passing
-  (let ((owner llvm:session (field c owner)) (storage t:type-ref (storage-type c ty)))
+(base:function passing-for
+  ((c context) (ty u64) (return bool) (ints u64) (floats u64)) passing
+  (let
+    ((owner llvm:session (field c owner))
+     (storage t:type-ref (storage-type c ty)))
     (base:cond
       ((== ty 14) (ignored storage))
       ((match (aggregate c ty) (true false) (false true))
@@ -556,7 +706,9 @@
               (match return
                 (true storage)
                 (false
-                  (ir:array-type (storage-type c (field homogeneous ty)) (field homogeneous count))))
+                  (ir:array-type
+                    (storage-type c (field homogeneous ty))
+                    (field homogeneous count))))
               1
               0
               (field homogeneous count)))
@@ -564,7 +716,9 @@
            ((> length 8) (registers (ir:array-type (integer c 64) 2) 1 2 0))
            (true
              (registers
-               (integer c (match return (true (base:convert (* length 8))) (false 64)))
+               (integer
+                 c
+                 (match return (true (base:convert (* length 8))) (false 64)))
                1
                1
                0)))))
@@ -573,12 +727,22 @@
         (let
           ((classes (tuple u64 u64) (tuple 0 0))
            (length u64 (size c storage))
-           (buffer (pointer u64) (cast (pointer u64) (cast (pointer void) (& classes))))
+           (buffer
+             (pointer u64)
+             (cast (pointer u64) (cast (pointer void) (& classes))))
            (classified unit (classify c ty 0 buffer))
            (first u64 (tuple-get classes 0))
            (second u64 (tuple-get classes 1))
-           (integer-count u64 (+ (match first (1 (cast u64 1)) (_ (cast u64 0))) (match second (1 (cast u64 1)) (_ (cast u64 0)))))
-           (float-count u64 (+ (match first (2 (cast u64 1)) (_ (cast u64 0))) (match second (2 (cast u64 1)) (_ (cast u64 0))))))
+           (integer-count
+             u64
+             (+
+               (match first (1 (cast u64 1)) (_ (cast u64 0)))
+               (match second (1 (cast u64 1)) (_ (cast u64 0)))))
+           (float-count
+             u64
+             (+
+               (match first (2 (cast u64 1)) (_ (cast u64 0)))
+               (match second (2 (cast u64 1)) (_ (cast u64 0))))))
           (match
             (match return
               (true false)
@@ -592,7 +756,10 @@
                 ((members (pointer t:type-ref) (types c 2))
                  (first-type
                    t:type-ref
-                   (chunk-type c first (match (> length 8) (true 8) (false length)))))
+                   (chunk-type
+                     c
+                     first
+                     (match (> length 8) (true 8) (false length)))))
                 (do
                   (store (deref members) first-type)
                   (match (> length 8)
@@ -615,7 +782,12 @@
   (minimum (+ old add) 8))
 
 (base:function function-parameters
-  ((c context) (params u64) (out (pointer t:type-ref)) (index u64) (ints u64) (floats u64)) u32
+  ((c context)
+   (params u64)
+   (out (pointer t:type-ref))
+   (index u64)
+   (ints u64)
+   (floats u64)) u32
   (match params
     (0 (base:convert index))
     (_
@@ -626,19 +798,20 @@
         (do
           (match pass
             ((ignored _) unit)
-            ((indirect _) (store (deref (pointer-offset out index)) (pointer c)))
+            ((indirect _)
+             (store (deref (pointer-offset out index)) (pointer c)))
             ((registers representation pieces _ _)
-              (match pieces
-                (2
-                  (do
-                    (store
-                      (deref (pointer-offset out index))
-                      (ir:struct-element representation 0))
-                    (store
-                      (deref (pointer-offset out (+ index 1)))
-                      (ir:struct-element representation 1))
-                    unit))
-                (_ (store (deref (pointer-offset out index)) representation)))))
+             (match pieces
+               (2
+                 (do
+                   (store
+                     (deref (pointer-offset out index))
+                     (ir:struct-element representation 0))
+                   (store
+                     (deref (pointer-offset out (+ index 1)))
+                     (ir:struct-element representation 1))
+                   unit))
+               (_ (store (deref (pointer-offset out index)) representation)))))
           (function-parameters
             c
             (m:next p params)
@@ -652,7 +825,9 @@
     ((pass passing (passing-for c result true 0 0))
      (buffer (pointer t:type-ref) (types c 129))
      (sret u64 (sret pass))
-     (stored unit (match sret (1 (do (store (deref buffer) (pointer c)) unit)) (_ unit)))
+     (stored
+       unit
+       (match sret (1 (do (store (deref buffer) (pointer c)) unit)) (_ unit)))
      (count
        u32
        (function-parameters
@@ -675,32 +850,43 @@
     (true (ir:call-attribute value index attribute))
     (false (ir:function-attribute value index attribute))))
 
-(base:function enum-attribute ((c context) (name (pointer u8)) (value u64)) t:attribute-ref
+(base:function enum-attribute ((c context) (name (pointer u8)) (value u64))
+  t:attribute-ref
   (ir:enum-attribute
     (field (field c owner) context)
     (ir:attribute-kind name (cstring:strlen name))
     value))
 
-(base:function typed-attribute ((c context) (name (pointer u8)) (ty t:type-ref)) t:attribute-ref
+(base:function typed-attribute ((c context) (name (pointer u8)) (ty t:type-ref))
+  t:attribute-ref
   (ir:type-attribute
     (field (field c owner) context)
     (ir:attribute-kind name (cstring:strlen name))
     ty))
 
-(base:function extension ((c context) (value t:value-ref) (index u32) (ty u64) (call bool)) unit
+(base:function extension
+  ((c context) (value t:value-ref) (index u32) (ty u64) (call bool)) unit
   (base:cond
     ((== ty 2) (add-attribute value index (enum-attribute c "zeroext" 0) call))
     ((match (num:integer-type ty) (true (< (num:width ty) 32)) (false false))
      (add-attribute
        value
        index
-       (enum-attribute c (match (num:signed-type ty) (true "signext") (false "zeroext")) 0)
+       (enum-attribute
+         c
+         (match (num:signed-type ty) (true "signext") (false "zeroext"))
+         0)
        call))
     (true unit)))
 
 (base:function parameter-attributes
-  ((c context) (value t:value-ref) (params u64) (index u64) (ints u64) (floats u64) (call bool))
-  unit
+  ((c context)
+   (value t:value-ref)
+   (params u64)
+   (index u64)
+   (ints u64)
+   (floats u64)
+   (call bool)) unit
   (match params
     (0 unit)
     (_
@@ -711,21 +897,22 @@
         (do
           (match pass
             ((indirect representation)
-              (do
-                (match (config:x86 (field c program))
-                  (true
-                    (add-attribute
-                      value
-                      (base:convert index)
-                      (typed-attribute c "byval" representation)
-                      call))
-                  (false unit))
-                (add-attribute
-                  value
-                  (base:convert index)
-                  (enum-attribute c "align" (alignment c representation))
-                  call)))
-            ((registers _ _ _ _) (extension c value (base:convert index) ty call))
+             (do
+               (match (config:x86 (field c program))
+                 (true
+                   (add-attribute
+                     value
+                     (base:convert index)
+                     (typed-attribute c "byval" representation)
+                     call))
+                 (false unit))
+               (add-attribute
+                 value
+                 (base:convert index)
+                 (enum-attribute c "align" (alignment c representation))
+                 call)))
+            ((registers _ _ _ _)
+             (extension c value (base:convert index) ty call))
             (_ unit))
           (parameter-attributes
             c
@@ -736,20 +923,25 @@
             (count-floats floats (passing-floats pass))
             call))))))
 
-(base:function attributes ((c context) (value t:value-ref) (params u64) (result u64) (call bool))
-  unit
-  (let
-    ((pass passing (passing-for c result true 0 0))
-     (sret u64 (sret pass)))
+(base:function attributes
+  ((c context) (value t:value-ref) (params u64) (result u64) (call bool)) unit
+  (let ((pass passing (passing-for c result true 0 0)) (sret u64 (sret pass)))
     (do
       (match sret
         (1
           (do
-            (add-attribute value 1 (typed-attribute c "sret" (passing-representation pass)) call)
             (add-attribute
               value
               1
-              (enum-attribute c "align" (alignment c (passing-representation pass)))
+              (typed-attribute c "sret" (passing-representation pass))
+              call)
+            (add-attribute
+              value
+              1
+              (enum-attribute
+                c
+                "align"
+                (alignment c (passing-representation pass)))
               call)))
         (_ (extension c value 0 result call)))
       (parameter-attributes
@@ -761,7 +953,8 @@
         0
         call))))
 
-(base:function native-function ((c context) (name (pointer u8)) (signature t:type-ref)) t:value-ref
+(base:function native-function
+  ((c context) (name (pointer u8)) (signature t:type-ref)) t:value-ref
   (let
     ((owner llvm:session (field c owner))
      (existing t:value-ref (ir:function-get (field owner module) name))
@@ -775,12 +968,17 @@
                  (true (match (ir:linkage-get existing) (8 false) (_ true)))
                  (false false))
                (true unit)
-               (false (m:fatal "external symbol conflicts with a runtime declaration")))
+               (false
+                 (m:fatal
+                   "external symbol conflicts with a runtime declaration")))
              existing)))))
     function))
 
-(base:function declare ((c context) (name (pointer u8)) (params u64) (result u64)) t:value-ref
-  (let ((function t:value-ref (native-function c name (function-type c params result))))
+(base:function declare
+  ((c context) (name (pointer u8)) (params u64) (result u64)) t:value-ref
+  (let
+    ((function t:value-ref
+       (native-function c name (function-type c params result))))
     (do (attributes c function params result false) function)))
 
 (base:function native-arguments
@@ -800,32 +998,35 @@
          (builder t:builder-ref (field (field c owner) builder))
          (ty u64 (check:parameter-type p params))
          (pass passing (passing-for c ty false ints floats))
-         (value t:value-ref (convert c ty (deref (pointer-offset source source-index)) true)))
+         (value
+           t:value-ref
+           (convert c ty (deref (pointer-offset source source-index)) true)))
         (do
           (match pass
             ((ignored _) unit)
             ((indirect representation)
-              (let
-                ((address
-                   t:value-ref
-                   (ir:build-alloca builder representation "abi.argument")))
-                (do
-                  (ir:build-store builder value address)
-                  (store (deref (pointer-offset out index)) address)
-                  unit)))
+             (let
+               ((address
+                  t:value-ref
+                  (ir:build-alloca builder representation "abi.argument")))
+               (do
+                 (ir:build-store builder value address)
+                 (store (deref (pointer-offset out index)) address)
+                 unit)))
             ((registers representation pieces _ _)
-              (let ((coerced t:value-ref (repack c value representation)))
-                (match pieces
-                  (2
-                    (do
-                      (store
-                        (deref (pointer-offset out index))
-                        (ir:build-extract builder coerced 0 ""))
-                      (store
-                        (deref (pointer-offset out (+ index 1)))
-                        (ir:build-extract builder coerced 1 ""))
-                      unit))
-                  (_ (do (store (deref (pointer-offset out index)) coerced) unit))))))
+             (let ((coerced t:value-ref (repack c value representation)))
+               (match pieces
+                 (2
+                   (do
+                     (store
+                       (deref (pointer-offset out index))
+                       (ir:build-extract builder coerced 0 ""))
+                     (store
+                       (deref (pointer-offset out (+ index 1)))
+                       (ir:build-extract builder coerced 1 ""))
+                     unit))
+                 (_
+                   (do (store (deref (pointer-offset out index)) coerced) unit))))))
           (native-arguments
             c
             (m:next p params)
@@ -837,8 +1038,11 @@
             (count-floats floats (passing-floats pass))))))))
 
 (base:function call
-  ((c context) (function t:value-ref) (params u64) (result u64) (args (pointer t:value-ref)))
-  t:value-ref
+  ((c context)
+   (function t:value-ref)
+   (params u64)
+   (result u64)
+   (args (pointer t:value-ref))) t:value-ref
   (let
     ((p m:context (field c program))
      (owner llvm:session (field c owner))
@@ -849,9 +1053,12 @@
      (address
        t:value-ref
        (match sret
-         (1 (ir:build-alloca builder (passing-representation pass) "abi.result"))
+         (1
+           (ir:build-alloca builder (passing-representation pass) "abi.result"))
          (_ function)))
-     (stored unit (match sret (1 (do (store (deref buffer) address) unit)) (_ unit)))
+     (stored
+       unit
+       (match sret (1 (do (store (deref buffer) address) unit)) (_ unit)))
      (count
        u32
        (native-arguments
@@ -865,16 +1072,28 @@
          0))
      (value
        t:value-ref
-       (ir:build-call builder (function-type c params result) function buffer count "")))
+       (ir:build-call
+         builder
+         (function-type c params result)
+         function
+         buffer
+         count
+         "")))
     (do
       (attributes c value params result true)
       (match pass
         ((ignored _)
-          (match result
-            (14 (ir:const-int (integer c 64) 0 0))
-            (_ (ir:const-null (layout:value-type p owner result)))))
-        ((indirect representation) (convert c result (ir:build-load builder representation address "") false))
-        ((registers _ _ _ _) (convert c result (repack c value (storage-type c result)) false))))))
+         (match result
+           (14 (ir:const-int (integer c 64) 0 0))
+           (_ (ir:const-null (layout:value-type p owner result)))))
+        ((indirect representation)
+         (convert
+           c
+           result
+           (ir:build-load builder representation address "")
+           false))
+        ((registers _ _ _ _)
+         (convert c result (repack c value (storage-type c result)) false))))))
 
 (base:function adapter-arguments
   ((c context)
@@ -898,30 +1117,35 @@
            (match pass
              ((ignored _) (ir:const-null (storage-type c ty)))
              ((indirect representation)
-               (ir:build-load
-                 builder
-                 representation
-                 (ir:function-param function (base:convert source-index))
-                 ""))
+              (ir:build-load
+                builder
+                representation
+                (ir:function-param function (base:convert source-index))
+                ""))
              ((registers representation pieces _ _)
-               (let
-                 ((native
-                    t:value-ref
-                    (match pieces
-                      (2
-                        (ir:build-insert
-                          builder
-                          (ir:build-insert
-                            builder
-                            (ir:const-null representation)
-                            (ir:function-param function (base:convert source-index))
-                            0
-                            "")
-                          (ir:function-param function (base:convert (+ source-index 1)))
-                          1
-                          ""))
-                      (_ (ir:function-param function (base:convert source-index))))))
-                 (repack c native (storage-type c ty)))))))
+              (let
+                ((native
+                   t:value-ref
+                   (match pieces
+                     (2
+                       (ir:build-insert
+                         builder
+                         (ir:build-insert
+                           builder
+                           (ir:const-null representation)
+                           (ir:function-param
+                             function
+                             (base:convert source-index))
+                           0
+                           "")
+                         (ir:function-param
+                           function
+                           (base:convert (+ source-index 1)))
+                         1
+                         ""))
+                     (_
+                       (ir:function-param function (base:convert source-index))))))
+                (repack c native (storage-type c ty)))))))
         (do
           (store (deref (pointer-offset out index)) (convert c ty value false))
           (adapter-arguments
@@ -935,12 +1159,19 @@
             (count-floats floats (passing-floats pass))))))))
 
 (base:function adapter
-  ((c context) (name (pointer u8)) (internal t:value-ref) (params u64) (result u64)) t:value-ref
+  ((c context)
+   (name (pointer u8))
+   (internal t:value-ref)
+   (params u64)
+   (result u64)) t:value-ref
   (let
     ((owner llvm:session (field c owner))
      (builder t:builder-ref (field owner builder))
-     (function t:value-ref (native-function c name (function-type c params result)))
-     (entry t:block-ref (ir:block-append (field owner context) function "entry"))
+     (function t:value-ref
+       (native-function c name (function-type c params result)))
+     (entry
+       t:block-ref
+       (ir:block-append (field owner context) function "entry"))
      (pass passing (passing-for c result true 0 0))
      (sret u64 (sret pass))
      (args (pointer t:value-ref) (layout:values (field c program) 64)))
@@ -962,27 +1193,39 @@
              0))
          (value
            t:value-ref
-           (ir:build-call builder (ir:function-type-of internal) internal args count "")))
+           (ir:build-call
+             builder
+             (ir:function-type-of internal)
+             internal
+             args
+             count
+             "")))
         (match pass
           ((ignored _) (do (ir:build-ret-void builder) unit))
           ((indirect _)
-            (do
-              (ir:build-store builder (convert c result value true) (ir:function-param function 0))
-              (ir:build-ret-void builder)
-              unit))
+           (do
+             (ir:build-store
+               builder
+               (convert c result value true)
+               (ir:function-param function 0))
+             (ir:build-ret-void builder)
+             unit))
           ((registers representation _ _ _)
-            (do
-              (ir:build-ret
-                builder
-                (repack c (convert c result value true) representation))
-              unit))))
+           (do
+             (ir:build-ret
+               builder
+               (repack c (convert c result value true) representation))
+             unit))))
       function)))
 
 (base:function compatible ((p m:context) (signature u64)) bool
   (let ((v m:node (m:at p signature)))
     (match (check:c-components p (field v child) (m:empty-env))
       (false false)
-      (true (match (field v target) (14 true) (result (check:c-value-type p result (m:empty-env))))))))
+      (true
+        (match (field v target)
+          (14 true)
+          (result (check:c-value-type p result (m:empty-env))))))))
 
 (export
   storage-type

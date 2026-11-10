@@ -8,16 +8,23 @@
 (import libc.memory :as memory)
 (import libc.stdio :as stdio)
 
-(base:function write-all ((descriptor i32) (value (pointer u8)) (length usize)) bool
+(base:function write-all ((descriptor i32) (value (pointer u8)) (length usize))
+  bool
   (match (== length 0)
     (true true)
     (false
-      (let ((written isize (fd:write descriptor (cast (pointer void) value) length)))
+      (let
+        ((written
+           isize
+           (fd:write descriptor (cast (pointer void) value) length)))
         (match (> written 0)
           (false false)
           (true
             (let ((count usize (base:convert written)))
-              (write-all descriptor (pointer-offset value count) (- length count)))))))))
+              (write-all
+                descriptor
+                (pointer-offset value count)
+                (- length count)))))))))
 
 (base:function emit ((descriptor i32) (value (pointer u8))) bool
   (write-all descriptor value (text:strlen value)))
@@ -78,7 +85,9 @@
     (match descriptor
       (-1 false)
       (_
-        (let ((written bool (emit descriptor content)) (closed i32 (fd:close descriptor)))
+        (let
+          ((written bool (emit descriptor content))
+           (closed i32 (fd:close descriptor)))
           (match written (false false) (true (== closed 0))))))))
 
 (base:function readme-file ((name (pointer u8))) bool
@@ -92,7 +101,9 @@
              (steps
                (emit descriptor "# ")
                (emit descriptor name)
-               (emit descriptor "\n\nBuild and run with Verona installed:\n\n```sh\nverona build ")
+               (emit
+                 descriptor
+                 "\n\nBuild and run with Verona installed:\n\n```sh\nverona build ")
                (emit descriptor name)
                (emit descriptor " ./build\n./build/")
                (emit descriptor name)
@@ -105,7 +116,8 @@
     (false (fail "project name must start with a letter"))
     (true
       (match (valid-tail name)
-        (false (fail "project name may contain only ASCII letters, digits, - or _"))
+        (false
+          (fail "project name may contain only ASCII letters, digits, - or _"))
         (true
           (match (fs:mkdir name 493)
             (0
@@ -116,10 +128,13 @@
                       (match
                         (steps
                           (build-file name)
-                          (plain-file "src/main.vrn" "(function main () exit-code\n  0)\n")
+                          (plain-file
+                            "src/main.vrn"
+                            "(function main () exit-code\n  0)\n")
                           (plain-file ".gitignore" "/build/\n")
                           (readme-file name))
-                        (true (do (emit 1 "Created ") (emit 1 name) (emit 1 "\n") 0))
+                        (true
+                          (do (emit 1 "Created ") (emit 1 name) (emit 1 "\n") 0))
                         (false (fail "could not write project files"))))
                     (_ (fail "could not create source directory"))))
                 (_ (fail "could not enter project directory"))))
@@ -132,11 +147,12 @@
                     ((pointer types:directory-stream))
                     (pointer u8))
 
-#+darwin #+aarch64 (base:function read-entry ((directory (pointer types:directory-stream)))
-                     (pointer u8)
+#+darwin #+aarch64 (base:function read-entry
+                     ((directory (pointer types:directory-stream))) (pointer u8)
                      (cast (pointer u8) (fs:readdir directory)))
 
-#+linux (base:function read-entry ((directory (pointer types:directory-stream))) (pointer u8)
+#+linux (base:function read-entry ((directory (pointer types:directory-stream)))
+          (pointer u8)
           (cast (pointer u8) (fs:readdir directory)))
 
 ;; d_name follows the fixed dirent prefix on the supported 64-bit targets.
@@ -156,7 +172,8 @@
                      (pointer types:directory-stream)
                      (fs:opendir name))
 
-#+linux (base:function open-directory ((name (pointer u8))) (pointer types:directory-stream)
+#+linux (base:function open-directory ((name (pointer u8)))
+          (pointer types:directory-stream)
           (fs:opendir name))
 
 ;; Four pointers and a flag, padded to 40 bytes on supported 64-bit targets.
@@ -168,7 +185,8 @@
     (manifest (pointer void))
     (unversioned bool)))
 
-(base:function add-size-generic (for (a) ((base:numeric a))) ((left a) (right a)) a
+(base:function add-size-generic (for (a) ((base:numeric a)))
+  ((left a) (right a)) a
   (+ left right))
 
 (base:function add-size ((left usize) (right usize)) usize
@@ -178,7 +196,9 @@
   (match (>= byte 48) (false false) (true (<= byte 57))))
 
 (base:function skip-digits ((value (pointer u8))) (pointer u8)
-  (match (digit (deref value)) (true (skip-digits (pointer-offset value 1))) (false value)))
+  (match (digit (deref value))
+    (true (skip-digits (pointer-offset value 1)))
+    (false value)))
 
 ;; A version starts with three numeric components; retain any release suffix.
 (base:function version-component ((value (pointer u8)) (remaining i32)) bool
@@ -190,7 +210,10 @@
           (0 (match (deref end) (0 true) (45 true) (43 true) (_ false)))
           (_
             (match (deref end)
-              (46 (version-component (pointer-offset end 1) (match remaining (2 1) (_ 0))))
+              (46
+                (version-component
+                  (pointer-offset end 1)
+                  (match remaining (2 1) (_ 0))))
               (_ false))))))))
 
 (base:function split-version ((value (pointer u8))) (pointer u8)
@@ -208,12 +231,17 @@
 (base:type manifest-token
   (product (kind i32) (value (pointer u8)) (length usize) (next (pointer u8))))
 
-(base:function token-end ((kind i32) (value (pointer u8)) (length usize) (next (pointer u8)))
+(base:function token-end
+  ((kind i32) (value (pointer u8)) (length usize) (next (pointer u8)))
   manifest-token
   (manifest-token kind value length next))
 
 (base:function skip-comment ((value (pointer u8))) (pointer u8)
-  (match (deref value) (0 value) (10 value) (13 value) (_ (skip-comment (pointer-offset value 1)))))
+  (match (deref value)
+    (0 value)
+    (10 value)
+    (13 value)
+    (_ (skip-comment (pointer-offset value 1)))))
 
 (base:function manifest-space ((value (pointer u8))) (pointer u8)
   (match (deref value)
@@ -224,8 +252,8 @@
     (59 (manifest-space (skip-comment value)))
     (_ value)))
 
-(base:function manifest-atom ((start (pointer u8)) (value (pointer u8)) (length usize))
-  manifest-token
+(base:function manifest-atom
+  ((start (pointer u8)) (value (pointer u8)) (length usize)) manifest-token
   (match (deref value)
     (0 (token-end 3 start length value))
     (9 (token-end 3 start length value))
@@ -237,8 +265,8 @@
     (59 (token-end 3 start length value))
     (_ (manifest-atom start (pointer-offset value 1) (add-size length 1)))))
 
-(base:function manifest-string ((start (pointer u8)) (value (pointer u8)) (length usize))
-  manifest-token
+(base:function manifest-string
+  ((start (pointer u8)) (value (pointer u8)) (length usize)) manifest-token
   (match (deref value)
     (0 (token-end 5 start length value))
     (34 (token-end 4 start length (pointer-offset value 1)))
@@ -269,7 +297,10 @@
     (128 (token-end 5 (field token value) 0 (field token next)))
     (_
       (match (field token kind)
-        (1 (manifest-skip-list (manifest-read (field token next)) (add-depth depth)))
+        (1
+          (manifest-skip-list
+            (manifest-read (field token next))
+            (add-depth depth)))
         (0 token)
         (2 (token-end 5 (field token value) 0 (field token next)))
         (5 token)
@@ -278,7 +309,8 @@
 (base:function add-depth ((depth i32)) i32
   (add-size-generic depth 1))
 
-(base:function manifest-skip-list ((token manifest-token) (depth i32)) manifest-token
+(base:function manifest-skip-list ((token manifest-token) (depth i32))
+  manifest-token
   (match (field token kind)
     (0 (token-end 5 (field token value) 0 (field token next)))
     (5 token)
@@ -308,7 +340,8 @@
           (false (manifest-options (manifest-skip token 0))))))
     (_ (manifest-options (manifest-skip token 0)))))
 
-(base:function manifest-targets ((token manifest-token) (name (pointer u8))) manifest-token
+(base:function manifest-targets ((token manifest-token) (name (pointer u8)))
+  manifest-token
   (match (field token kind)
     (0 token)
     (5 token)
@@ -328,7 +361,8 @@
 
 ;; Decode in place after tokenization. Versions must be nonempty single-line
 ;; strings, matching the manifest version rule. Escapes never execute code.
-(base:function decode-version ((input (pointer u8)) (output (pointer u8)) (remaining usize)) bool
+(base:function decode-version
+  ((input (pointer u8)) (output (pointer u8)) (remaining usize)) bool
   (match remaining
     (0 (do (store (deref output) 0) true))
     (_
@@ -367,8 +401,10 @@
               (pointer-offset output 1)
               (- remaining 1))))))))
 
-(base:function save-manifest-version ((node (pointer library-record)) (value (pointer u8))) bool
-  (let ((storage (pointer void) (memory:malloc (add-size (text:strlen value) 1))))
+(base:function save-manifest-version
+  ((node (pointer library-record)) (value (pointer u8))) bool
+  (let
+    ((storage (pointer void) (memory:malloc (add-size (text:strlen value) 1))))
     (match (base:is-null storage)
       (true false)
       (false
@@ -384,7 +420,8 @@
               (field (deref node) unversioned)))
           true)))))
 
-(base:function read-manifest-version ((node (pointer library-record)) (path (pointer u8))) bool
+(base:function read-manifest-version
+  ((node (pointer library-record)) (path (pointer u8))) bool
   (let ((file (pointer types:file-stream) (stdio:fopen path "rb")))
     (match (base:is-null file)
       (true (match (deref (errno:errno-pointer)) (2 true) (_ false)))
@@ -420,15 +457,23 @@
                                 (field token length)))
                             (false (do (memory:free storage) true))
                             (true
-                              (let ((saved bool (save-manifest-version node (field token value))))
+                              (let
+                                ((saved
+                                   bool
+                                   (save-manifest-version
+                                     node
+                                     (field token value))))
                                 (do (memory:free storage) saved)))))))))))))))))
 
-(base:function manifest-fallback ((node (pointer library-record)) (directory (pointer u8))) bool
+(base:function manifest-fallback
+  ((node (pointer library-record)) (directory (pointer u8))) bool
   (match (deref (field (deref node) version))
     (0
       (let
         ((length usize (text:strlen directory))
-         (storage (pointer void) (memory:malloc (add-size (text:strlen directory) 14))))
+         (storage
+           (pointer void)
+           (memory:malloc (add-size (text:strlen directory) 14))))
         (match (base:is-null storage)
           (true false)
           (false
@@ -444,7 +489,10 @@
   (let ((order i32 (text:strcmp (field left name) (field right name))))
     (match order
       (0
-        (let ((versions i32 (text:strcmp (field left version) (field right version))))
+        (let
+          ((versions
+             i32
+             (text:strcmp (field left version) (field right version))))
           (match versions
             (0
               (steps
@@ -453,7 +501,8 @@
             (_ (< versions 0)))))
       (_ (< order 0)))))
 
-(base:function set-next ((node (pointer library-record)) (next (pointer void))) bool
+(base:function set-next ((node (pointer library-record)) (next (pointer void)))
+  bool
   (do
     (store
       (deref node)
@@ -465,24 +514,35 @@
         (field (deref node) unversioned)))
     true))
 
-(base:function insert-record ((previous (pointer library-record)) (node (pointer library-record)))
-  bool
+(base:function insert-record
+  ((previous (pointer library-record)) (node (pointer library-record))) bool
   (let ((next (pointer void) (field (deref previous) next)))
     (match (base:is-null next)
       (true (do (set-next previous (cast (pointer void) node)) true))
       (false
-        (let ((following (pointer library-record) (cast (pointer library-record) next)))
+        (let
+          ((following
+             (pointer library-record)
+             (cast (pointer library-record) next)))
           (match (record-before (deref node) (deref following))
-            (true (do (set-next node next) (set-next previous (cast (pointer void) node)) true))
+            (true
+              (do
+                (set-next node next)
+                (set-next previous (cast (pointer void) node))
+                true))
             (false (insert-record following node))))))))
 
-(base:function collect-library ((head (pointer library-record)) (name (pointer u8))) bool
-  (let ((storage (pointer void) (memory:calloc 1 (add-size (text:strlen name) 41))))
+(base:function collect-library
+  ((head (pointer library-record)) (name (pointer u8))) bool
+  (let
+    ((storage (pointer void) (memory:calloc 1 (add-size (text:strlen name) 41))))
     (match (base:is-null storage)
       (true false)
       (false
         (let
-          ((node (pointer library-record) (cast (pointer library-record) storage))
+          ((node
+             (pointer library-record)
+             (cast (pointer library-record) storage))
            (copy (pointer u8) (pointer-offset (cast (pointer u8) storage) 40)))
           (do
             (text:strcpy copy name)
@@ -500,7 +560,9 @@
               (false (do (memory:free storage) false)))))))))
 
 (base:function print-records
-  ((next (pointer void)) (previous (pointer u8)) (previous-version (pointer u8))) bool
+  ((next (pointer void))
+   (previous (pointer u8))
+   (previous-version (pointer u8))) bool
   (match (base:is-null next)
     (true (match (deref previous) (0 true) (_ (emit 1 "\n"))))
     (false
@@ -521,23 +583,34 @@
                     (emit 1 ": "))))
               (emit
                 1
-                (match (deref (field node version)) (0 "(unversioned)") (_ (field node version))))
+                (match (deref (field node version))
+                  (0 "(unversioned)")
+                  (_ (field node version))))
               (match (field node unversioned)
-                (true (match (deref (field node version)) (0 true) (_ (emit 1 "*"))))
+                (true
+                  (match (deref (field node version)) (0 true) (_ (emit 1 "*"))))
                 (false true))
-              (print-records (field node next) (field node name) (field node version)))))))))
+              (print-records
+                (field node next)
+                (field node name)
+                (field node version)))))))))
 
 (base:function free-records ((next (pointer void))) bool
   (match (base:is-null next)
     (true true)
     (false
-      (let ((following (pointer void) (field (deref (cast (pointer library-record) next)) next)))
+      (let
+        ((following
+           (pointer void)
+           (field (deref (cast (pointer library-record) next)) next)))
         (do
-          (memory:free (field (deref (cast (pointer library-record) next)) manifest))
+          (memory:free
+            (field (deref (cast (pointer library-record) next)) manifest))
           (memory:free next)
           (free-records following))))))
 
-(base:function list-entry ((head (pointer library-record)) (name (pointer u8))) bool
+(base:function list-entry ((head (pointer library-record)) (name (pointer u8)))
+  bool
   (match (text:strcmp name ".")
     (0 true)
     (_
@@ -556,13 +629,17 @@
                   (steps (== closed 0) (collect-library head name)))))))))))
 
 (base:function list-entries
-  ((directory (pointer types:directory-stream)) (head (pointer library-record))) bool
+  ((directory (pointer types:directory-stream)) (head (pointer library-record)))
+  bool
   (do
     (store (deref (errno:errno-pointer)) 0)
     (let ((entry (pointer u8) (read-entry directory)))
-    (match (base:is-null entry)
-      (true (== (deref (errno:errno-pointer)) 0))
-      (false (steps (list-entry head (entry-name entry)) (list-entries directory head)))))))
+      (match (base:is-null entry)
+        (true (== (deref (errno:errno-pointer)) 0))
+        (false
+          (steps
+            (list-entry head (entry-name entry))
+            (list-entries directory head)))))))
 
 (base:function list-libraries () exit-code
   (let ((root (pointer u8) (process:getenv "VERONA_SOURCE_DIR")))
@@ -573,13 +650,19 @@
           (47
             (match (fs:chdir root)
               (0
-                (let ((directory (pointer types:directory-stream) (open-directory ".")))
+                (let
+                  ((directory
+                     (pointer types:directory-stream)
+                     (open-directory ".")))
                   (match (base:is-null directory)
                     (true (fail "cannot open VERONA_SOURCE_DIR"))
                     (false
                       (let ((storage (pointer void) (memory:calloc 1 40)))
                         (match (base:is-null storage)
-                          (true (do (fs:closedir directory) (fail "cannot allocate library listing")))
+                          (true
+                            (do
+                              (fs:closedir directory)
+                              (fail "cannot allocate library listing")))
                           (false
                             (let
                               ((head
@@ -587,7 +670,9 @@
                                  (cast (pointer library-record) storage))
                                (listed
                                  bool
-                                 (list-entries directory (cast (pointer library-record) storage)))
+                                 (list-entries
+                                   directory
+                                   (cast (pointer library-record) storage)))
                                (closed i32 (fs:closedir directory)))
                               (let
                                 ((printed
@@ -595,13 +680,18 @@
                                    (steps
                                      listed
                                      (== closed 0)
-                                     (print-records (field (deref head) next) "" ""))))
+                                     (print-records
+                                       (field (deref head) next)
+                                       ""
+                                       ""))))
                                 (do
                                   (free-records (field (deref head) next))
                                   (memory:free storage)
                                   (match printed
                                     (true 0)
-                                    (false (fail "cannot list VERONA_SOURCE_DIR or write output")))))))))))))
+                                    (false
+                                      (fail
+                                        "cannot list VERONA_SOURCE_DIR or write output")))))))))))))
               (_ (fail "cannot enter VERONA_SOURCE_DIR"))))
           (_ (fail "VERONA_SOURCE_DIR must name an absolute directory")))))))
 

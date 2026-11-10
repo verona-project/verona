@@ -22,7 +22,8 @@
 (base:function equal ((a (pointer u8)) (b (pointer u8))) bool
   (match (cstring:strcmp a b) (0 true) (_ false)))
 
-(base:function copy ((memory (pointer arena:arena)) (value data:view)) (pointer u8)
+(base:function copy ((memory (pointer arena:arena)) (value data:view))
+  (pointer u8)
   (let ((out data:data (data:empty (arena:allocator memory))))
     (do
       (m:storage (data:assign-bytes (& out) value))
@@ -43,8 +44,11 @@
           (lower (pointer-offset bytes 1) (- count 1)))))))
 
 (base:function add-feature
-  ((memory (pointer arena:arena)) (head (pointer (pointer void))) (name (pointer u8))) unit
-  (let ((text (pointer u8) (copy memory (data:view name (cstring:strlen name)))))
+  ((memory (pointer arena:arena))
+   (head (pointer (pointer void)))
+   (name (pointer u8))) unit
+  (let
+    ((text (pointer u8) (copy memory (data:view name (cstring:strlen name)))))
     (do
       (lower text (cstring:strlen text))
       (match (arena:allocate memory 16 8)
@@ -58,15 +62,18 @@
              (append-feature head (cast (pointer void) link)))))
         (_ (m:fatal "cannot allocate reader feature"))))))
 
-(base:function append-feature ((head (pointer (pointer void))) (link (pointer void))) unit
+(base:function append-feature
+  ((head (pointer (pointer void))) (link (pointer void))) unit
   (match (base:is-null (deref head))
     (true (do (store (deref head) link) unit))
     (false (append-after (cast (pointer syntax:feature) (deref head)) link))))
 
-(base:function append-after ((current (pointer syntax:feature)) (link (pointer void))) unit
+(base:function append-after
+  ((current (pointer syntax:feature)) (link (pointer void))) unit
   (let ((v syntax:feature (deref current)))
     (match (base:is-null (field v next))
-      (true (do (store (deref current) (syntax:feature (field v name) link)) unit))
+      (true
+        (do (store (deref current) (syntax:feature (field v name) link)) unit))
       (false (append-after (cast (pointer syntax:feature) (field v next)) link)))))
 
 (base:function has ((text (pointer u8)) (part (pointer u8))) bool
@@ -77,28 +84,40 @@
     ((base:or
        (== (cstring:strncmp triple "aarch64-" 8) (cast i32 0))
        (== (cstring:strncmp triple "arm64-" 6) (cast i32 0)))
-      "aarch64")
+     "aarch64")
     ((base:or
        (== (cstring:strncmp triple "x86_64-" 7) (cast i32 0))
        (== (cstring:strncmp triple "amd64-" 6) (cast i32 0)))
-      "x86_64")
-    (true (do (m:fatal "unsupported target architecture: expected 64-bit AArch64 or x86-64") ""))))
+     "x86_64")
+    (true
+      (do
+        (m:fatal
+          "unsupported target architecture: expected 64-bit AArch64 or x86-64")
+        ""))))
 
 (base:function platform ((triple (pointer u8))) (pointer u8)
   (base:cond
     ((has triple "darwin") "darwin")
     ((base:or (has triple "linux") (has triple "gnu")) "linux")
-    (true (do (m:fatal "unsupported target platform: expected Darwin or Linux") ""))))
+    (true
+      (do (m:fatal "unsupported target platform: expected Darwin or Linux") ""))))
 
 (base:function from-context ((p m:context)) (pointer void)
   (match (base:is-null (field p session))
     (true (m:empty-env))
-    (false (field (deref (cast (pointer m:module-session) (field p session))) configuration))))
+    (false
+      (field
+        (deref (cast (pointer m:module-session) (field p session)))
+        configuration))))
 
 (base:function reader-features ((p m:context)) syntax:features
   (let ((config (pointer void) (from-context p)))
     (match (base:is-null config)
-      (true (syntax:features (syntax:native-platform) (syntax:native-architecture) (m:empty-env)))
+      (true
+        (syntax:features
+          (syntax:native-platform)
+          (syntax:native-architecture)
+          (m:empty-env)))
       (false (field (deref (cast (pointer configuration) config)) features)))))
 
 (base:function x86 ((p m:context)) bool

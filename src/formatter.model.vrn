@@ -8,7 +8,14 @@
 ; Kinds: atom=0, open=1, close=2, comment=3, quote=4, feature=5,
 ; string=6, character=7. NEXT skips a complete form after parsing.
 ; 48-byte node layout on the supported 64-bit Foundation ABI.
-(base:type node (product (kind u64) (start u64) (length u64) (next u64) (flat u64) (inline bool)))
+(base:type node
+  (product
+    (kind u64)
+    (start u64)
+    (length u64)
+    (next u64)
+    (flat u64)
+    (inline bool)))
 
 (array:define nodes node)
 
@@ -52,19 +59,26 @@
     ((limit-error offset message) message)))
 
 (base:function offset ((value status)) u64
-  (match value ((syntax-error offset message) offset) ((limit-error offset message) offset) (_ 0)))
+  (match value
+    ((syntax-error offset message) offset)
+    ((limit-error offset message) offset)
+    (_ 0)))
 
 ; Sequence fallible operations without evaluating later ones after a failure.
 (base:macro step (operation next)
   `(match ,operation ((ok) ,next) (formatter-step-error formatter-step-error)))
 
 (base:macro steps (&rest operations)
-  (compiler:reduce-right 'formatter.model:step '(formatter.model:success) operations))
+  (compiler:reduce-right
+    'formatter.model:step
+    '(formatter.model:success)
+    operations))
 
 ; Statically specialized, bounded-stack iteration. DONE allows early exit.
 ; The recursive driver halves its budget; STEP advances caller-owned state.
 (base:macro iteration (name state done step)
-  `(base:function ,name ((context (pointer ,state)) (count u64)) formatter.model:status
+  `(base:function ,name ((context (pointer ,state)) (count u64))
+     formatter.model:status
      (match (,done context)
        (true (formatter.model:success))
        (false
@@ -80,7 +94,9 @@
                      (,name context (- count half))))))))))))
 
 (base:function empty ((backing allocator:backend)) tape
-  (nodes-empty (cast (pointer node) (cast (pointer void) "")) (array:layout 48 8 backing)))
+  (nodes-empty
+    (cast (pointer node) (cast (pointer void) ""))
+    (array:layout 48 8 backing)))
 
 (base:function at ((items tape) (i u64)) node
   (deref (pointer-offset (tuple-get items 0) i)))
@@ -93,7 +109,8 @@
     (true (base:convert (deref (pointer-offset (field source bytes) i))))
     (false 0)))
 
-(base:function equal-at ((source data:view) (start u64) (length u64) (text (pointer u8)) (size u64))
+(base:function equal-at
+  ((source data:view) (start u64) (length u64) (text (pointer u8)) (size u64))
   bool
   (match (== length size)
     (false false)
