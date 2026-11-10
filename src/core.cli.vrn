@@ -797,8 +797,8 @@
 
 (base:function build-features
   ((argv (pointer (pointer u8)))
-   (index u64)
-   (end u64)
+   (index i32)
+   (end i32)
    (memory (pointer arena:arena))
    (features (pointer (pointer void)))) bool
   (match (== index end)
@@ -819,7 +819,7 @@
   (let
     ((memory arena:arena (arena:create (system:create) 4096))
      (features (pointer void) (m:empty-env))
-     (valid bool (build-features argv 4 (base:convert argc) (& memory) (& features)))
+     (valid bool (build-features argv 4 argc (& memory) (& features)))
      (result
        exit-code
        (match valid
