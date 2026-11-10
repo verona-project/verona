@@ -887,24 +887,35 @@
                    code))))))))
     (do (arena:destroy (& memory)) result)))
 
-(base:function command ((argc i32) (argv (pointer (pointer u8)))) exit-code
-  (match
-    (base:and-then
-      (base:not (< argc (cast i32 2)))
-      (equal (deref (pointer-offset argv 1)) "build"))
-    (false (source-command argc argv))
-    (true
-      (match (< argc (cast i32 4)) (true (usage)) (false (build-command argc argv))))))
+(base:function is-version-command ((argc i32) (argv (pointer (pointer u8)))) bool
+  (base:and-then
+    (base:not (< argc 2))
+    (let ((command (pointer u8) (deref (pointer-offset argv 1))))
+      (base:or (equal command "--version") (equal command "-V")))))
 
 (base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
-  (match
-    (base:and-then
-      (base:not (< argc (cast i32 2)))
-      (base:or
-        (equal (deref (pointer-offset argv 1)) "--version")
-        (equal (deref (pointer-offset argv 1)) "-V")))
+  (match (is-version-command argc argv)
     (true
       (match (== argc 2)
-        (true (do (m:text c:STDOUT-FILENO constants:compiler-version) (m:text c:STDOUT-FILENO "\n") 0))
+        (true
+          (do
+            (m:text c:STDOUT-FILENO constants:compiler-version)
+            (m:text c:STDOUT-FILENO "\n")
+            0))
         (false (usage))))
-    (false (command argc argv))))
+    (false
+      (let ((command (pointer u8) (deref (pointer-offset argv 1))))
+        (base:cond
+          ((base:or-else
+             (equal command "read")
+             (equal command "check")
+             (equal command "eval")
+             (equal command "emit-llvm"))
+           (source-command argc argv))
+          ((base:or-else
+             (equal command "compile")
+             (equal command "compile-report"))
+           (source-command argc argv))
+          ((equal command "build")
+           (match (< argc 4) (true (usage)) (false (build-command argc argv))))
+          (true 1))))))
