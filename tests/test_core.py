@@ -3142,6 +3142,104 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(message, result.stderr)
 
+    def test_constant_folding_integer_semantics(self):
+        cases = {
+            "(%/-primitive-i64 84 2)": 42,
+            "(%/-primitive-i64 -85 2)": -42,
+            "(%/-primitive-i64 85 -2)": -42,
+            "(%+-primitive-i64 9223372036854775807 1)": -9223372036854775808,
+            "(%--primitive-i64 -9223372036854775808 1)": 9223372036854775807,
+            "(%*-primitive-i64 9223372036854775807 2)": -2,
+            "(%sext-primitive-i8-i64 (%+-primitive-i8 127 1))": -128,
+            "(%zext-primitive-u8-i64 (%+-primitive-u8 255 1))": 0,
+            "(%zext-primitive-u16-i64 (%sext-primitive-i8-u16 -1))": 65535,
+            "(%zext-primitive-u8-i64 (%trunc-primitive-i64-u8 -1))": 255,
+            "(%reinterpret-primitive-u64-i64 (%/-primitive-u64 18446744073709551615 2))": 9223372036854775807,
+            "(%sext-primitive-i8-i64 (%shr-primitive-i8 -3 1))": -2,
+            "(%sext-primitive-i8-i64 (%shr-primitive-i8 -128 -1))": -1,
+            "(%zext-primitive-u8-i64 (%shr-primitive-u8 255 8))": 255,
+            "(%zext-primitive-u8-i64 (%shl-primitive-u8 255 1))": 254,
+            "(%and-primitive-i64 -1 42)": 42,
+            "(%or-primitive-i64 40 2)": 42,
+            "(%xor-primitive-i64 63 21)": 42,
+            "(if (%>-primitive-u64 18446744073709551615 0) 42 0)": 42,
+            "(if (%<-primitive-i64 -1 0) 42 0)": 42,
+            "(if (%=-primitive-i8 (%+-primitive-i8 127 1) -128) 42 0)": 42,
+            "(if (%not-primitive-bool (%and-primitive-bool true false)) 42 0)": 42,
+        }
+        for expression, expected in cases.items():
+            with self.subTest(expression=expression):
+                self.agrees(self.program(expression), expected)
+
+    def test_constant_folding_removes_guarded_division(self):
+        source = self.program("""
+(if (%=-primitive-i64 (%/-primitive-i64 84 2) 42)
+  (%/-primitive-i64 (%+-primitive-i64 80 4) 2)
+  (%/-primitive-i64 1 0))
+""")
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        # Runtime helpers remain declared; no user expression calls division.
+        self.assertNotRegex(emitted.stdout, r"call i64 @core\.div")
+        self.assertNotIn("phi i64", emitted.stdout)
+        invalid = self.run_core("emit-llvm", self.program(
+            "(if (%=-primitive-i64 (%/-primitive-i64 84 2) 42) 42 missing)"))
+        self.assertEqual(invalid.returncode, 2, invalid.stderr)
+        self.assertIn("unknown local", invalid.stderr)
+
+    def test_constant_folding_keeps_effects_and_resolved_calls(self):
+        self.agrees("""
+(%function / ((left i64) (right i64)) i64 42)
+(%function main () i64 (/ 1 0))
+""", 42)
+        self.agrees("""
+(%function mark ((trace (pointer i64))) i64
+  (do (store (deref trace) 42) 7))
+(%function main () i64
+  (let ((trace i64 0))
+    (%+-primitive-i64 (%*-primitive-i64 (mark (& trace)) 0) trace)))
+""", 42)
+        self.agrees(self.program("""
+(if (%=-primitive-f64 (%/-primitive-f64 84.0 2.0) 42.0) 42 0)
+"""), 42)
+
+    def test_constant_folding_preserves_failures(self):
+        cases = [
+            (f"(if (%=-primitive-{ty} (%/-primitive-{ty} {minimum} -1) 0) 42 0)",
+             "signed division overflow")
+            for ty, minimum in (("i8", -128), ("i16", -32768),
+                                ("i32", -2147483648), ("i64", -9223372036854775808))
+        ]
+        cases.append(("(%/-primitive-i64 42 (%--primitive-i64 2 2))", "division by zero"))
+        for expression, message in cases:
+            with self.subTest(expression=expression):
+                source = self.program(expression)
+                evaluated = self.run_core("eval", source)
+                self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
+                self.assertIn(message, evaluated.stderr)
+                for level in ("-O0", "-O2"):
+                    binary = self.root / "folding failure"
+                    compiled = self.run_core("compile-report", source, "-o", binary, level)
+                    self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                    native = subprocess.run([str(binary)], capture_output=True,
+                                            text=True, timeout=10)
+                    self.assertEqual(native.returncode, 70, native.stderr)
+                    self.assertEqual(native.stdout, "")
+                    self.assertEqual(native.stderr.splitlines()[0],
+                                     evaluated.stderr.splitlines()[0])
+
+    def test_constant_folding_depth_budget(self):
+        expression = "42"
+        for _ in range(40):
+            expression = f"(%/-primitive-i64 {expression} 1)"
+        source = self.program(expression)
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        # Exceeding the folding depth leaves an ordinary runtime expression.
+        self.assertRegex(emitted.stdout, r"call i64 @core\.div")
+
     def test_copy_propagation_reuses_parameter_value(self):
         source = """
 (%function copied ((value i64)) i64

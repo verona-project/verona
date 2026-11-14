@@ -146,7 +146,10 @@
     (cabi:convert (field b abi) ty value false)))
 
 (base:function word ((owner llvm:session) (ty u64) (value i64)) t:value-ref
-  (ir:const-int (layout:scalar-type owner ty) (base:convert value) 0))
+  ; LLVM constants must receive width-masked bits. Passing a sign-extended
+  ; narrow negative payload can disagree with LLVM's folded arithmetic value.
+  (ir:const-int
+    (layout:scalar-type owner ty) (num:narrow ty (base:convert value)) 0))
 
 (base:function construct
   ((c m:context) (b backend) (args u64) (value t:value-ref) (index u32))
@@ -792,6 +795,15 @@
 ; Lower one checked expression and record its LLVM value under the syntax index.
 ; Resolved binder/function slots provide local references and direct call targets.
 (base:function expression ((c m:context) (b backend) (id u64)) t:value-ref
+  (match
+    ; Zero disables folding; otherwise bound depth to 32.
+    (optimize:constant c id (match (field b optimize) (true 32) (false 0)))
+    ((known value)
+      (put b id (word (field b owner) (field (m:at c id) ty) value)))
+    ((unknown) (expression-unfolded c b id))))
+
+(base:function expression-unfolded ((c m:context) (b backend) (id u64))
+  t:value-ref
   (let ((v m:node (m:at c id)) (args u64 (m:next c (field v child))))
     (put
       b

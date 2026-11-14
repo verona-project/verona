@@ -1,25 +1,143 @@
 (import base)
 (import core.model :as m)
+(import core.numeric :as num)
+
+; UNKNOWN includes unsupported operations, possible runtime failures, and
+; exhausted recursion budgets. A known value has the checked node's type.
+(base:type constant-result (sum (unknown) (known i64)))
+
+; Compare canonical scalar payloads using the operand type's signedness.
+(base:function less ((ty u64) (a i64) (b i64)) bool
+  (match (num:signed-type ty)
+    (true (< a b))
+    (false
+      (let ((left u64 (base:convert a)) (right u64 (base:convert b)))
+        (< left right)))))
+
+(base:function compare ((op u64) (ty u64) (a i64) (b i64)) bool
+  (match op
+    (5 (== a b)) ; Equal.
+    (6 (less ty a b))
+    (7 (base:not (less ty b a)))
+    (8 (less ty b a))
+    (9 (base:not (less ty a b)))
+    (_ (base:not (== a b))))) ; Not equal (opcode 10).
+
+; Match evaluator arithmetic right shift: division rounds negative values down.
+; The divisor is a power of two from a count reduced modulo the operand width.
+(base:function shift-right ((ty u64) (a i64) (divisor u64)) u64
+  (let ((bits u64 (base:convert a)))
+    (match (base:and (num:signed-type ty) (< a 0))
+      (false (/ bits divisor))
+      (true (- 0 (+ 1 (/ (- (- 0 bits) 1) divisor)))))))
+
+(base:function divide ((ty u64) (a i64) (b i64)) constant-result
+  (base:cond
+    ((== b 0) (unknown))
+    ((num:signed-type ty)
+     (match
+       (base:and (== b -1) (== a (num:normalize ty (num:sign-bit ty))))
+       (true (unknown))
+       (false (known (/ a b)))))
+    (true
+      (let ((left u64 (base:convert a)) (right u64 (base:convert b)))
+        (known (num:normalize ty (/ left right)))))))
+
+; Only resolved integer/boolean primitive opcodes reach this helper.
+; Unsigned 64-bit intermediates deliberately wrap; normalize applies the
+; checked operand width rather than the host's signed arithmetic semantics.
+(base:function binary
+  ((op u64) (ty u64) (a i64) (b i64)) constant-result
+  (let ((left u64 (base:convert a)) (right u64 (base:convert b)))
+    (base:cond
+      ((base:and (>= op 5) (<= op 10))
+       (known (match (compare op ty a b) (true 1) (false 0))))
+      ((== op 4) (divide ty a b))
+      (true
+        (match op
+          (1 (known (num:normalize ty (+ left right))))
+          (2 (known (num:normalize ty (- left right))))
+          (3 (known (num:normalize ty (* left right))))
+          (11 (known (num:normalize ty (num:bitwise op left right))))
+          (12 (known (num:normalize ty (num:bitwise op left right))))
+          (13 (known (num:normalize ty (num:bitwise op left right))))
+          (14
+            (known
+              (num:normalize ty
+                (* left (num:pow2 (num:remainder right (num:width ty)))))))
+          (15
+            (known
+              (num:normalize ty
+                (shift-right ty a
+                  (num:pow2 (num:remainder right (num:width ty)))))))
+          (_ (unknown)))))))
+
+; Read-only folding of checked literals and primitive-only expression trees.
+; No references, calls, memory accesses, pointer operations, or floating point.
+; Fuel bounds nesting; exhausting it leaves normal lowering in control.
+(base:function constant ((c m:context) (id u64) (fuel u64)) constant-result
+  (match fuel
+    (0 (unknown))
+    (_
+      (let ((v m:node (m:at c id)))
+        (match (field v kind)
+          (2 ; Checked integer literal.
+            (match (num:integer-type (field v ty))
+              (true (known (field v value)))
+              (false (unknown))))
+          (3 ; Boolean literal; type 2 excludes untyped macro syntax.
+            (match (field v ty)
+              (2 (known (field v value)))
+              (_ (unknown))))
+          (9 ; Checked primitive with a resolved opcode and concrete types.
+            (let
+              ((args u64 (m:next c (field v child)))
+               (ty u64 (field (m:at c args) ty)))
+              (match (base:or (== ty 2) (num:integer-type ty))
+                (false (unknown))
+                (true (primitive c v args ty (- fuel 1))))))
+          (_ (unknown)))))))
+
+(base:function primitive
+  ((c m:context) (v m:node) (args u64) (ty u64) (fuel u64)) constant-result
+  (match (constant c args fuel)
+    ((unknown) (unknown))
+    ((known a)
+      (match (field v target)
+        (16 ; Explicit integer conversion; floating conversions stay runtime.
+          (match
+            (base:and (num:integer-type ty) (num:integer-type (field v ty)))
+            (true (known (num:normalize (field v ty) (base:convert a))))
+            (false (unknown))))
+        (17 ; Boolean negation.
+          (known (match a (0 1) (_ 0))))
+        (_
+          (match (m:next c args)
+            (0 (unknown))
+            (right
+              (match (constant c right fuel)
+                ((unknown) (unknown))
+                ((known b) (binary (field v target) ty a b))))))))))
 
 ; Read-only checked-expression rewrites. Call only after successful checking.
 ; Never replace tape nodes: binders, sibling links, source spans, and shared
 ; specialization identities remain owned by the checked program. Returning an
 ; existing branch ID lets lowering keep its normal expression/LLVM slot mapping.
-; This local rule allocates nothing, grows no graph, and needs no fixed point.
-; Zero means no rewrite. Only a typed boolean literal can be discarded here;
-; calls, loads, references, and other computations remain conservative.
+; These rules allocate nothing, grow no graph, and need no fixed point.
+; Zero means no branch rewrite. Only proven constant boolean computations
+; can be discarded here; calls, loads, and references remain conservative.
 (base:function known-branch ((c m:context) (condition u64)) u64
   (let ((v m:node (m:at c condition)))
-    (match
-      (base:and
-        ; Node kind 3 is a boolean literal in core.model's checked tape.
-        (== (field v kind) 3)
-        ; Type 2 is bool. Reject untyped macro booleans, which have ty=0.
-        (== (field v ty) 2))
-      (false 0)
-      (true
-        (match (field v value)
-          (0 (m:next c (m:next c condition)))
-          (_ (m:next c condition)))))))
+    ; Type 2 is bool. Reject untyped macro booleans, which have ty=0.
+    (match (field v ty)
+      (2
+        ; At most 32 levels of constant expression nesting per query.
+        (match (constant c condition 32)
+          ((unknown) 0)
+          ((known value)
+            (match value
+              (0 (m:next c (m:next c condition)))
+              (_ (m:next c condition))))))
+      (_ 0))))
 
-(export known-branch)
+(export constant-result constant known-branch)
