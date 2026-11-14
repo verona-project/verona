@@ -3142,6 +3142,136 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(message, result.stderr)
 
+    def test_dead_bindings_remove_safe_computations(self):
+        source = """
+(%type Option (sum (Some i64)))
+(%function identity ((value i64)) i64
+  (let ((unused (%*-primitive-i64 value value))
+        (aggregate (tuple value true))
+        (constructor (Some value))
+        (branch (if (%<-primitive-i64 value 0)
+                  (%+-primitive-i64 value 1) (%--primitive-i64 value 1)))
+        (sequence (do (%+-primitive-i64 value 1) (%*-primitive-i64 value 2)))
+        (division (%/-primitive-i64 84 2)))
+    value))
+(%function main () i64 (identity 42))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        bodies = re.findall(
+            r"define internal i64 @[^\n]+\(i64 (%[\w.]+)\) \{\n(.*?)\n\}",
+            emitted.stdout, re.S)
+        self.assertEqual(len(bodies), 1, emitted.stdout)
+        parameter, body = bodies[0]
+        instructions = [line.strip() for line in body.splitlines()
+                        if line.strip() and not line.strip().endswith(":")]
+        self.assertEqual(instructions, [f"ret i64 {parameter}"])
+
+    def test_dead_bindings_keep_dependencies_and_specializations(self):
+        self.agrees(self.program("""
+(let ((value i64 40) (outer value))
+  (let ((value i64 2) (unused (%*-primitive-i64 value value)))
+    (%+-primitive-i64 outer value)))
+"""), 42)
+        self.agrees(self.program("""
+(let ((first i64 20) (second (%*-primitive-i64 first 2)) (unused i64 99))
+  (%+-primitive-i64 second 2))
+"""), 42)
+        self.agrees("""
+(%function pick (for (a)) ((value a)) a
+  (let ((copy value) (unused (tuple value))) (let ((value copy)) value)))
+(%function main () i64
+  (%+-primitive-i64 (pick (cast i64 40))
+    (%zext-primitive-u8-i64 (pick (cast u8 2)))))
+""", 42)
+        self.agrees("""
+(%type Callback (pointer (function (i64) i64)))
+(%function answer ((value i64)) i64 value)
+(%function invoke ((callback Callback)) i64
+  (let ((alias callback) (unused i64 0)) (alias 42)))
+(%function main () i64 (invoke answer))
+""", 42)
+
+    def test_dead_bindings_preserve_effects_and_reads(self):
+        self.agrees("""
+(%function mark ((trace (pointer i64)) (digit i64)) i64
+  (do (store (deref trace)
+        (%+-primitive-i64 (%*-primitive-i64 (deref trace) 10) digit)) digit))
+(%function main () i64
+  (let ((trace i64 0) (first (mark (& trace) 4))
+        (pure (%*-primitive-i64 9 9)) (second (mark (& trace) 2))) trace))
+""", 42)
+        source = """
+(%function main () i64
+  (let ((value i64 42) (pointer (& value)) (snapshot value)
+        (unused value) (write (store (deref pointer) 2))) snapshot))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        # Both the live snapshot and the unused stored-local read are retained.
+        self.assertGreaterEqual(emitted.stdout.count("load i64"), 2)
+        global_read = """
+(%variable total i64 42)
+(%function main () i64 (let ((unused total)) 42))
+"""
+        self.agrees(global_read, 42)
+        emitted = self.run_core("emit-llvm", global_read)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("load i64", emitted.stdout)
+
+    def test_dead_bindings_preserve_failures_and_diagnostics(self):
+        cases = [
+            (self.program("(let ((unused (%/-primitive-i64 1 0))) 42)"),
+             "division by zero"),
+            (self.program("(let ((unused (%/-primitive-i64 -9223372036854775808 -1))) 42)"),
+             "signed division overflow"),
+            ("""(%function probe ((at u64)) i64
+  (let ((unused (index (array-of (cast i64 42)) at))) 42))
+(%function main () i64 (probe 1))""", "array index out of bounds"),
+        ]
+        for source, message in cases:
+            with self.subTest(message=message):
+                evaluated = self.run_core("eval", source)
+                self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
+                self.assertIn(message, evaluated.stderr)
+                for level in ("-O0", "-O2"):
+                    binary = self.root / "dead binding failure"
+                    compiled = self.run_core("compile-report", source, "-o", binary, level)
+                    self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                    native = subprocess.run([str(binary)], capture_output=True,
+                                            text=True, timeout=10)
+                    self.assertEqual(native.returncode, 70, native.stderr)
+                    self.assertEqual(native.stdout, "")
+                    self.assertEqual(native.stderr.splitlines()[0],
+                                     evaluated.stderr.splitlines()[0])
+        invalid = self.run_core("emit-llvm", self.program("(let ((unused missing)) 42)"))
+        self.assertEqual(invalid.returncode, 2, invalid.stderr)
+        self.assertIn("unknown local", invalid.stderr)
+
+    def test_dead_bindings_keep_potential_divergence(self):
+        source = """
+(%function loop () i64 (loop))
+(%function main () i64 (let ((unused (loop))) 42))
+"""
+        # Do not execute an infinite program. The recursive call and unused
+        # initializer call must both remain, alongside the native entry call.
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertGreaterEqual(len(re.findall(r"call i64 @", emitted.stdout)), 3)
+
+    def test_dead_bindings_proof_budget(self):
+        expression = "value"
+        for _ in range(40):
+            expression = f"(%+-primitive-i64 {expression} 1)"
+        source = (f"(%function probe ((value i64)) i64 (let ((unused {expression})) value))"
+                  "(%function main () i64 (probe 42))")
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("add i64", emitted.stdout)
+
     def test_known_match_eliminates_dispatch(self):
         cases = [
             self.program("(match (%/-primitive-i64 84 2) (0 0) (42 42) (_ 1))"),

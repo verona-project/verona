@@ -30,7 +30,8 @@
     (slots (pointer t:value-ref))
     (helpers (pointer t:value-ref))
     (abi cabi:context)
-    (optimize bool)))
+    (optimize bool)
+    (references (pointer u8))))
 
 ; Read a previously populated LLVM handle slot using its checked syntax/binder identity.
 (base:function get ((b backend) (id u64)) t:value-ref
@@ -466,7 +467,7 @@
         (match (m:next c id) (0 value) (next (sequence c b next)))))))
 
 ; Lower sequential let initializers, associate binder IDs with their LLVM values, then lower the body.
-; Evaluate each initializer once and in order, including unused bindings.
+; Keep initializer order. Skip only unreferenced bindings proven discardable.
 ; A copy from a stored local loads its current value here, preserving a snapshot.
 (base:function bindings ((c m:context) (b backend) (id u64) (body u64))
   t:value-ref
@@ -475,7 +476,11 @@
     (_
       (let ((name u64 (m:child c id)) (init u64 (field (m:at c id) target)))
         (do
-          (bind-binder c b name (expression c b init))
+          (match
+            (base:and-then (field b optimize)
+              (optimize:dead-binding c (field b references) id))
+            (true unit)
+            (false (bind-binder c b name (expression c b init))))
           (bindings c b (m:next c id) body))))))
 
 ; Build branches and a phi for a checked if expression.
@@ -1778,7 +1783,8 @@
          (layout:values c (tuple-get (deref (field c items)) 1))
          (runtime c owner)
          (cabi:create c owner)
-         optimized)))
+         optimized
+         (optimize:references c optimized))))
     (do
       (external-declarations c b all)
       (declarations c b all)

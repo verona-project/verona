@@ -1,6 +1,9 @@
 (import base)
 (import core.model :as m)
 (import core.numeric :as num)
+(import core.check :as check)
+(import arena)
+(import libc.memory :as memory)
 
 ; UNKNOWN includes unsupported operations, possible runtime failures, and
 ; exhausted recursion budgets. A known value has the checked node's type.
@@ -237,4 +240,112 @@
               ((unknown) 0)
               ((known value) (scalar-arms c arms value 128)))))))))
 
-(export constant-result constant known-branch known-match)
+; One byte per checked tape identity. Scan the complete tape once, including
+; references in other initializers and currently unreachable branches. Counting
+; by resolved binder ID preserves shadowing and specialization identities.
+; Deliberately do not subtract references when dropping another initializer:
+; checked subtrees may be shared, so transitive liveness needs separate analysis.
+(base:function mark-references
+  ((c m:context) (used (pointer u8)) (start u64) (count u64)) unit
+  (match count
+    (0 unit)
+    (1
+      (let ((v m:node (m:at c start)))
+        (match (field v kind)
+          (5 ; Checked local reference, including references used as places/callees.
+            (do
+              (store (deref (pointer-offset used (field v target))) (cast u8 1))
+              unit))
+          (_ unit))))
+    (_
+      (let ((half u64 (/ count 2)))
+        (do
+          (mark-references c used start half)
+          (mark-references c used (+ start half) (- count half)))))))
+
+; Arena-owned analysis storage lives as long as the borrowed checked program.
+; Disabled optimization returns null and performs no scan/allocation.
+(base:function references ((c m:context) (enabled bool)) (pointer u8)
+  (match enabled
+    (false (cast (pointer u8) (m:empty-env)))
+    (true
+      (let ((count u64 (m:nodes-length (deref (field c items)))))
+        (match (arena:allocate (field c memory) count 1)
+          ((allocated p)
+            (let ((used (pointer u8) (cast (pointer u8) (cast (pointer void) p))))
+              (do
+                (memory:memset (cast (pointer void) used) 0 count)
+                (mark-references c used 1 (- count 1))
+                used)))
+          (_
+            (do
+              (m:fatal "optimizer reference storage allocation failed")
+              (cast (pointer u8) (m:empty-env)))))))))
+
+; A discardability proof, not a general purity/movement/duplication summary.
+; Unknown nodes and exhausted budgets must keep their original evaluation.
+(base:function discardable-chain ((c m:context) (id u64) (fuel u64)) bool
+  (match fuel
+    (0 false)
+    (_
+      (match id
+        (0 true)
+        (_
+          (base:and-then
+            (discardable c id (- fuel 1))
+            (discardable-chain c (m:next c id) (- fuel 1))))))))
+
+(base:function discardable ((c m:context) (id u64) (fuel u64)) bool
+  (match fuel
+    (0 false)
+    (_
+      (let
+        ((v m:node (m:at c id))
+         (args u64 (m:next c (field v child))))
+        (match (field v kind)
+          (2 true) ; Integer literal.
+          (3 true) ; Boolean literal.
+          (4 true) ; Unit literal.
+          (17 true) ; Static data literal; no runtime allocation.
+          (36 true) ; Floating literal; no runtime arithmetic/conversion.
+          (5 ; Reading an immutable SSA local cannot trap or observe memory.
+            (base:not (check:stored-binder c (field v target))))
+          (9 ; Resolved primitive; reject floating point and pointer operations.
+            (let
+              ((op u64 (field v target))
+               (ty u64 (field (m:at c args) ty)))
+              (match (base:or (== ty 2) (num:integer-type ty))
+                (false false)
+                (true
+                  (match op
+                    (4 ; Division is discardable only when proven to succeed.
+                      (match (constant c id fuel)
+                        ((known value) true)
+                        ((unknown) false)))
+                    (_
+                      (base:and-then
+                        (base:or
+                          (base:and (>= op 1) (<= op 15))
+                          (== op 17) ; Boolean negation.
+                          (base:and (== op 16) ; Integer-to-integer conversion.
+                            (num:integer-type (field v ty))))
+                        (discardable-chain c args (- fuel 1)))))))))
+          (6 (discardable-chain c args (- fuel 1))) ; Condition and both branches.
+          (13 (discardable-chain c args (- fuel 1))) ; Product/tuple/array values.
+          (14 (discardable c args (- fuel 1))) ; Extract from a proven safe value.
+          (15 (discardable-chain c args (- fuel 1))) ; Sum constructor payloads.
+          (56 (discardable-chain c args (- fuel 1))) ; Sequence.
+          (_ false))))))
+
+; USED must be the reference table from an enabled analysis. Stored locals are
+; retained defensively even when no ordinary checked reference was found.
+(base:function dead-binding
+  ((c m:context) (used (pointer u8)) (id u64)) bool
+  (let ((name u64 (m:child c id)))
+    (base:and-then
+      (== (deref (pointer-offset used name)) (cast u8 0))
+      (base:not (check:stored-binder c name))
+      ; Bound each proof to 32 levels; uncertainty preserves the initializer.
+      (discardable c (field (m:at c id) target) 32))))
+
+(export constant-result constant known-branch known-match references dead-binding)
