@@ -1081,6 +1081,32 @@
             yes
             no))))))
 
+; Bind from the already evaluated scrutinee; never re-evaluate payload syntax.
+; Shared by selected-arm lowering and the ordinary runtime matching path.
+(base:function bind-arm
+  ((c m:context) (b backend) (arm u64) (value t:value-ref)
+   (sum bool) (tuple bool)) unit
+  (let
+    ((target u64 (field (m:at c arm) target))
+     (builder t:builder-ref (field (field b owner) builder)))
+    (match target
+      (0
+        (match (field (m:at c arm) value)
+          (0 unit)
+          (binder (do (put b (base:convert binder) value) unit))))
+      (_
+        (match tuple
+          (true
+            (payload-bindings c b
+              (m:next c (m:child c (m:child c arm))) value 0))
+          (false
+            (match sum
+              (true
+                (payload-bindings c b
+                  (m:next c (m:child c (m:child c arm)))
+                  (ir:build-extract builder value (base:convert target) "") 0))
+              (false unit))))))))
+
 (base:function lower-arms
   ((c m:context)
    (b backend)
@@ -1182,34 +1208,7 @@
                                 yes
                                 no))))))))))
             (ir:builder-position builder yes)
-            (match target
-              (0
-                (match (field (m:at c arm) value)
-                  (0 unit)
-                  (binder (do (put b (base:convert binder) value) unit))))
-              (_
-                (match tuple
-                  (true
-                    (payload-bindings
-                      c
-                      b
-                      (m:next c (m:child c (m:child c arm)))
-                      value
-                      0))
-                  (false
-                    (match sum
-                      (true
-                        (payload-bindings
-                          c
-                          b
-                          (m:next c (m:child c (m:child c arm)))
-                          (ir:build-extract
-                            builder
-                            value
-                            (base:convert target)
-                            "")
-                          0))
-                      (false unit))))))
+            (bind-arm c b arm value sum tuple)
             (let
               ((result t:value-ref (expression c b (m:next c (m:child c arm))))
                (last t:block-ref (ir:builder-block builder)))
@@ -1220,9 +1219,25 @@
 (base:function match-value
   ((c m:context) (b backend) (id u64) (args u64) (sum bool)) t:value-ref
   (let
+    ((value t:value-ref (expression c b args))
+     (tuple bool (== (check:type-kind c (field (m:at c args) ty)) 22))
+     (arm u64
+       (match (field b optimize)
+         (true (optimize:known-match c args sum tuple))
+         (false 0))))
+    (match arm
+      (0 (match-value-unfolded c b id args sum value))
+      (_
+        (do
+          (bind-arm c b arm value sum tuple)
+          (expression c b (m:next c (m:child c arm))))))))
+
+(base:function match-value-unfolded
+  ((c m:context) (b backend) (id u64) (args u64) (sum bool)
+   (value t:value-ref)) t:value-ref
+  (let
     ((owner llvm:session (field b owner))
      (builder t:builder-ref (field owner builder))
-     (value t:value-ref (expression c b args))
      (tuple bool (== (check:type-kind c (field (m:at c args) ty)) 22))
      (tag
        t:value-ref

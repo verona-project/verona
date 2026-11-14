@@ -3142,6 +3142,126 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(message, result.stderr)
 
+    def test_known_match_eliminates_dispatch(self):
+        cases = [
+            self.program("(match (%/-primitive-i64 84 2) (0 0) (42 42) (_ 1))"),
+            self.program("(match false (true 0) (false 42))"),
+            self.program("(match (%/-primitive-i64 84 2) (0 0) (value value))"),
+            self.program("(match (cast i8 -128) (-128 42) (_ 0))"),
+            self.program("(match (cast u64 18446744073709551615) (0 0) (_ 42))"),
+            self.program("(match (tuple) ((tuple) 42))"),
+            """(%function pick (for (a)) ((value a)) a
+  (match (tuple value) ((tuple selected) selected)))
+(%function main () i64
+  (%+-primitive-i64 (pick (cast i64 40))
+    (%zext-primitive-u8-i64 (pick (cast u8 2)))))""",
+            self.program("""(match (tuple (%/-primitive-i64 84 2) false)
+              ((tuple 0 _) 0) ((tuple value _) value))"""),
+            """(%type Option (sum (Some i64) (None)))
+(%function main () i64
+  (match (Some 42) ((None) 0) ((Some 0) 1) ((Some result) result)))""",
+            """(%type Option (sum (Some i64) (None)))
+(%function main () i64
+  (match (None) ((Some result) result) ((None) 42)))""",
+            """(%type Option (sum (Some i64) (None)))
+(%function main () i64
+  (match (Some 40)
+    ((None) 0)
+    ((Some outer)
+      (match (Some 2) ((None) 0) ((Some inner) (%+-primitive-i64 outer inner))))))""",
+        ]
+        for source in cases:
+            with self.subTest(source=source):
+                self.agrees(source, 42)
+                emitted = self.run_core("emit-llvm", source)
+                self.assertEqual(emitted.returncode, 0, emitted.stderr)
+                self.assertNotIn("match.end", emitted.stdout)
+                self.assertNotIn("next.case", emitted.stdout)
+                self.assertNotIn("phi i64", emitted.stdout)
+
+    def test_known_match_preserves_payload_order(self):
+        source = """
+(%type Bundle (sum (Pair i64 i64) (Empty)))
+(%function mark ((trace (pointer i64)) (digit i64)) i64
+  (do (store (deref trace)
+        (%+-primitive-i64 (%*-primitive-i64 (deref trace) 10) digit)) digit))
+(%function main () i64
+  (let ((trace i64 0))
+    (match (Pair (mark (& trace) 4) (mark (& trace) 2))
+      ((Empty) 0) ((Pair _ _) trace))))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertNotIn("match.end", emitted.stdout)
+        self.agrees("""
+(%type Bundle (sum (Pair i64 i64) (Empty)))
+(%function main () i64
+  (match (Pair 40 2) ((Empty) 0)
+    (whole (match whole ((Pair a b) (%+-primitive-i64 a b)) ((Empty) 1)))))
+""", 42)
+        self.agrees(self.program("""
+(match (tuple (cast i64 40) (cast i64 2))
+  ((tuple 0 _) 0)
+  (whole (%+-primitive-i64 (tuple-get whole 0) (tuple-get whole 1))))
+"""), 42)
+
+    def test_known_match_keeps_unknown_patterns(self):
+        for argument, expected in ((0, 99), (42, 42)):
+            source = f"""
+(%type Option (sum (Some i64) (None)))
+(%function choose ((value i64)) i64
+  (match (Some value) ((Some 0) 99) ((Some result) result) ((None) 0)))
+(%function main () i64 (choose {argument}))
+"""
+            with self.subTest(argument=argument):
+                self.agrees(source, expected)
+                emitted = self.run_core("emit-llvm", source)
+                self.assertEqual(emitted.returncode, 0, emitted.stderr)
+                self.assertIn("match.end", emitted.stdout)
+                self.assertIn("phi i64", emitted.stdout)
+        self.agrees("""
+(%type Option (sum (Some i64) (None)))
+(%function make ((value i64)) Option (Some value))
+(%function main () i64
+  (match (make 42) ((Some result) result) ((None) 0)))
+""", 42)
+
+    def test_known_match_preserves_failures_and_diagnostics(self):
+        source = """
+(%type Bundle (sum (Pair i64 i64) (Empty)))
+(%function main () i64
+  (match (Pair (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1))
+    ((Empty) 0) ((Pair _ _) 42)))
+"""
+        evaluated = self.run_core("eval", source)
+        self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
+        self.assertIn("division by zero", evaluated.stderr)
+        for level in ("-O0", "-O2"):
+            binary = self.root / "match failure"
+            compiled = self.run_core("compile-report", source, "-o", binary, level)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            native = subprocess.run([str(binary)], capture_output=True,
+                                    text=True, timeout=10)
+            self.assertEqual(native.returncode, 70, native.stderr)
+            self.assertEqual(native.stdout, "")
+            self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+        invalid = """
+(%type Option (sum (Some i64) (None)))
+(%function main () i64 (match (Some 42) ((Some value) value) ((None) missing)))
+"""
+        result = self.run_core("emit-llvm", invalid)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("unknown local", result.stderr)
+
+    def test_known_match_arm_budget(self):
+        arms = " ".join(f"({value} 0)" for value in range(130))
+        source = self.program(f"(match (cast i64 130) {arms} (_ 42))")
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("match.end", emitted.stdout)
+
     def test_constant_folding_integer_semantics(self):
         cases = {
             "(%/-primitive-i64 84 2)": 42,

@@ -140,4 +140,101 @@
               (_ (m:next c condition))))))
       (_ 0))))
 
-(export constant-result constant known-branch)
+; A pattern is rejected only by a proven mismatch. An unknown earlier pattern
+; prevents selecting a later arm, even if that later arm is a catch-all.
+(base:type pattern-result (sum (matches) (rejects) (undecided)))
+
+(base:function components
+  ((c m:context) (names u64) (values u64) (fuel u64)) pattern-result
+  (match fuel
+    (0 (undecided))
+    (_
+      (match names
+        (0 (match values (0 (matches)) (_ (undecided))))
+        (_
+          (match values
+            (0 (undecided))
+            (_
+              (let ((pattern m:node (m:at c names)))
+                (match (field pattern kind)
+                  (0 ; A checked component binder or wildcard always matches.
+                    (components c (m:next c names) (m:next c values) (- fuel 1)))
+                  (_
+                    ; Only known integer/boolean literal comparisons simplify.
+                    (match (constant c values 32)
+                      ((unknown) (undecided))
+                      ((known value)
+                        (match (== value (field pattern value))
+                          (false (rejects))
+                          (true
+                            (components c (m:next c names) (m:next c values)
+                              (- fuel 1))))))))))))))))
+
+; TARGET is a one-based sum tag, or 1 for a tuple pattern. Arm target 0 is
+; a whole-value binder/wildcard. Identities and sibling chains stay untouched.
+(base:function structured-arms
+  ((c m:context) (arm u64) (target u64) (values u64) (fuel u64)) u64
+  (match fuel
+    (0 0)
+    (_
+      (match arm
+        (0 0)
+        (_
+          (let ((tag u64 (field (m:at c arm) target)))
+            (base:cond
+              ((== tag 0) arm)
+              ((== tag target)
+               (match
+                 (components c (m:next c (m:child c (m:child c arm))) values fuel)
+                 ((matches) arm)
+                 ((undecided) 0)
+                 ((rejects)
+                   (structured-arms c (m:next c arm) target values (- fuel 1)))))
+              (true
+                (structured-arms c (m:next c arm) target values (- fuel 1))))))))))
+
+(base:function scalar-arms
+  ((c m:context) (arm u64) (value i64) (fuel u64)) u64
+  (match fuel
+    (0 0)
+    (_
+      (match arm
+        (0 0)
+        (_
+          (let ((pattern m:node (m:at c arm)))
+            (match
+              (base:or (== (field pattern target) 0) (== (field pattern value) value))
+              (true arm)
+              (false (scalar-arms c (m:next c arm) value (- fuel 1))))))))))
+
+; Select an existing checked arm, or zero to retain normal runtime matching.
+; The emitter must evaluate the entire scrutinee exactly once BEFORE binding
+; the selected arm, including unused/effectful constructor payloads.
+; Only direct sum/tuple construction and proven scalar constants are supported.
+; Scan at most 128 arms/components, with the existing 32-level folding budget.
+(base:function known-match
+  ((c m:context) (scrutinee u64) (sum bool) (tuple bool)) u64
+  (let
+    ((v m:node (m:at c scrutinee))
+     (arms u64 (m:next c scrutinee))
+     (values u64 (m:next c (field v child))))
+    (match sum
+      (true
+        (match (field v kind)
+          (15 ; Checked sum constructor; its descriptor stores a zero-based tag.
+            (structured-arms c arms
+              (+ (field (m:at c (field v target)) target) 1) values 128))
+          (_ 0)))
+      (false
+        (match tuple
+          (true
+            (match (field v kind)
+              (13 ; Checked aggregate construction, with a resolved tuple type.
+                (structured-arms c arms 1 values 128))
+              (_ 0)))
+          (false
+            (match (constant c scrutinee 32)
+              ((unknown) 0)
+              ((known value) (scalar-arms c arms value 128)))))))))
+
+(export constant-result constant known-branch known-match)
