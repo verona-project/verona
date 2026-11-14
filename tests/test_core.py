@@ -3142,6 +3142,63 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(message, result.stderr)
 
+    def test_copy_propagation_reuses_parameter_value(self):
+        source = """
+(%function copied ((value i64)) i64
+  (let ((first value) (second first) (third second)) third))
+(%function main () i64 (copied 42))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        # Ignore generated symbol names. The one-parameter identity function
+        # must contain only a return: no loads, stores, or copy instructions.
+        bodies = re.findall(
+            r"define internal i64 @[^\n]+\(i64 (%[\w.]+)\) \{\n(.*?)\n\}",
+            emitted.stdout, re.S)
+        self.assertEqual(len(bodies), 1, emitted.stdout)
+        parameter, body = bodies[0]
+        instructions = [line.strip() for line in body.splitlines()
+                        if line.strip() and not line.strip().endswith(":")]
+        self.assertEqual(instructions, [f"ret i64 {parameter}"])
+        self.agrees(self.program("""
+(let ((value i64 40) (copy value))
+  (let ((value i64 2) (second copy)) (%+-primitive-i64 second value)))
+"""), 42)
+
+    def test_copy_propagation_preserves_effect_order(self):
+        source = """
+(%function mark ((trace (pointer i64)) (digit i64)) i64
+  (do (store (deref trace)
+        (%+-primitive-i64 (%*-primitive-i64 (deref trace) 10) digit)) digit))
+(%function main () i64
+  (let ((trace i64 0)
+        (first (mark (& trace) 4))
+        (first-copy first)
+        (second (mark (& trace) 2))
+        (second-copy second)
+        (unused-copy first-copy))
+    (%+-primitive-i64 trace (%--primitive-i64 second-copy second))))
+"""
+        # Re-evaluating an initializer, omitting it, or changing its order
+        # changes trace. Unused aliases must not drop their initializer effects.
+        self.agrees(source, 42)
+
+    def test_copy_propagation_preserves_storage_snapshots(self):
+        for expression in (
+            """(let ((value i64 40) (copy value) (alias copy))
+              (store (deref (& value)) 2) (%+-primitive-i64 alias value))""",
+            """(let ((value i64 40) (copy value) (alias copy))
+              (store (deref (& copy)) 2) (%+-primitive-i64 alias copy))""",
+            """(let ((value i64 40) (pointer (& value))
+                     (copy value) (alias copy))
+              (store (deref pointer) 2) (%+-primitive-i64 alias value))""",
+            """(let ((value i64 40) (copy value) (pointer (& copy)))
+              (store (deref pointer) 2) (%+-primitive-i64 value copy))""",
+        ):
+            with self.subTest(expression=expression):
+                self.agrees(self.program(expression), 42)
+
     def test_known_boolean_branch_elimination(self):
         for expression in (
             "(if true 42 (%/-primitive-i64 1 0))",

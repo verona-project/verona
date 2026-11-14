@@ -40,6 +40,9 @@
 (base:function put ((b backend) (id u64) (value t:value-ref)) t:value-ref
   (do (store (deref (pointer-offset (field b slots) id)) value) value))
 
+; Copy propagation is intrinsic to SSA lowering: a nonstored binder aliases
+; the already evaluated LLVM value, without emitting a copy instruction.
+; Stored binders need distinct storage so later writes cannot change a copy.
 (base:function bind-binder
   ((c m:context) (b backend) (id u64) (value t:value-ref)) unit
   (match (check:stored-binder c id)
@@ -460,6 +463,8 @@
         (match (m:next c id) (0 value) (next (sequence c b next)))))))
 
 ; Lower sequential let initializers, associate binder IDs with their LLVM values, then lower the body.
+; Evaluate each initializer once and in order, including unused bindings.
+; A copy from a stored local loads its current value here, preserving a snapshot.
 (base:function bindings ((c m:context) (b backend) (id u64) (body u64))
   t:value-ref
   (match id
