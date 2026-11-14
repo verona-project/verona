@@ -3142,6 +3142,104 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(message, result.stderr)
 
+    def test_llvm_pipeline_removes_internal_functions(self):
+        source = """
+(%function unreachable () i64 12345)
+(%function answer () i64 42)
+(native-export answer "answer")
+(%function main () i64 (answer))
+"""
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        functions = re.findall(
+            r'define internal i64 @("[^"\n]+"|[\w.]+)\(\) \{\n(.*?)\n\}',
+            emitted.stdout, re.S)
+        names = [name.strip('"') for name, body in functions
+                 if re.search(r"ret i64 12345\b", body)]
+        self.assertEqual(len(names), 1, emitted.stdout)
+        nm = shutil.which("llvm-nm") or shutil.which("nm")
+        self.assertIsNotNone(nm)
+        for level in ("-O0", "-O1", "-O2", "-O3"):
+            with self.subTest(level=level):
+                artifact = self.root / "pipeline.o"
+                compiled = self.run_core("compile", source, "--emit", "object",
+                                         "-o", artifact, level)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                symbols = subprocess.run([nm, str(artifact)], capture_output=True,
+                                         text=True, timeout=10)
+                self.assertEqual(symbols.returncode, 0, symbols.stderr)
+                pattern = r"(?m)\b[tT] _?" + re.escape(names[0]) + r"$"
+                if level == "-O0":
+                    self.assertRegex(symbols.stdout, pattern)
+                else:
+                    self.assertNotRegex(symbols.stdout, pattern)
+                self.assertRegex(symbols.stdout, r"(?m)\bT _?answer$")
+                binary = self.root / "pipeline"
+                compiled = self.run_core("compile-report", source, "-o", binary, level)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                native = subprocess.run([str(binary)], capture_output=True,
+                                        text=True, timeout=10)
+                self.assertEqual(native.returncode, 0, native.stderr)
+                self.assertEqual(native.stdout, "i64:42\n")
+
+    def test_llvm_pipeline_error_recovery(self):
+        source = (Path(__file__).parent / "llvm_passes.vrn").read_text()
+        binary = self.root / "passes"
+        compiled = self.run_core("compile", source, "-o", binary, "-O2", "--library", "LLVM",
+                                 "--module-path", "projects/llvm/src",
+                                 "--module-path", "projects/base/src",
+                                 "--module-path", "projects/foundation/src",
+                                 "--module-path", "projects/libc/src")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(native.returncode, 0, native.stderr)
+        self.assertEqual(native.stderr, "")
+
+    def test_llvm_pipeline_preserves_divergence(self):
+        source = "(%function loop () i64 (loop))" + self.program("(let ((unused (loop))) 42)")
+        binary = self.root / "nonterminating"
+        compiled = self.run_core("compile-report", source, "-o", binary, "-O2")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        try:
+            native = subprocess.run([str(binary)], capture_output=True,
+                                    text=True, timeout=0.5)
+        except subprocess.TimeoutExpired:
+            return
+        # Stack exhaustion is possible if recursion remains; returning normally
+        # would mean the optimizer incorrectly discarded a potentially diverging call.
+        self.assertNotEqual(native.returncode, 0, native.stdout)
+
+    def test_llvm_pipeline_preserves_callbacks(self):
+        source = """
+(%type Callback (pointer (function (i32) i32)))
+(%function increment ((value i32)) i32 (%+-primitive-i32 value 1))
+(%function callback () Callback increment)
+(%function apply ((function Callback) (value i32)) i32 (function value))
+(native-export callback "get_callback")
+(native-export apply "apply_callback")
+"""
+        library = self.root / "callbacks.a"
+        compiled = self.run_core("compile", source, "--emit", "static-library",
+                                 "-o", library, "-O2")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        client = self.root / "callbacks.c"
+        client.write_text("""
+#include <stdint.h>
+typedef int32_t (*callback)(int32_t);
+extern callback get_callback(void);
+extern int32_t apply_callback(callback, int32_t);
+static int32_t twice(int32_t x) { return x * 2; }
+int main(void) {
+  return get_callback()(41) == 42 && apply_callback(twice, 21) == 42 ? 0 : 1;
+}
+""")
+        binary = self.root / "callback client"
+        linked = subprocess.run(["clang", str(client), str(library), "-o", str(binary)],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(linked.returncode, 0, linked.stderr)
+        native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(native.returncode, 0, native.stderr)
+
     def test_dead_bindings_remove_safe_computations(self):
         source = """
 (%type Option (sum (Some i64)))
@@ -3860,10 +3958,18 @@ int main(void) {{
     a.elements[2]==255 && apply(increment,41)==42 && indirect(0)==0 ? 0 : 1;
 }}
 """)
-        binary = self.root / "aggregate-client"
-        linked = subprocess.run(["clang", "-Wall", "-Werror", str(client), str(library), "-o", str(binary)], capture_output=True, text=True, timeout=30)
-        self.assertEqual(linked.returncode, 0, linked.stderr)
-        self.assertEqual(subprocess.run([str(binary)], timeout=10).returncode, 0)
+        for level in ("-O0", "-O2"):
+            with self.subTest(level=level):
+                if level != "-O0":
+                    result = self.run_core("compile", source, "--emit", "static-library",
+                                           "-o", library, level)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(library.with_suffix(".h").read_text(), header)
+                binary = self.root / "aggregate-client"
+                linked = subprocess.run(["clang", "-Wall", "-Werror", str(client), str(library),
+                                         "-o", str(binary)], capture_output=True, text=True, timeout=30)
+                self.assertEqual(linked.returncode, 0, linked.stderr)
+                self.assertEqual(subprocess.run([str(binary)], timeout=10).returncode, 0)
 
     def test_native_export_modules_and_identity(self):
         (self.root / "dep.vrn").write_text('(%function answer () i32 42)(native-export answer "dependency_answer")')

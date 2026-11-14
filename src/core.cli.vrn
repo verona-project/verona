@@ -32,6 +32,7 @@
 (import llvm.enums :as enum)
 (import llvm.types :as t)
 (import llvm.target :as target)
+(import llvm.passes :as passes)
 
 (base:type machine-options
   (product (triple (pointer u8)) (cpu (pointer u8)) (features (pointer u8))))
@@ -232,6 +233,32 @@
     ((equal level "-O2") 2)
     (true 3)))
 
+; Target-aware middle-end passes run once before any native output is written.
+; O0 keeps the unoptimized baseline. emit-llvm prints the pre-pipeline module.
+; Verify after the pipeline as well as before it; own diagnostics on every path.
+(base:function optimize-native
+  ((owner llvm:session) (machine t:machine-ref) (level (pointer u8))) exit-code
+  (match (equal level "-O0")
+    (true 0)
+    (false
+      (let
+        ((pipeline (pointer u8)
+           (base:cond
+             ((equal level "-O1") "default<O1>")
+             ((equal level "-O2") "default<O2>")
+             (true "default<O3>")))
+         (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+         (status i32
+           (do
+             ; Passes can erase blocks that the lowering builder still points at.
+             (ir:builder-clear (field owner builder))
+             (passes:run (field owner module) machine pipeline (& message))))
+         (verified i32
+           (match status (0 (llvm:verify owner (& message))) (_ status))))
+        (match verified
+          (0 (do (dispose-message message) 0))
+          (_ (do (llvm-error message) 2)))))))
+
 ; Create and own a native LLVM target machine while emitting/linking the borrowed module.
 ; Release the machine and transferred diagnostics before returning the command status.
 (base:function compile
@@ -258,9 +285,12 @@
           (let
             ((result
                exit-code
-               (match (equal kind "object")
-                 (true (emit-object owner machine output))
-                 (false (object-and-link c owner machine output links kind)))))
+               (match (optimize-native owner machine optimization)
+                 (0
+                   (match (equal kind "object")
+                     (true (emit-object owner machine output))
+                     (false (object-and-link c owner machine output links kind))))
+                 (failure failure))))
             (do (target:machine-dispose machine) result)))))))
 
 ; Build and verify an owned LLVM session, then print IR or compile the executable.

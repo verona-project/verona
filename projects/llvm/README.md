@@ -161,3 +161,16 @@ The core bindings also expose context-owned literal `struct-type`, `const-null`,
 and the `build-insert`/`build-extract` aggregate SSA builders. Struct
 element type arrays are borrowed for the call; LLVM owns the resulting type.
 Aggregate indices are zero-based `u32`. LLVM computes native field layout.
+
+## Optimization passes
+
+Import `llvm.passes` to run an LLVM 23 new-pass-manager pipeline with
+`(passes:run module machine pipeline out-message)`. The target machine may be null
+for generic use. The function returns zero on success and leaves the output
+message null. On failure it returns nonzero with a copied diagnostic owned by
+the caller; release it using `llvm.core:message-dispose`. The wrapper releases
+pass options and consumes LLVM errors internally, and enables per-pass checks.
+
+Finish IR construction and clear any builder insertion position before running
+passes that may delete blocks. Verify the input module first and verify output
+before native emission. The compiler driver does both.

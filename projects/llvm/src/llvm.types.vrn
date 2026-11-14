@@ -44,7 +44,17 @@
 
 (base:type attribute-ref (pointer attribute-handle))
 
+(base:type pass-options-handle)
+
+(base:type pass-options-ref (pointer pass-options-handle))
+
+(base:type error-handle)
+
+(base:type error-ref (pointer error-handle))
+
 (export
+  pass-options-ref
+  error-ref
   attribute-ref
   context-ref
   module-ref

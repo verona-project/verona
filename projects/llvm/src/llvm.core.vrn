@@ -124,6 +124,8 @@
 
 (base:external-function builder-dispose "LLVMDisposeBuilder" (t:builder-ref) void)
 
+(base:external-function builder-clear "LLVMClearInsertionPosition" (t:builder-ref) void)
+
 (base:external-function
   builder-position
   "LLVMPositionBuilderAtEnd"
@@ -464,6 +466,7 @@
   block-parent
   builder-create
   builder-dispose
+  builder-clear
   builder-position
   builder-block
   build-ret

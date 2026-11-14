@@ -1,0 +1,51 @@
+(import base :as b)
+(import llvm)
+(import llvm.core :as ir)
+(import llvm.types :as t)
+(import llvm.target :as target)
+(import llvm.passes :as passes)
+
+; Error recovery must leave the module usable and diagnostics independently owned.
+(%function invalid-pipelines ((owner llvm:session) (remaining u64)) bool
+  (if (%=-primitive-u64 remaining 0)
+    true
+    (let
+      ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+       (status i32
+         (passes:run (field owner module)
+           (cast t:machine-ref (target:null-pointer)) "not-a-verona-llvm-pass" (& message)))
+       (ok bool
+         (if (%=-primitive-i32 status 0) false (b:not (b:is-null message)))))
+      (do
+        (if (b:is-null message) unit (do (ir:message-dispose message) unit))
+        (b:and-then ok (invalid-pipelines owner (%--primitive-u64 remaining 1)))))))
+
+(%function main () i64
+  (let
+    ((owner llvm:session (llvm:create "passes"))
+     (ty t:type-ref (ir:int-type (field owner context) 32))
+     (function t:value-ref
+       (ir:function-add (field owner module) "answer" (ir:function-type ty (& ty) 0 0)))
+     (block t:block-ref (ir:block-append (field owner context) function "entry")))
+    (do
+      (ir:builder-position (field owner builder) block)
+      (ir:build-ret (field owner builder) (ir:const-int ty 42 0))
+      (ir:builder-clear (field owner builder))
+      (let
+        ((errors-ok bool (invalid-pipelines owner 8))
+         (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+         (status i32
+           (passes:run (field owner module)
+             (cast t:machine-ref (target:null-pointer)) "default<O2>" (& message)))
+         (success-null bool (b:is-null message)))
+        (do
+          (if (b:is-null message) unit (do (ir:message-dispose message) unit))
+          (let
+            ((verification (pointer u8) (cast (pointer u8) (target:null-pointer)))
+             (valid i32 (llvm:verify owner (& verification))))
+            (do
+              (if (b:is-null verification) unit
+                (do (ir:message-dispose verification) unit))
+              (llvm:destroy owner)
+              (if (b:and-then errors-ok success-null
+                    (%=-primitive-i32 status 0) (%=-primitive-i32 valid 0)) 0 1))))))))
