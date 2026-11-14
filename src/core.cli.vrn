@@ -275,7 +275,12 @@
    (links link:options)
    (kind (pointer u8))) exit-code
   (let
-    ((owner llvm:session (emit:build c all main (equal mode "compile-report")))
+    ((owner
+       llvm:session
+       (emit:build
+         c all main (equal mode "compile-report")
+         (base:or (equal mode "emit-llvm")
+           (base:not (equal optimization "-O0")))))
      (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
      (status i32 (llvm:verify owner (& message)))
      (result
@@ -1030,7 +1035,7 @@
 (base:function is-version-command ((argc i32) (argv (pointer (pointer u8))))
   bool
   (base:and-then
-    (base:not (< argc 2))
+    (== argc 2)
     (let ((command (pointer u8) (deref (pointer-offset argv 1))))
       (base:or (equal command "--version") (equal command "-V")))))
 

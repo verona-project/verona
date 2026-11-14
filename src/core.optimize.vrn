@@ -1,0 +1,25 @@
+(import base)
+(import core.model :as m)
+
+; Read-only checked-expression rewrites. Call only after successful checking.
+; Never replace tape nodes: binders, sibling links, source spans, and shared
+; specialization identities remain owned by the checked program. Returning an
+; existing branch ID lets lowering keep its normal expression/LLVM slot mapping.
+; This local rule allocates nothing, grows no graph, and needs no fixed point.
+; Zero means no rewrite. Only a typed boolean literal can be discarded here;
+; calls, loads, references, and other computations remain conservative.
+(base:function known-branch ((c m:context) (condition u64)) u64
+  (let ((v m:node (m:at c condition)))
+    (match
+      (base:and
+        ; Node kind 3 is a boolean literal in core.model's checked tape.
+        (== (field v kind) 3)
+        ; Type 2 is bool. Reject untyped macro booleans, which have ty=0.
+        (== (field v ty) 2))
+      (false 0)
+      (true
+        (match (field v value)
+          (0 (m:next c (m:next c condition)))
+          (_ (m:next c condition)))))))
+
+(export known-branch)

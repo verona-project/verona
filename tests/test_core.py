@@ -3142,6 +3142,37 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(message, result.stderr)
 
+    def test_known_boolean_branch_elimination(self):
+        for expression in (
+            "(if true 42 (%/-primitive-i64 1 0))",
+            "(if false (%/-primitive-i64 1 0) 42)",
+            "(if true (if false 0 42) 0)",
+        ):
+            with self.subTest(expression=expression):
+                source = self.program(expression)
+                self.agrees(source, 42)
+                emitted = self.run_core("emit-llvm", source)
+                self.assertEqual(emitted.returncode, 0, emitted.stderr)
+                self.assertNotIn("then:", emitted.stdout)
+                self.assertNotIn("else:", emitted.stdout)
+                self.assertNotIn("phi i64", emitted.stdout)
+
+        # A call condition must still execute, even when its body returns true.
+        source = """
+(%function mark ((p (pointer i64))) bool (do (store (deref p) 42) true))
+(%function main () i64
+  (let ((value i64 0)) (do (if (mark (& value)) (cast i64 0) (cast i64 1)) value)))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("phi i64", emitted.stdout)
+
+        # Optimization cannot conceal an error in the unused branch.
+        for expression in ("(if true 42 missing)", "(if false missing 42)"):
+            result = self.run_core("emit-llvm", self.program(expression))
+            self.assertEqual(result.returncode, 2, result.stderr)
+
     def test_llvm_library_and_linker_boundary(self):
         environment = dict(os.environ, VERONA_CORE_CLANG="/nonexistent/compiler")
         source = "(%function choose ((x i64)) i64 (if (%<-primitive-i64 x 0) 7 (%+-primitive-i64 x 2)))" + self.program("(choose 40)")

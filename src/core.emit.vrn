@@ -17,6 +17,7 @@
 (import core.layout :as layout)
 (import core.cabi :as cabi)
 (import core.format :as format)
+(import core.optimize :as optimize)
 
 ; Every checked node/binder/function has a unique syntax index. Its LLVM value
 ; lives in the matching slot, so lexical shadowing requires no textual names.
@@ -28,7 +29,8 @@
     (owner llvm:session)
     (slots (pointer t:value-ref))
     (helpers (pointer t:value-ref))
-    (abi cabi:context)))
+    (abi cabi:context)
+    (optimize bool)))
 
 ; Read a previously populated LLVM handle slot using its checked syntax/binder identity.
 (base:function get ((b backend) (id u64)) t:value-ref
@@ -856,7 +858,14 @@
           (match (uses-storage c id)
             (true (load-place c b id))
             (false (get b (field v target)))))
-        (6 (conditional c b args))
+        (6
+          (let ((selected u64
+                   (match (field b optimize)
+                     (true (optimize:known-branch c args))
+                     (false 0))))
+            (match selected
+              (0 (conditional c b args))
+              (_ (expression c b selected)))))
         (7 (bindings c b (m:child c args) (m:next c args)))
         (8
           (let
@@ -1725,7 +1734,8 @@
 ; Build a module containing runtime helpers, checked functions, and a native main wrapper.
 ; The wrapper either reports the full result or returns its low byte.
 ; The caller owns and must destroy the returned session.
-(base:function build ((c m:context) (all u64) (main u64) (report bool))
+(base:function build
+  ((c m:context) (all u64) (main u64) (report bool) (optimized bool))
   llvm:session
   (let
     ((owner llvm:session (llvm:create "verona.core"))
@@ -1735,7 +1745,8 @@
          owner
          (layout:values c (tuple-get (deref (field c items)) 1))
          (runtime c owner)
-         (cabi:create c owner))))
+         (cabi:create c owner)
+         optimized)))
     (do
       (external-declarations c b all)
       (declarations c b all)
