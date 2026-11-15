@@ -129,13 +129,12 @@
 ; These rules allocate nothing, grow no graph, and need no fixed point.
 ; Zero means no branch rewrite. Only proven constant boolean computations
 ; can be discarded here; calls, loads, and references remain conservative.
-(base:function known-branch ((c m:context) (condition u64)) u64
+(base:function known-branch ((c m:context) (condition u64) (depth u64)) u64
   (let ((v m:node (m:at c condition)))
     ; Type 2 is bool. Reject untyped macro booleans, which have ty=0.
     (match (field v ty)
       (2
-        ; At most 32 levels of constant expression nesting per query.
-        (match (constant c condition 32)
+        (match (constant c condition depth)
           ((unknown) 0)
           ((known value)
             (match value
@@ -148,7 +147,7 @@
 (base:type pattern-result (sum (matches) (rejects) (undecided)))
 
 (base:function components
-  ((c m:context) (names u64) (values u64) (fuel u64)) pattern-result
+  ((c m:context) (names u64) (values u64) (fuel u64) (depth u64)) pattern-result
   (match fuel
     (0 (undecided))
     (_
@@ -161,22 +160,22 @@
               (let ((pattern m:node (m:at c names)))
                 (match (field pattern kind)
                   (0 ; A checked component binder or wildcard always matches.
-                    (components c (m:next c names) (m:next c values) (- fuel 1)))
+                    (components c (m:next c names) (m:next c values) (- fuel 1) depth))
                   (_
                     ; Only known integer/boolean literal comparisons simplify.
-                    (match (constant c values 32)
+                    (match (constant c values depth)
                       ((unknown) (undecided))
                       ((known value)
                         (match (== value (field pattern value))
                           (false (rejects))
                           (true
                             (components c (m:next c names) (m:next c values)
-                              (- fuel 1))))))))))))))))
+                              (- fuel 1) depth)))))))))))))))
 
 ; TARGET is a one-based sum tag, or 1 for a tuple pattern. Arm target 0 is
 ; a whole-value binder/wildcard. Identities and sibling chains stay untouched.
 (base:function structured-arms
-  ((c m:context) (arm u64) (target u64) (values u64) (fuel u64)) u64
+  ((c m:context) (arm u64) (target u64) (values u64) (fuel u64) (depth u64)) u64
   (match fuel
     (0 0)
     (_
@@ -188,13 +187,13 @@
               ((== tag 0) arm)
               ((== tag target)
                (match
-                 (components c (m:next c (m:child c (m:child c arm))) values fuel)
+                 (components c (m:next c (m:child c (m:child c arm))) values fuel depth)
                  ((matches) arm)
                  ((undecided) 0)
                  ((rejects)
-                   (structured-arms c (m:next c arm) target values (- fuel 1)))))
+                   (structured-arms c (m:next c arm) target values (- fuel 1) depth))))
               (true
-                (structured-arms c (m:next c arm) target values (- fuel 1))))))))))
+                (structured-arms c (m:next c arm) target values (- fuel 1) depth)))))))))
 
 (base:function scalar-arms
   ((c m:context) (arm u64) (value i64) (fuel u64)) u64
@@ -216,29 +215,30 @@
 ; Only direct sum/tuple construction and proven scalar constants are supported.
 ; Scan at most 128 arms/components, with the existing 32-level folding budget.
 (base:function known-match
-  ((c m:context) (scrutinee u64) (sum bool) (tuple bool)) u64
+  ((c m:context) (scrutinee u64) (sum bool) (tuple bool)
+   (depth u64) (arms u64)) u64
   (let
     ((v m:node (m:at c scrutinee))
-     (arms u64 (m:next c scrutinee))
+     (first u64 (m:next c scrutinee))
      (values u64 (m:next c (field v child))))
     (match sum
       (true
         (match (field v kind)
           (15 ; Checked sum constructor; its descriptor stores a zero-based tag.
-            (structured-arms c arms
-              (+ (field (m:at c (field v target)) target) 1) values 128))
+            (structured-arms c first
+              (+ (field (m:at c (field v target)) target) 1) values arms depth))
           (_ 0)))
       (false
         (match tuple
           (true
             (match (field v kind)
               (13 ; Checked aggregate construction, with a resolved tuple type.
-                (structured-arms c arms 1 values 128))
+                (structured-arms c first 1 values arms depth))
               (_ 0)))
           (false
-            (match (constant c scrutinee 32)
+            (match (constant c scrutinee depth)
               ((unknown) 0)
-              ((known value) (scalar-arms c arms value 128)))))))))
+              ((known value) (scalar-arms c first value arms)))))))))
 
 ; One byte per checked tape identity. Scan the complete tape once, including
 ; references in other initializers and currently unreachable branches. Counting
@@ -340,12 +340,11 @@
 ; USED must be the reference table from an enabled analysis. Stored locals are
 ; retained defensively even when no ordinary checked reference was found.
 (base:function dead-binding
-  ((c m:context) (used (pointer u8)) (id u64)) bool
+  ((c m:context) (used (pointer u8)) (id u64) (depth u64)) bool
   (let ((name u64 (m:child c id)))
     (base:and-then
       (== (deref (pointer-offset used name)) (cast u8 0))
       (base:not (check:stored-binder c name))
-      ; Bound each proof to 32 levels; uncertainty preserves the initializer.
-      (discardable c (field (m:at c id) target) 32))))
+      (discardable c (field (m:at c id) target) depth))))
 
 (export constant-result constant known-branch known-match references dead-binding)

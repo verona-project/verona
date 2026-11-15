@@ -22,6 +22,7 @@
 (import core.eval :as eval)
 (import core.emit :as emit)
 (import core.inline :as inline)
+(import core.passes :as optimization)
 (import core.link :as link)
 (import core.header :as header)
 (import core.format :as format)
@@ -309,12 +310,17 @@
    (links link:options)
    (kind (pointer u8))) exit-code
   (let
-    ((owner
+    ((snapshot unit
+       (match (equal mode "optimization-report")
+         (true (optimization:dump c "before-lowering"))
+         (false unit)))
+     (owner
        llvm:session
        (emit:build
          c all main (equal mode "compile-report")
-         (base:or (equal mode "emit-llvm")
-           (base:not (equal optimization "-O0")))))
+         (base:or (equal mode "emit-llvm") (equal mode "optimization-report")
+           (base:not (equal optimization "-O0")))
+         (equal mode "optimization-report")))
      (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
      (status i32 (llvm:verify owner (& message)))
      (result
@@ -323,7 +329,9 @@
          (0
            (do
              (dispose-message message)
-             (match (equal mode "emit-llvm")
+             (match (equal mode "optimization-report")
+               (true (do (optimization:dump c "after-lowering") 0))
+               (false (match (equal mode "emit-llvm")
                (true
                  (let
                    ((text (pointer u8) (ir:module-string (field owner module))))
@@ -344,7 +352,7 @@
                          (equal kind "shared-library")))
                      (true
                        (match (header:write c all output) (true 0) (false 2)))
-                     (false code)))))))
+                     (false code)))))))))
          (_ (do (llvm-error message) 2)))))
     (do (llvm:destroy owner) result)))
 
@@ -600,7 +608,7 @@
   (do
     (m:text
       c:STDERR-FILENO
-      "usage: verona {read|check|eval|emit-llvm} FILE [--module-path DIRECTORY ...] [--feature NAME ...] [--target TRIPLE]\n       verona {compile|compile-report} FILE [-o OUTPUT] [--emit object|executable|static-library|shared-library] [-O0|-O1|-O2|-O3] [--module-path DIRECTORY ...] [--library NAME ...] [--library-path DIRECTORY ...] [--framework NAME ...] [--feature NAME ...] [--target TRIPLE] [--cpu CPU] [--features FEATURES]\n       verona build TARGET OUTPUT-DIRECTORY [--feature NAME ...]\n       verona {--version|-V}\n")
+      "usage: verona {read|check|eval|emit-llvm|optimization-report} FILE [--module-path DIRECTORY ...] [--feature NAME ...] [--target TRIPLE]\n       verona {compile|compile-report} FILE [-o OUTPUT] [--emit object|executable|static-library|shared-library] [-O0|-O1|-O2|-O3] [--module-path DIRECTORY ...] [--library NAME ...] [--library-path DIRECTORY ...] [--framework NAME ...] [--feature NAME ...] [--target TRIPLE] [--cpu CPU] [--features FEATURES]\n       verona build TARGET OUTPUT-DIRECTORY [--feature NAME ...]\n       verona {--version|-V}\n")
     2))
 
 ; Parse module search paths and grouped native link options in command-line order.
@@ -909,6 +917,7 @@
              (equal mode "check")
              (equal mode "eval")
              (equal mode "emit-llvm")
+             (equal mode "optimization-report")
              compile))
          (memory arena:arena (arena:create (system:create) 4096))
          (machine machine-options (machine-options "native" "generic" ""))
@@ -1090,7 +1099,8 @@
              (equal command "read")
              (equal command "check")
              (equal command "eval")
-             (equal command "emit-llvm"))
+             (equal command "emit-llvm")
+             (equal command "optimization-report"))
            (source-command argc argv))
           ((base:or-else
              (equal command "compile")

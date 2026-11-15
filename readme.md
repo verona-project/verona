@@ -71,7 +71,7 @@ tools. For a source release, pass the recorded seed artifact explicitly with
 ## Command line options
 
 ```text
-verona {read|check|eval|emit-llvm} FILE [OPTIONS]
+verona {read|check|eval|emit-llvm|optimization-report} FILE [OPTIONS]
 verona {compile|compile-report} FILE [OPTIONS]
 verona build TARGET OUTPUT-DIRECTORY [--feature NAME ...]
 verona {--version|-V}
@@ -100,6 +100,18 @@ Static and shared libraries with native exports also receive a C header.
 `read` prints the indexed syntax tree, `check` performs analysis without
 execution, `eval` evaluates the checked program, and `emit-llvm` writes LLVM IR.
 `compile-report` creates an executable that prints the complete typed result.
+
+`optimization-report FILE` runs the checked simplifications during LLVM lowering
+without producing a native artifact. It writes deterministic `before-lowering`
+and `after-lowering` tape summaries to stdout, and applied-rule remarks with
+source locations and checked node IDs to stderr. The tape summaries match:
+these passes select existing nodes or values without rewriting the checked tape.
+Summaries include kind, type, child/next IDs and source ranges; pointer-bearing
+payloads are omitted. Remarks cover constant folding, known branches/matches,
+and discarded local bindings actually encountered during lowering. They are
+not an inventory of all possible rewrites in unreachable subtrees. Like
+`emit-llvm`, this command uses enabled local simplification and accepts source
+options, not native output options or `-O` flags. It does not run LLVM passes.
 
 Native compilation at `-O1`, `-O2`, and `-O3` runs LLVM's corresponding standard
 optimization pipeline with the configured target machine before object emission.

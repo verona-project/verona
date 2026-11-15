@@ -17,7 +17,7 @@
 (import core.layout :as layout)
 (import core.cabi :as cabi)
 (import core.format :as format)
-(import core.optimize :as optimize)
+(import core.passes :as passes)
 (import core.inline :as inline)
 
 ; Every checked node/binder/function has a unique syntax index. Its LLVM value
@@ -31,8 +31,7 @@
     (slots (pointer t:value-ref))
     (helpers (pointer t:value-ref))
     (abi cabi:context)
-    (optimize bool)
-    (references (pointer u8))))
+    (passes passes:context)))
 
 ; Read a previously populated LLVM handle slot using its checked syntax/binder identity.
 (base:function get ((b backend) (id u64)) t:value-ref
@@ -478,8 +477,7 @@
       (let ((name u64 (m:child c id)) (init u64 (field (m:at c id) target)))
         (do
           (match
-            (base:and-then (field b optimize)
-              (optimize:dead-binding c (field b references) id))
+            (passes:dead (field b passes) id)
             (true unit)
             (false (bind-binder c b name (expression c b init))))
           (bindings c b (m:next c id) body))))))
@@ -806,8 +804,7 @@
 ; Resolved binder/function slots provide local references and direct call targets.
 (base:function expression ((c m:context) (b backend) (id u64)) t:value-ref
   (match
-    ; Zero disables folding; otherwise bound depth to 32.
-    (optimize:constant c id (match (field b optimize) (true 32) (false 0)))
+    (passes:fold (field b passes) id)
     ((known value)
       (put b id (word (field b owner) (field (m:at c id) ty) value)))
     ((unknown) (expression-unfolded c b id))))
@@ -886,10 +883,7 @@
             (true (load-place c b id))
             (false (get b (field v target)))))
         (6
-          (let ((selected u64
-                   (match (field b optimize)
-                     (true (optimize:known-branch c args))
-                     (false 0))))
+          (let ((selected u64 (passes:branch (field b passes) id args)))
             (match selected
               (0 (conditional c b args))
               (_ (expression c b selected)))))
@@ -1231,10 +1225,7 @@
   (let
     ((value t:value-ref (expression c b args))
      (tuple bool (== (check:type-kind c (field (m:at c args) ty)) 22))
-     (arm u64
-       (match (field b optimize)
-         (true (optimize:known-match c args sum tuple))
-         (false 0))))
+     (arm u64 (passes:arm (field b passes) id args sum tuple)))
     (match arm
       (0 (match-value-unfolded c b id args sum value))
       (_
@@ -1780,7 +1771,7 @@
 ; The wrapper either reports the full result or returns its low byte.
 ; The caller owns and must destroy the returned session.
 (base:function build
-  ((c m:context) (all u64) (main u64) (report bool) (optimized bool))
+  ((c m:context) (all u64) (main u64) (report bool) (optimized bool) (remarks bool))
   llvm:session
   (let
     ((owner llvm:session (llvm:create "verona.core"))
@@ -1791,8 +1782,7 @@
          (layout:values c (tuple-get (deref (field c items)) 1))
          (runtime c owner)
          (cabi:create c owner)
-         optimized
-         (optimize:references c optimized))))
+         (passes:prepare c optimized remarks (passes:defaults)))))
     (do
       (external-declarations c b all)
       (declarations c b all)

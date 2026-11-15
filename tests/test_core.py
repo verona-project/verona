@@ -3289,6 +3289,69 @@ int main(int argc, char **argv) {
             self.assertEqual(native.stdout, "")
             self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
 
+    def test_optimization_report_decisions_and_stable_tape(self):
+        source = """
+(%function main () i64
+  (let ((unused (%+-primitive-i64 1 2)))
+    (if (%=-primitive-i64 1 1)
+      (match (cast i64 42) (42 (%+-primitive-i64 40 2)) (_ 0)) 0)))
+"""
+        first = self.run_core("optimization-report", source)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        before, after = first.stdout.removeprefix("before-lowering\n").split("after-lowering\n")
+        self.assertEqual(before, after)
+        rows = before.splitlines()
+        ids = [int(re.match(r"node (\d+) ", row).group(1)) for row in rows]
+        self.assertEqual(ids, list(range(1, len(ids) + 1)))
+        for rule in ("dead-binding", "known-branch", "known-match", "constant-fold"):
+            self.assertIn(f"optimization: {rule} node=", first.stderr)
+        self.assertRegex(first.stderr, r"input\.vrn:\d+:\d+: optimization:")
+        second = self.run_core("optimization-report", source)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual((first.stdout, first.stderr), (second.stdout, second.stderr))
+        self.agrees(source, 42)
+        ordinary = self.run_core("emit-llvm", source)
+        self.assertEqual(ordinary.returncode, 0, ordinary.stderr)
+        self.assertEqual(ordinary.stderr, "")
+
+    def test_optimization_report_checks_before_passes(self):
+        result = self.run_core("optimization-report", self.program("(if true 42 missing)"))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("unknown local name", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn("optimization:", result.stderr)
+        for option in ("-O0", "-o", "--emit"):
+            rejected = self.run_core("optimization-report", self.program("42"), option)
+            self.assertEqual(rejected.returncode, 2, rejected.stderr)
+
+    def test_optimization_report_preserves_specializations_and_callbacks(self):
+        source = """
+(%type Callback (pointer (function (i64) i64)))
+(%function increment ((value i64)) i64 (%+-primitive-i64 value 1))
+(%function choose (for (a)) ((value a)) a value)
+(%function main () i64
+  (let ((callback Callback increment) (unused (choose (cast u8 0))))
+    (callback (choose (cast i64 41)))))
+"""
+        report = self.run_core("optimization-report", source)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        before, after = report.stdout.removeprefix("before-lowering\n").split("after-lowering\n")
+        self.assertEqual(before, after)
+        self.agrees(source, 42)
+
+    def test_optimization_report_locations_and_budget_fallback(self):
+        (self.root / "dep.vrn").write_text(
+            "(%function answer () i64 (%+-primitive-i64 40 2)) (export answer)")
+        imported = self.run_core("optimization-report", "(import dep)" + self.program("(dep:answer)"))
+        self.assertEqual(imported.returncode, 0, imported.stderr)
+        self.assertRegex(imported.stderr, r"dep\.vrn:1:\d+: optimization: constant-fold")
+        arms = " ".join(f"({value} 0)" for value in range(130))
+        source = self.program(f"(match (cast i64 130) {arms} (_ 42))")
+        report = self.run_core("optimization-report", source)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertNotIn("optimization: known-match", report.stderr)
+        self.agrees(source, 42)
+
     def test_eta_forwarder_preserves_identity(self):
         self.agrees("""
 (%type Callback (pointer (function (i64) i64)))
