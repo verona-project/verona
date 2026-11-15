@@ -834,3 +834,14 @@ runtime savings against code growth and compile cost. Verona has no
 candidate-cloning pass or speculative budget/remark model. That policy remains
 open; this test records the existing LLVM baseline and prevents overstating it
 as speculative inlining.
+
+### Cross-block common subexpression elimination: existing LLVM GVN verified
+
+The pinned LLVM 23 optimized pipelines include `early-cse` and `gvn`. A
+structural regression keeps a function body live with runtime external inputs,
+checks that Verona's pre-pipeline IR contains a repeated multiplication in a
+conditional block, then runs `default<O2>` and verifies the dominating value is
+reused and only one multiplication remains. This is broader than Verona's
+initial sibling-only local CSE. No CFG or cross-block value-numbering table is
+added to the Verona checked-graph pass; LLVM owns availability, alias and
+profitability decisions.
