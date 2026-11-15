@@ -3289,6 +3289,111 @@ int main(int argc, char **argv) {
             self.assertEqual(native.stdout, "")
             self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
 
+    def test_constant_propagation_aliases_select_branches_and_matches(self):
+        source = """
+(%function main () i64
+  (let ((seed i64 40) (alias seed) (answer (%+-primitive-i64 alias 2))
+        (ready (%=-primitive-i64 answer 42)) (unused (%/-primitive-i64 answer 1)))
+    (if ready (match answer (42 answer) (_ 0)) 0)))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertNotIn("then", emitted.stdout)
+        self.assertNotIn("match.end", emitted.stdout)
+        self.assertNotIn("add i64", emitted.stdout)
+        self.assertNotIn("call i64 @core.div", emitted.stdout)
+        report = self.run_core("optimization-report", source)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        for rule in ("constant-propagation", "known-branch", "known-match", "dead-binding"):
+            self.assertIn(f"optimization: {rule} node=", report.stderr)
+
+    def test_constant_propagation_shadowing_and_specializations(self):
+        self.agrees("""
+(%function pick (for (a)) ((value a)) a
+  (let ((copy value)) (let ((value copy)) value)))
+(%function main () i64
+  (let ((value i64 40) (saved value)
+        (other (let ((value u8 2) (alias value)) (pick alias))))
+    (%+-primitive-i64 (pick saved) (%zext-primitive-u8-i64 other))))
+""", 42)
+        source = """
+(%function choose ((flag bool)) i64 (let ((alias flag)) (if alias 42 0)))
+(%function main () i64 (choose true))
+"""
+        self.agrees(source, 42)
+        report = self.run_core("optimization-report", source)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertNotIn("optimization: known-branch", report.stderr)
+
+    def test_constant_propagation_integer_widths(self):
+        for ty, initial, expression, expected in (
+                ("i8", "127", "(%sext-primitive-i8-i64 (%+-primitive-i8 alias 1))", -128),
+                ("u8", "255", "(%zext-primitive-u8-i64 (%+-primitive-u8 alias 1))", 0),
+                ("u64", "18446744073709551615",
+                 "(%reinterpret-primitive-u64-i64 (%/-primitive-u64 alias 2))", 9223372036854775807)):
+            with self.subTest(ty=ty):
+                self.agrees(self.program(
+                    f"(let ((value {ty} {initial}) (alias value)) {expression})"), expected)
+
+    def test_constant_propagation_preserves_storage_and_effects(self):
+        self.agrees("""
+(%function replace ((place (pointer i64))) unit (store (deref place) 2))
+(%function main () i64
+  (let ((value i64 40) (pointer (& value)) (snapshot value))
+    (replace pointer)
+    (%+-primitive-i64 snapshot value)))
+""", 42)
+        self.agrees("""
+(%variable total i64 40)
+(%function replace () unit (store total 2))
+(%function main () i64
+  (let ((snapshot total)) (replace) (%+-primitive-i64 snapshot total)))
+""", 42)
+        source = """
+(%variable calls i64 0)
+(%function obtain () i64 (do (store calls (%+-primitive-i64 calls 1)) 21))
+(%function main () i64
+  (let ((value (obtain)) (alias value))
+    (if (%=-primitive-i64 calls 1) (%+-primitive-i64 value alias) 0)))
+"""
+        self.agrees(source, 42)
+        report = self.run_core("optimization-report", source)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertNotIn("optimization: constant-propagation", report.stderr)
+        self.assertNotIn("optimization: known-branch", report.stderr)
+
+    def test_constant_propagation_preserves_failures(self):
+        for numerator, denominator, message in (
+                ("1", "0", "division by zero"),
+                ("-9223372036854775808", "-1", "division overflow")):
+            with self.subTest(message=message):
+                source = self.program(f"""
+(let ((top i64 {numerator}) (bottom i64 {denominator})
+      (unused (%/-primitive-i64 top bottom))) 42)
+""")
+                evaluated = self.run_core("eval", source)
+                self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
+                self.assertIn(message, evaluated.stderr)
+                for level in ("-O0", "-O2"):
+                    binary = self.root / "propagation-failure"
+                    compiled = self.run_core("compile-report", source, "-o", binary, level)
+                    self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                    native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+                    self.assertEqual(native.returncode, 70, native.stderr)
+                    self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+
+    def test_constant_propagation_alias_budget(self):
+        bindings = ["(v0 bool true)"] + [f"(v{i} v{i - 1})" for i in range(1, 40)]
+        source = self.program(f"(let ({' '.join(bindings)}) (if v39 42 0))")
+        self.agrees(source, 42)
+        report = self.run_core("optimization-report", source)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertNotIn("optimization: known-branch", report.stderr)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("then", emitted.stdout)
+
     def test_optimization_report_decisions_and_stable_tape(self):
         source = """
 (%function main () i64

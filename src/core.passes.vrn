@@ -16,14 +16,21 @@
     (enabled bool)
     (remarks bool)
     (budget limits)
-    (references (pointer u8))))
+    (references (pointer u8))
+    (initializers (pointer u64))))
 
 (base:function defaults () limits
   (limits 32 128))
 
 (base:function prepare
   ((c m:context) (enabled bool) (remarks bool) (budget limits)) context
-  (context c enabled remarks budget (simplify:references c enabled)))
+  (context
+    c
+    enabled
+    remarks
+    budget
+    (simplify:references c enabled)
+    (simplify:initializers c enabled)))
 
 ; Remarks never increment the semantic error count. Node IDs and source spans
 ; refer to the original checked program, including imported module locations.
@@ -48,6 +55,7 @@
        simplify:constant-result
        (simplify:constant
          (field p program)
+         (field p initializers)
          id
          (match (field p enabled)
            (true (field (field p budget) depth))
@@ -58,6 +66,7 @@
          ; Literal emission is not a simplification decision.
          (match (field (m:at (field p program) id) kind)
            (9 (remark p id "constant-fold" 0))
+           (5 (remark p id "constant-propagation" 0))
            (_ unit)))
         (_ unit))
       result)))
@@ -70,6 +79,7 @@
          (true
            (simplify:known-branch
              (field p program)
+             (field p initializers)
              condition
              (field (field p budget) depth)))
          (false 0))))
@@ -86,6 +96,7 @@
          (true
            (simplify:known-match
              (field p program)
+             (field p initializers)
              scrutinee
              sum
              tuple
@@ -104,6 +115,7 @@
          (field p enabled)
          (simplify:dead-binding
            (field p program)
+           (field p initializers)
            (field p references)
            id
            (field (field p budget) depth)))))

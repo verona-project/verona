@@ -77,10 +77,11 @@
                   (num:pow2 (num:remainder right (num:width ty)))))))
           (_ (unknown)))))))
 
-; Read-only folding of checked literals and primitive-only expression trees.
-; No references, calls, memory accesses, pointer operations, or floating point.
+; Read-only folding of checked literals, immutable local aliases and resolved
+; primitive trees. No calls, memory accesses, pointers or floating-point folding.
 ; Fuel bounds nesting; exhausting it leaves normal lowering in control.
-(base:function constant ((c m:context) (id u64) (fuel u64)) constant-result
+(base:function constant
+  ((c m:context) (locals (pointer u64)) (id u64) (fuel u64)) constant-result
   (match fuel
     (0 (unknown))
     (_
@@ -92,18 +93,30 @@
               (false (unknown))))
           (3 ; Boolean literal; type 2 excludes untyped macro syntax.
             (match (field v ty) (2 (known (field v value))) (_ (unknown))))
+          (5 ; Only immutable let binders have an initializer entry.
+            (match (base:or (== (field v ty) 2) (num:integer-type (field v ty)))
+              (false (unknown))
+              (true
+                (match (deref (pointer-offset locals (field v target)))
+                  (0 (unknown))
+                  (init (constant c locals init (- fuel 1)))))))
           (9 ; Checked primitive with a resolved opcode and concrete types.
             (let
               ((args u64 (m:next c (field v child)))
                (ty u64 (field (m:at c args) ty)))
               (match (base:or (== ty 2) (num:integer-type ty))
                 (false (unknown))
-                (true (primitive c v args ty (- fuel 1))))))
+                (true (primitive c locals v args ty (- fuel 1))))))
           (_ (unknown)))))))
 
 (base:function primitive
-  ((c m:context) (v m:node) (args u64) (ty u64) (fuel u64)) constant-result
-  (match (constant c args fuel)
+  ((c m:context)
+   (locals (pointer u64))
+   (v m:node)
+   (args u64)
+   (ty u64)
+   (fuel u64)) constant-result
+  (match (constant c locals args fuel)
     ((unknown) (unknown))
     ((known a)
      (match (field v target)
@@ -117,7 +130,7 @@
          (match (m:next c args)
            (0 (unknown))
            (right
-             (match (constant c right fuel)
+             (match (constant c locals right fuel)
                ((unknown) (unknown))
                ((known b) (binary (field v target) ty a b))))))))))
 
@@ -128,12 +141,13 @@
 ; These rules allocate nothing, grow no graph, and need no fixed point.
 ; Zero means no branch rewrite. Only proven constant boolean computations
 ; can be discarded here; calls, loads, and references remain conservative.
-(base:function known-branch ((c m:context) (condition u64) (depth u64)) u64
+(base:function known-branch
+  ((c m:context) (locals (pointer u64)) (condition u64) (depth u64)) u64
   (let ((v m:node (m:at c condition)))
     ; Type 2 is bool. Reject untyped macro booleans, which have ty=0.
     (match (field v ty)
       (2
-        (match (constant c condition depth)
+        (match (constant c locals condition depth)
           ((unknown) 0)
           ((known value)
            (match value
@@ -146,7 +160,12 @@
 (base:type pattern-result (sum (matches) (rejects) (undecided)))
 
 (base:function components
-  ((c m:context) (names u64) (values u64) (fuel u64) (depth u64)) pattern-result
+  ((c m:context)
+   (locals (pointer u64))
+   (names u64)
+   (values u64)
+   (fuel u64)
+   (depth u64)) pattern-result
   (match fuel
     (0 (undecided))
     (_
@@ -161,13 +180,14 @@
                   (0 ; A checked component binder or wildcard always matches.
                     (components
                       c
+                      locals
                       (m:next c names)
                       (m:next c values)
                       (- fuel 1)
                       depth))
                   (_
                     ; Only known integer/boolean literal comparisons simplify.
-                    (match (constant c values depth)
+                    (match (constant c locals values depth)
                       ((unknown) (undecided))
                       ((known value)
                        (match (== value (field pattern value))
@@ -175,6 +195,7 @@
                          (true
                            (components
                              c
+                             locals
                              (m:next c names)
                              (m:next c values)
                              (- fuel 1)
@@ -183,7 +204,13 @@
 ; TARGET is a one-based sum tag, or 1 for a tuple pattern. Arm target 0 is
 ; a whole-value binder/wildcard. Identities and sibling chains stay untouched.
 (base:function structured-arms
-  ((c m:context) (arm u64) (target u64) (values u64) (fuel u64) (depth u64)) u64
+  ((c m:context)
+   (locals (pointer u64))
+   (arm u64)
+   (target u64)
+   (values u64)
+   (fuel u64)
+   (depth u64)) u64
   (match fuel
     (0 0)
     (_
@@ -197,6 +224,7 @@
                (match
                  (components
                    c
+                   locals
                    (m:next c (m:child c (m:child c arm)))
                    values
                    fuel
@@ -206,6 +234,7 @@
                  ((rejects)
                   (structured-arms
                     c
+                    locals
                     (m:next c arm)
                     target
                     values
@@ -214,6 +243,7 @@
               (true
                 (structured-arms
                   c
+                  locals
                   (m:next c arm)
                   target
                   values
@@ -241,8 +271,13 @@
 ; Only direct sum/tuple construction and proven scalar constants are supported.
 ; Scan at most 128 arms/components, with the existing 32-level folding budget.
 (base:function known-match
-  ((c m:context) (scrutinee u64) (sum bool) (tuple bool) (depth u64) (arms u64))
-  u64
+  ((c m:context)
+   (locals (pointer u64))
+   (scrutinee u64)
+   (sum bool)
+   (tuple bool)
+   (depth u64)
+   (arms u64)) u64
   (let
     ((v m:node (m:at c scrutinee))
      (first u64 (m:next c scrutinee))
@@ -253,6 +288,7 @@
           (15 ; Checked sum constructor; its descriptor stores a zero-based tag.
             (structured-arms
               c
+              locals
               first
               (+ (field (m:at c (field v target)) target) 1)
               values
@@ -264,10 +300,10 @@
           (true
             (match (field v kind)
               (13 ; Checked aggregate construction, with a resolved tuple type.
-                (structured-arms c first 1 values arms depth))
+                (structured-arms c locals first 1 values arms depth))
               (_ 0)))
           (false
-            (match (constant c scrutinee depth)
+            (match (constant c locals scrutinee depth)
               ((unknown) 0)
               ((known value) (scalar-arms c first value arms)))))))))
 
@@ -314,9 +350,69 @@
               (m:fatal "optimizer reference storage allocation failed")
               (cast (pointer u8) (m:empty-env)))))))))
 
+; Map resolved immutable let binder IDs to their checked initializer IDs.
+; Parameters, pattern binders, globals and stored/address-taken locals have no
+; entry. Initializers are borrowed, never moved or removed by this analysis.
+; Resolve chains on demand under the same depth budget as primitive folding.
+(base:function local-bindings
+  ((c m:context) (locals (pointer u64)) (binding u64)) unit
+  (match binding
+    (0 unit)
+    (_
+      (let ((name u64 (m:child c binding)))
+        (do
+          (match (check:stored-binder c name)
+            (true unit)
+            (false
+              (store
+                (deref (pointer-offset locals name))
+                (field (m:at c binding) target))))
+          (local-bindings c locals (m:next c binding)))))))
+
+(base:function initializer-range
+  ((c m:context) (locals (pointer u64)) (start u64) (count u64)) unit
+  (match count
+    (0 unit)
+    (1
+      (let ((v m:node (m:at c start)))
+        (match (field v kind)
+          (7 ; Checked let: bindings follow its operation head.
+            (local-bindings c locals (m:child c (m:next c (field v child)))))
+          (_ unit))))
+    (_
+      (let ((half u64 (/ count 2)))
+        (do
+          (initializer-range c locals start half)
+          (initializer-range c locals (+ start half) (- count half)))))))
+
+(base:function initializers ((c m:context) (enabled bool)) (pointer u64)
+  (match enabled
+    (false (cast (pointer u64) (m:empty-env)))
+    (true
+      ; Each tape identity gets one u64 initializer ID: eight bytes, aligned
+      ; to eight bytes on the supported 64-bit compiler hosts. Zero is unknown.
+      (let
+        ((count u64 (m:nodes-length (deref (field c items))))
+         (bytes u64 (* count 8)))
+        (match (arena:allocate (field c memory) bytes 8)
+          ((allocated p)
+           (let
+             ((locals
+                (pointer u64)
+                (cast (pointer u64) (cast (pointer void) p))))
+             (do
+               (memory:memset (cast (pointer void) locals) 0 bytes)
+               (initializer-range c locals 1 (- count 1))
+               locals)))
+          (_
+            (do
+              (m:fatal "optimizer initializer storage allocation failed")
+              (cast (pointer u64) (m:empty-env)))))))))
+
 ; A discardability proof, not a general purity/movement/duplication summary.
 ; Unknown nodes and exhausted budgets must keep their original evaluation.
-(base:function discardable-chain ((c m:context) (id u64) (fuel u64)) bool
+(base:function discardable-chain
+  ((c m:context) (locals (pointer u64)) (id u64) (fuel u64)) bool
   (match fuel
     (0 false)
     (_
@@ -324,10 +420,11 @@
         (0 true)
         (_
           (base:and-then
-            (discardable c id (- fuel 1))
-            (discardable-chain c (m:next c id) (- fuel 1))))))))
+            (discardable c locals id (- fuel 1))
+            (discardable-chain c locals (m:next c id) (- fuel 1))))))))
 
-(base:function discardable ((c m:context) (id u64) (fuel u64)) bool
+(base:function discardable
+  ((c m:context) (locals (pointer u64)) (id u64) (fuel u64)) bool
   (match fuel
     (0 false)
     (_
@@ -347,7 +444,7 @@
                 (true
                   (match op
                     (4 ; Division is discardable only when proven to succeed.
-                      (match (constant c id fuel)
+                      (match (constant c locals id fuel)
                         ((known value) true)
                         ((unknown) false)))
                     (_
@@ -358,23 +455,27 @@
                           (base:and
                             (== op 16) ; Integer-to-integer conversion.
                             (num:integer-type (field v ty))))
-                        (discardable-chain c args (- fuel 1)))))))))
-          (6 (discardable-chain c args (- fuel 1))) ; Condition and both branches.
-          (13 (discardable-chain c args (- fuel 1))) ; Product/tuple/array values.
-          (14 (discardable c args (- fuel 1))) ; Extract from a proven safe value.
-          (15 (discardable-chain c args (- fuel 1))) ; Sum constructor payloads.
-          (56 (discardable-chain c args (- fuel 1))) ; Sequence.
+                        (discardable-chain c locals args (- fuel 1)))))))))
+          (6 (discardable-chain c locals args (- fuel 1))) ; Condition and both branches.
+          (13 (discardable-chain c locals args (- fuel 1))) ; Product/tuple/array values.
+          (14 (discardable c locals args (- fuel 1))) ; Extract from a proven safe value.
+          (15 (discardable-chain c locals args (- fuel 1))) ; Sum constructor payloads.
+          (56 (discardable-chain c locals args (- fuel 1))) ; Sequence.
           (_ false))))))
 
 ; USED must be the reference table from an enabled analysis. Stored locals are
 ; retained defensively even when no ordinary checked reference was found.
 (base:function dead-binding
-  ((c m:context) (used (pointer u8)) (id u64) (depth u64)) bool
+  ((c m:context)
+   (locals (pointer u64))
+   (used (pointer u8))
+   (id u64)
+   (depth u64)) bool
   (let ((name u64 (m:child c id)))
     (base:and-then
       (== (deref (pointer-offset used name)) (cast u8 0))
       (base:not (check:stored-binder c name))
-      (discardable c (field (m:at c id) target) depth))))
+      (discardable c locals (field (m:at c id) target) depth))))
 
 (export
   constant-result
@@ -382,4 +483,5 @@
   known-branch
   known-match
   references
+  initializers
   dead-binding)
