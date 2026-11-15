@@ -791,6 +791,18 @@ and checks the runtime result. Optimization choices and clone counts remain
 LLVM-version and target dependent; the test does not promise that every
 constant call receives a clone.
 
+### Known-function argument specialization: existing LLVM support verified
+
+LLVM's function-specialization machinery also propagates constant function
+pointers. This can turn an indirect callback invocation into a direct call in
+a profitable clone. A regression runs the pinned O2 pipeline over a Verona
+function that accepts a known callback; it confirms the optimized module no
+longer contains an indirect call through an SSA function-pointer argument and
+checks the result against the evaluator. Existing library tests continue to
+cover exported APIs accepting genuinely dynamic callbacks from C, so this
+optimization does not narrow unknown incoming targets. LLVM controls whether
+and how many clones are created; Verona adds no callback-specific cloning pass.
+
 ### Temporary product scalar replacement: existing LLVM SROA audited
 
 Verona lowers tuple/product constructors and projections to LLVM `insertvalue`

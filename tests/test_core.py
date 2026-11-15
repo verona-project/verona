@@ -4123,6 +4123,29 @@ int main(int argc, char **argv) {
         self.assertEqual(optimized.returncode, 0, optimized.stderr)
         self.assertIn("@inspect_scalar", optimized.stdout)
 
+    def test_llvm_specializes_known_function_pointer_arguments(self):
+        opt = shutil.which("opt")
+        if opt is None:
+            self.skipTest("LLVM opt is required for the pinned function-specialization check")
+        source = """
+(%type Callback (pointer (function (i64) i64)))
+(%function increment ((value i64)) i64 (%+-primitive-i64 value 1))
+(%noinline increment)
+(%function apply ((callback Callback) (value i64)) i64 (callback value))
+(%noinline apply)
+(%function main () i64 (apply increment 41))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        module = self.root / "known-function.ll"
+        module.write_text(emitted.stdout)
+        optimized = subprocess.run(
+            [opt, "-S", "-passes=default<O2>", str(module), "-o", "-"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(optimized.returncode, 0, optimized.stderr)
+        self.assertNotRegex(optimized.stdout, r"call i64 %[-a-zA-Z$._0-9]+")
+
     def test_llvm_pipeline_preserves_callbacks(self):
         source = """
 (%type Callback (pointer (function (i32) i32)))
