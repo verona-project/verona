@@ -9,6 +9,7 @@
 ; Future mutating/inlining passes must define invalidation and growth/version
 ; limits explicitly rather than inheriting this read-only contract.
 (base:type limits (product (depth u64) (arms u64)))
+
 (base:type context
   (product
     (program m:context)
@@ -17,7 +18,8 @@
     (budget limits)
     (references (pointer u8))))
 
-(base:function defaults () limits (limits 32 128))
+(base:function defaults () limits
+  (limits 32 128))
 
 (base:function prepare
   ((c m:context) (enabled bool) (remarks bool) (budget limits)) context
@@ -25,8 +27,8 @@
 
 ; Remarks never increment the semantic error count. Node IDs and source spans
 ; refer to the original checked program, including imported module locations.
-(base:function remark
-  ((p context) (id u64) (rule (pointer u8)) (selected u64)) unit
+(base:function remark ((p context) (id u64) (rule (pointer u8)) (selected u64))
+  unit
   (match (field p remarks)
     (false unit)
     (true
@@ -42,24 +44,34 @@
 
 (base:function fold ((p context) (id u64)) simplify:constant-result
   (let
-    ((result simplify:constant-result
-       (simplify:constant (field p program) id
-         (match (field p enabled) (true (field (field p budget) depth)) (false 0)))))
+    ((result
+       simplify:constant-result
+       (simplify:constant
+         (field p program)
+         id
+         (match (field p enabled)
+           (true (field (field p budget) depth))
+           (false 0)))))
     (do
       (match result
         ((known value)
-          ; Literal emission is not a simplification decision.
-          (match (field (m:at (field p program) id) kind)
-            (9 (remark p id "constant-fold" 0))
-            (_ unit)))
+         ; Literal emission is not a simplification decision.
+         (match (field (m:at (field p program) id) kind)
+           (9 (remark p id "constant-fold" 0))
+           (_ unit)))
         (_ unit))
       result)))
 
 (base:function branch ((p context) (id u64) (condition u64)) u64
   (let
-    ((selected u64
+    ((selected
+       u64
        (match (field p enabled)
-         (true (simplify:known-branch (field p program) condition (field (field p budget) depth)))
+         (true
+           (simplify:known-branch
+             (field p program)
+             condition
+             (field (field p budget) depth)))
          (false 0))))
     (do
       (match selected (0 unit) (_ (remark p id "known-branch" selected)))
@@ -68,11 +80,17 @@
 (base:function arm
   ((p context) (id u64) (scrutinee u64) (sum bool) (tuple bool)) u64
   (let
-    ((selected u64
+    ((selected
+       u64
        (match (field p enabled)
          (true
-           (simplify:known-match (field p program) scrutinee sum tuple
-             (field (field p budget) depth) (field (field p budget) arms)))
+           (simplify:known-match
+             (field p program)
+             scrutinee
+             sum
+             tuple
+             (field (field p budget) depth)
+             (field (field p budget) arms)))
          (false 0))))
     (do
       (match selected (0 unit) (_ (remark p id "known-match" selected)))
@@ -80,9 +98,14 @@
 
 (base:function dead ((p context) (id u64)) bool
   (let
-    ((result bool
-       (base:and-then (field p enabled)
-         (simplify:dead-binding (field p program) (field p references) id
+    ((result
+       bool
+       (base:and-then
+         (field p enabled)
+         (simplify:dead-binding
+           (field p program)
+           (field p references)
+           id
            (field (field p budget) depth)))))
     (do
       (match result (true (remark p id "dead-binding" 0)) (false unit))
@@ -97,13 +120,20 @@
     (1
       (let ((v m:node (m:at c start)))
         (do
-          (m:text 1 "node ") (m:number 1 start)
-          (m:text 1 " kind=") (m:number 1 (field v kind))
-          (m:text 1 " type=") (m:number 1 (field v ty))
-          (m:text 1 " child=") (m:number 1 (field v child))
-          (m:text 1 " next=") (m:number 1 (field v next))
-          (m:text 1 " start=") (m:number 1 (field v start))
-          (m:text 1 " length=") (m:number 1 (field v length))
+          (m:text 1 "node ")
+          (m:number 1 start)
+          (m:text 1 " kind=")
+          (m:number 1 (field v kind))
+          (m:text 1 " type=")
+          (m:number 1 (field v ty))
+          (m:text 1 " child=")
+          (m:number 1 (field v child))
+          (m:text 1 " next=")
+          (m:number 1 (field v next))
+          (m:text 1 " start=")
+          (m:number 1 (field v start))
+          (m:text 1 " length=")
+          (m:number 1 (field v length))
           (m:text 1 "\n"))))
     (_
       (let ((half u64 (/ count 2)))
@@ -113,7 +143,8 @@
 
 (base:function dump ((c m:context) (stage (pointer u8))) unit
   (do
-    (m:text 1 stage) (m:text 1 "\n")
+    (m:text 1 stage)
+    (m:text 1 "\n")
     (dump-range c 1 (- (m:nodes-length (deref (field c items))) 1))))
 
 (export limits context defaults prepare fold branch arm dead dump)

@@ -19,41 +19,58 @@
   (let ((name (pointer u8) (match kind (72 "alwaysinline") (_ "noinline"))))
     (do
       (ir:function-attribute
-        (deref (pointer-offset slots fn)) enum:attribute-function-index
-        (ir:enum-attribute (field owner context)
-          (ir:attribute-kind name (cstring:strlen name)) 0))
+        (deref (pointer-offset slots fn))
+        enum:attribute-function-index
+        (ir:enum-attribute
+          (field owner context)
+          (ir:attribute-kind name (cstring:strlen name))
+          0))
       unit)))
 
 (base:function specialization-attributes
-  ((c m:context) (owner llvm:session) (slots (pointer t:value-ref))
-   (id u64) (template u64) (kind u64)) unit
+  ((c m:context)
+   (owner llvm:session)
+   (slots (pointer t:value-ref))
+   (id u64)
+   (template u64)
+   (kind u64)) unit
   (match id
     (0 unit)
     (_
       (let ((v m:node (m:at c id)))
         (do
           ; Checked specialization=40; TARGET retains its template identity.
-          (match (base:and (== (field v kind) 40) (== (field v target) template))
+          (match
+            (base:and (== (field v kind) 40) (== (field v target) template))
             (true (attribute owner slots id kind))
             (false unit))
           (specialization-attributes c owner slots (m:next c id) template kind))))))
 
 (base:function apply-directives
-  ((c m:context) (owner llvm:session) (slots (pointer t:value-ref))
-   (id u64) (all u64)) unit
+  ((c m:context)
+   (owner llvm:session)
+   (slots (pointer t:value-ref))
+   (id u64)
+   (all u64)) unit
   (match id
     (0 unit)
     (_
       (let ((v m:node (m:at c id)))
         (do
           (match
-            (base:and (> (field v target) 0)
+            (base:and
+              (> (field v target) 0)
               (base:or (== (field v kind) 72) (== (field v kind) 73)))
             (true
               (match (field (m:at c (field v target)) kind)
                 (41 ; A parametric template is not itself lowered to LLVM.
-                  (specialization-attributes c owner slots all
-                    (field v target) (field v kind)))
+                  (specialization-attributes
+                    c
+                    owner
+                    slots
+                    all
+                    (field v target)
+                    (field v kind)))
                 (_ (attribute owner slots (field v target) (field v kind)))))
             (false unit))
           (apply-directives c owner slots (m:next c id) all))))))
@@ -69,7 +86,8 @@
       (let ((user t:value-ref (ir:use-user use)))
         (base:or-else
           (base:and-then
-            (base:or (base:not (base:is-null (ir:is-call user)))
+            (base:or
+              (base:not (base:is-null (ir:is-call user)))
               (base:not (base:is-null (ir:is-invoke user))))
             (== (ir:called-value user) fn))
           (direct-call fn (ir:next-use use)))))))
@@ -79,8 +97,12 @@
     (do
       (m:storage (number:format-u64 fn (& name)))
       (m:storage (data:append (& name) 0))
-      (let ((value t:value-ref (ir:function-get (field owner module) (data:bytes name))))
-        (base:and-then (base:not (base:is-null value))
+      (let
+        ((value
+           t:value-ref
+           (ir:function-get (field owner module) (data:bytes name))))
+        (base:and-then
+          (base:not (base:is-null value))
           (direct-call value (ir:first-use value)))))))
 
 (base:function specialization-remaining
@@ -90,8 +112,10 @@
     (_
       (let ((v m:node (m:at c id)))
         (base:or-else
-          (base:and-then (== (field v kind) 40)
-            (== (field v target) template) (remaining c owner id))
+          (base:and-then
+            (== (field v kind) 40)
+            (== (field v target) template)
+            (remaining c owner id))
           (specialization-remaining c owner (m:next c id) template))))))
 
 ; These are nonfatal remarks, not semantic diagnostics. LLVM owns inlining
@@ -108,7 +132,8 @@
             (false unit)
             (true
               (match
-                (base:or-else disabled
+                (base:or-else
+                  disabled
                   (match (field (m:at c (field v target)) kind)
                     (41 (specialization-remaining c owner all (field v target)))
                     (_ (remaining c owner (field v target)))))
@@ -116,10 +141,12 @@
                 (true
                   (do
                     (m:location c (field v start))
-                    (m:text constants:STDERR-FILENO
+                    (m:text
+                      constants:STDERR-FILENO
                       (match disabled
                         (true "note: forced inlining is inactive at -O0\n")
-                        (false "note: forced inlining left direct calls (recursion or LLVM constraints)\n")))
+                        (false
+                          "note: forced inlining left direct calls (recursion or LLVM constraints)\n")))
                     unit)))))
           (remarks c owner (m:next c id) all disabled))))))
 

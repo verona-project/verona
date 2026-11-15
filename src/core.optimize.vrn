@@ -38,8 +38,7 @@
   (base:cond
     ((== b 0) (unknown))
     ((num:signed-type ty)
-     (match
-       (base:and (== b -1) (== a (num:normalize ty (num:sign-bit ty))))
+     (match (base:and (== b -1) (== a (num:normalize ty (num:sign-bit ty))))
        (true (unknown))
        (false (known (/ a b)))))
     (true
@@ -49,8 +48,7 @@
 ; Only resolved integer/boolean primitive opcodes reach this helper.
 ; Unsigned 64-bit intermediates deliberately wrap; normalize applies the
 ; checked operand width rather than the host's signed arithmetic semantics.
-(base:function binary
-  ((op u64) (ty u64) (a i64) (b i64)) constant-result
+(base:function binary ((op u64) (ty u64) (a i64) (b i64)) constant-result
   (let ((left u64 (base:convert a)) (right u64 (base:convert b)))
     (base:cond
       ((base:and (>= op 5) (<= op 10))
@@ -66,12 +64,16 @@
           (13 (known (num:normalize ty (num:bitwise op left right))))
           (14
             (known
-              (num:normalize ty
+              (num:normalize
+                ty
                 (* left (num:pow2 (num:remainder right (num:width ty)))))))
           (15
             (known
-              (num:normalize ty
-                (shift-right ty a
+              (num:normalize
+                ty
+                (shift-right
+                  ty
+                  a
                   (num:pow2 (num:remainder right (num:width ty)))))))
           (_ (unknown)))))))
 
@@ -89,9 +91,7 @@
               (true (known (field v value)))
               (false (unknown))))
           (3 ; Boolean literal; type 2 excludes untyped macro syntax.
-            (match (field v ty)
-              (2 (known (field v value)))
-              (_ (unknown))))
+            (match (field v ty) (2 (known (field v value))) (_ (unknown))))
           (9 ; Checked primitive with a resolved opcode and concrete types.
             (let
               ((args u64 (m:next c (field v child)))
@@ -106,21 +106,20 @@
   (match (constant c args fuel)
     ((unknown) (unknown))
     ((known a)
-      (match (field v target)
-        (16 ; Explicit integer conversion; floating conversions stay runtime.
-          (match
-            (base:and (num:integer-type ty) (num:integer-type (field v ty)))
-            (true (known (num:normalize (field v ty) (base:convert a))))
-            (false (unknown))))
-        (17 ; Boolean negation.
-          (known (match a (0 1) (_ 0))))
-        (_
-          (match (m:next c args)
-            (0 (unknown))
-            (right
-              (match (constant c right fuel)
-                ((unknown) (unknown))
-                ((known b) (binary (field v target) ty a b))))))))))
+     (match (field v target)
+       (16 ; Explicit integer conversion; floating conversions stay runtime.
+         (match (base:and (num:integer-type ty) (num:integer-type (field v ty)))
+           (true (known (num:normalize (field v ty) (base:convert a))))
+           (false (unknown))))
+       (17 ; Boolean negation.
+         (known (match a (0 1) (_ 0))))
+       (_
+         (match (m:next c args)
+           (0 (unknown))
+           (right
+             (match (constant c right fuel)
+               ((unknown) (unknown))
+               ((known b) (binary (field v target) ty a b))))))))))
 
 ; Read-only checked-expression rewrites. Call only after successful checking.
 ; Never replace tape nodes: binders, sibling links, source spans, and shared
@@ -137,9 +136,9 @@
         (match (constant c condition depth)
           ((unknown) 0)
           ((known value)
-            (match value
-              (0 (m:next c (m:next c condition)))
-              (_ (m:next c condition))))))
+           (match value
+             (0 (m:next c (m:next c condition)))
+             (_ (m:next c condition))))))
       (_ 0))))
 
 ; A pattern is rejected only by a proven mismatch. An unknown earlier pattern
@@ -160,17 +159,26 @@
               (let ((pattern m:node (m:at c names)))
                 (match (field pattern kind)
                   (0 ; A checked component binder or wildcard always matches.
-                    (components c (m:next c names) (m:next c values) (- fuel 1) depth))
+                    (components
+                      c
+                      (m:next c names)
+                      (m:next c values)
+                      (- fuel 1)
+                      depth))
                   (_
                     ; Only known integer/boolean literal comparisons simplify.
                     (match (constant c values depth)
                       ((unknown) (undecided))
                       ((known value)
-                        (match (== value (field pattern value))
-                          (false (rejects))
-                          (true
-                            (components c (m:next c names) (m:next c values)
-                              (- fuel 1) depth)))))))))))))))
+                       (match (== value (field pattern value))
+                         (false (rejects))
+                         (true
+                           (components
+                             c
+                             (m:next c names)
+                             (m:next c values)
+                             (- fuel 1)
+                             depth)))))))))))))))
 
 ; TARGET is a one-based sum tag, or 1 for a tuple pattern. Arm target 0 is
 ; a whole-value binder/wildcard. Identities and sibling chains stay untouched.
@@ -187,16 +195,32 @@
               ((== tag 0) arm)
               ((== tag target)
                (match
-                 (components c (m:next c (m:child c (m:child c arm))) values fuel depth)
+                 (components
+                   c
+                   (m:next c (m:child c (m:child c arm)))
+                   values
+                   fuel
+                   depth)
                  ((matches) arm)
                  ((undecided) 0)
                  ((rejects)
-                   (structured-arms c (m:next c arm) target values (- fuel 1) depth))))
+                  (structured-arms
+                    c
+                    (m:next c arm)
+                    target
+                    values
+                    (- fuel 1)
+                    depth))))
               (true
-                (structured-arms c (m:next c arm) target values (- fuel 1) depth)))))))))
+                (structured-arms
+                  c
+                  (m:next c arm)
+                  target
+                  values
+                  (- fuel 1)
+                  depth)))))))))
 
-(base:function scalar-arms
-  ((c m:context) (arm u64) (value i64) (fuel u64)) u64
+(base:function scalar-arms ((c m:context) (arm u64) (value i64) (fuel u64)) u64
   (match fuel
     (0 0)
     (_
@@ -205,7 +229,9 @@
         (_
           (let ((pattern m:node (m:at c arm)))
             (match
-              (base:or (== (field pattern target) 0) (== (field pattern value) value))
+              (base:or
+                (== (field pattern target) 0)
+                (== (field pattern value) value))
               (true arm)
               (false (scalar-arms c (m:next c arm) value (- fuel 1))))))))))
 
@@ -215,8 +241,8 @@
 ; Only direct sum/tuple construction and proven scalar constants are supported.
 ; Scan at most 128 arms/components, with the existing 32-level folding budget.
 (base:function known-match
-  ((c m:context) (scrutinee u64) (sum bool) (tuple bool)
-   (depth u64) (arms u64)) u64
+  ((c m:context) (scrutinee u64) (sum bool) (tuple bool) (depth u64) (arms u64))
+  u64
   (let
     ((v m:node (m:at c scrutinee))
      (first u64 (m:next c scrutinee))
@@ -225,8 +251,13 @@
       (true
         (match (field v kind)
           (15 ; Checked sum constructor; its descriptor stores a zero-based tag.
-            (structured-arms c first
-              (+ (field (m:at c (field v target)) target) 1) values arms depth))
+            (structured-arms
+              c
+              first
+              (+ (field (m:at c (field v target)) target) 1)
+              values
+              arms
+              depth))
           (_ 0)))
       (false
         (match tuple
@@ -272,11 +303,12 @@
       (let ((count u64 (m:nodes-length (deref (field c items)))))
         (match (arena:allocate (field c memory) count 1)
           ((allocated p)
-            (let ((used (pointer u8) (cast (pointer u8) (cast (pointer void) p))))
-              (do
-                (memory:memset (cast (pointer void) used) 0 count)
-                (mark-references c used 1 (- count 1))
-                used)))
+           (let
+             ((used (pointer u8) (cast (pointer u8) (cast (pointer void) p))))
+             (do
+               (memory:memset (cast (pointer void) used) 0 count)
+               (mark-references c used 1 (- count 1))
+               used)))
           (_
             (do
               (m:fatal "optimizer reference storage allocation failed")
@@ -299,9 +331,7 @@
   (match fuel
     (0 false)
     (_
-      (let
-        ((v m:node (m:at c id))
-         (args u64 (m:next c (field v child))))
+      (let ((v m:node (m:at c id)) (args u64 (m:next c (field v child))))
         (match (field v kind)
           (2 true) ; Integer literal.
           (3 true) ; Boolean literal.
@@ -311,9 +341,7 @@
           (5 ; Reading an immutable SSA local cannot trap or observe memory.
             (base:not (check:stored-binder c (field v target))))
           (9 ; Resolved primitive; reject floating point and pointer operations.
-            (let
-              ((op u64 (field v target))
-               (ty u64 (field (m:at c args) ty)))
+            (let ((op u64 (field v target)) (ty u64 (field (m:at c args) ty)))
               (match (base:or (== ty 2) (num:integer-type ty))
                 (false false)
                 (true
@@ -327,7 +355,8 @@
                         (base:or
                           (base:and (>= op 1) (<= op 15))
                           (== op 17) ; Boolean negation.
-                          (base:and (== op 16) ; Integer-to-integer conversion.
+                          (base:and
+                            (== op 16) ; Integer-to-integer conversion.
                             (num:integer-type (field v ty))))
                         (discardable-chain c args (- fuel 1)))))))))
           (6 (discardable-chain c args (- fuel 1))) ; Condition and both branches.
@@ -347,4 +376,10 @@
       (base:not (check:stored-binder c name))
       (discardable c (field (m:at c id) target) depth))))
 
-(export constant-result constant known-branch known-match references dead-binding)
+(export
+  constant-result
+  constant
+  known-branch
+  known-match
+  references
+  dead-binding)

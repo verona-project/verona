@@ -244,18 +244,21 @@
     (true 0)
     (false
       (let
-        ((pipeline (pointer u8)
+        ((pipeline
+           (pointer u8)
            (base:cond
              ((equal level "-O1") "default<O1>")
              ((equal level "-O2") "default<O2>")
              (true "default<O3>")))
          (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
-         (status i32
+         (status
+           i32
            (do
              ; Passes can erase blocks that the lowering builder still points at.
              (ir:builder-clear (field owner builder))
              (passes:run (field owner module) machine pipeline (& message))))
-         (verified i32
+         (verified
+           i32
            (match status (0 (llvm:verify owner (& message))) (_ status))))
         (match verified
           (0 (do (dispose-message message) 0))
@@ -294,7 +297,8 @@
                      (inline:remarks c owner all all (equal optimization "-O0"))
                      (match (equal kind "object")
                        (true (emit-object owner machine output))
-                       (false (object-and-link c owner machine output links kind)))))
+                       (false
+                         (object-and-link c owner machine output links kind)))))
                  (failure failure))))
             (do (target:machine-dispose machine) result)))))))
 
@@ -310,15 +314,21 @@
    (links link:options)
    (kind (pointer u8))) exit-code
   (let
-    ((snapshot unit
+    ((snapshot
+       unit
        (match (equal mode "optimization-report")
          (true (optimization:dump c "before-lowering"))
          (false unit)))
      (owner
        llvm:session
        (emit:build
-         c all main (equal mode "compile-report")
-         (base:or (equal mode "emit-llvm") (equal mode "optimization-report")
+         c
+         all
+         main
+         (equal mode "compile-report")
+         (base:or
+           (equal mode "emit-llvm")
+           (equal mode "optimization-report")
            (base:not (equal optimization "-O0")))
          (equal mode "optimization-report")))
      (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
@@ -331,28 +341,33 @@
              (dispose-message message)
              (match (equal mode "optimization-report")
                (true (do (optimization:dump c "after-lowering") 0))
-               (false (match (equal mode "emit-llvm")
-               (true
-                 (let
-                   ((text (pointer u8) (ir:module-string (field owner module))))
-                   (do
-                     (m:text c:STDOUT-FILENO text)
-                     (ir:message-dispose text)
-                     0)))
                (false
-                 (let
-                   ((code
-                      exit-code
-                      (compile c all owner output optimization links kind)))
-                   (match
-                     (base:and-then
-                       (== code 0)
-                       (base:or
-                         (equal kind "static-library")
-                         (equal kind "shared-library")))
-                     (true
-                       (match (header:write c all output) (true 0) (false 2)))
-                     (false code)))))))))
+                 (match (equal mode "emit-llvm")
+                   (true
+                     (let
+                       ((text
+                          (pointer u8)
+                          (ir:module-string (field owner module))))
+                       (do
+                         (m:text c:STDOUT-FILENO text)
+                         (ir:message-dispose text)
+                         0)))
+                   (false
+                     (let
+                       ((code
+                          exit-code
+                          (compile c all owner output optimization links kind)))
+                       (match
+                         (base:and-then
+                           (== code 0)
+                           (base:or
+                             (equal kind "static-library")
+                             (equal kind "shared-library")))
+                         (true
+                           (match (header:write c all output)
+                             (true 0)
+                             (false 2)))
+                         (false code)))))))))
          (_ (do (llvm-error message) 2)))))
     (do (llvm:destroy owner) result)))
 
