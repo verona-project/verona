@@ -58,6 +58,14 @@
 
 (base:external-function function-get "LLVMGetNamedFunction" (t:module-ref (pointer u8)) t:value-ref)
 
+; Borrowed use-list traversal. Do not mutate IR while retaining these handles.
+(base:external-function first-use "LLVMGetFirstUse" (t:value-ref) t:use-ref)
+(base:external-function next-use "LLVMGetNextUse" (t:use-ref) t:use-ref)
+(base:external-function use-user "LLVMGetUser" (t:use-ref) t:value-ref)
+(base:external-function is-call "LLVMIsACallInst" (t:value-ref) t:value-ref)
+(base:external-function is-invoke "LLVMIsAInvokeInst" (t:value-ref) t:value-ref)
+(base:external-function called-value "LLVMGetCalledValue" (t:value-ref) t:value-ref)
+
 (base:external-function linkage-get "LLVMGetLinkage" (t:value-ref) i32)
 
 (base:external-function
@@ -401,6 +409,12 @@
   struct-element
   build-ret-void
   function-get
+  first-use
+  next-use
+  use-user
+  is-call
+  is-invoke
+  called-value
   linkage-get
   struct-gep
   attribute-kind

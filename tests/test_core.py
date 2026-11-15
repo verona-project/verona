@@ -3142,6 +3142,173 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(message, result.stderr)
 
+    def test_inline_directives_and_auto_default(self):
+        source = """
+(%inline forced)
+(%function forced ((value i64)) i64 (%+-primitive-i64 value 1))
+(%function forbidden ((value i64)) i64 (%+-primitive-i64 value 2))
+(%function automatic ((value i64)) i64 (%+-primitive-i64 value 3))
+(%noinline forbidden)
+(native-export forced "forced_api")
+(native-export forbidden "forbidden_api")
+(native-export automatic "automatic_api")
+(%function main () i64 (%+-primitive-i64 (forced 20) (forbidden 19)))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        attributes = dict(re.findall(r"attributes #(\d+) = \{([^}]+)\}", emitted.stdout))
+        functions = re.findall(
+            r'define internal i64 @("[^"\n]+"|[\w.]+)\(i64 %[\w.]+\)([^\n]*) \{\n(.*?)\n\}',
+            emitted.stdout, re.S)
+        names = {}
+        for increment, policy in ((1, "alwaysinline"), (2, "noinline"), (3, None)):
+            matches = [(name.strip('"'), suffix) for name, suffix, body in functions
+                       if re.search(r"add i64 %[\w.]+, " + str(increment) + r"\b", body)]
+            self.assertEqual(len(matches), 1, emitted.stdout)
+            name, suffix = matches[0]
+            names[increment] = name
+            group = re.search(r"#(\d+)", suffix)
+            flags = attributes[group.group(1)] if group else ""
+            if policy:
+                self.assertIn(policy, flags)
+            else:
+                self.assertNotIn("alwaysinline", flags)
+                self.assertNotIn("noinline", flags)
+        nm = shutil.which("llvm-nm") or shutil.which("nm")
+        self.assertIsNotNone(nm)
+        for level in ("-O0", "-O1", "-O2", "-O3"):
+            with self.subTest(level=level):
+                artifact = self.root / "inline.o"
+                compiled = self.run_core("compile", source, "--emit", "object",
+                                         "-o", artifact, level)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                symbols = subprocess.run([nm, str(artifact)], capture_output=True,
+                                         text=True, timeout=10)
+                self.assertEqual(symbols.returncode, 0, symbols.stderr)
+                pattern = r"(?m)\b[tT] _?" + re.escape(names[1]) + r"$"
+                if level == "-O0":
+                    self.assertRegex(symbols.stdout, pattern)
+                    self.assertIn("forced inlining is inactive at -O0", compiled.stderr)
+                else:
+                    self.assertNotRegex(symbols.stdout, pattern)
+                self.assertRegex(symbols.stdout, r"(?m)\b[tT] _?" + re.escape(names[2]) + r"$")
+                self.assertRegex(symbols.stdout, r"(?m)\bT _?forced_api$")
+
+    def test_inline_macros_modules_and_specializations(self):
+        options = ("--module-path", "projects/base/src", "--module-path", "projects/foundation/src",
+                   "--module-path", "projects/libc/src")
+        source = """
+(import base :as b)
+(b:inline-function pick (for (a)) ((value a)) a value)
+(b:noinline-function add ((value i64)) i64 (+ value 1))
+(%function main () i64
+  (%+-primitive-i64 (add (pick (cast i64 39)))
+    (%zext-primitive-u8-i64 (pick (cast u8 2)))))
+"""
+        self.agrees(source, 42, *options)
+        emitted = self.run_core("emit-llvm", source, *options)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        groups = re.findall(r"attributes #(\d+) = \{[^}]*alwaysinline[^}]*\}", emitted.stdout)
+        self.assertEqual(len(groups), 1, emitted.stdout)
+        self.assertEqual(len(re.findall(r"(?m)^define .* #" + groups[0] + r" \{", emitted.stdout)), 2)
+        (self.root / "library.vrn").write_text("""
+(import base :as b)
+(export helper)
+(b:inline-function helper ((value i64)) i64 (+ value 1))
+""")
+        self.agrees("""
+(import library :as lib)
+(%function helper ((value i64)) i64 (%+-primitive-i64 value 2))
+(%noinline helper)
+(%function main () i64 (%+-primitive-i64 (lib:helper 20) (helper 19)))
+""", 42, *options)
+        duplicate = "(%inline helper)(%inline helper)(%function helper () i64 42)" + self.program("(helper)")
+        compiled = self.run_core("compile", duplicate, "-o", self.root / "duplicates", "-O0")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        self.assertEqual(compiled.stderr.count("forced inlining is inactive at -O0"), 1)
+
+    def test_inline_directive_diagnostics(self):
+        cases = [
+            ("(%inline missing)", "must name a local Verona function"),
+            ("(%inline)", "exactly one"),
+            ("(%noinline 42)", "unqualified local function"),
+            ("(%inline main auto)", "exactly one"),
+            ("(%function helper () i64 42)(%inline helper)(%noinline helper)", "conflicting inline"),
+            ("(%function helper () i64 42)(%noinline helper)(%inline helper)", "conflicting inline"),
+            ("(%constant value i64 42)(%inline value)", "must name a local Verona function"),
+            ('(%external-function foreign "getpid" () i32)(%inline foreign)', "with a body"),
+            ("(%inline other:helper)", "unqualified local function"),
+            ("(%function helper () i64 missing)(%inline helper)", "unknown local"),
+        ]
+        for declaration, message in cases:
+            for mode in ("check", "eval", "emit-llvm", "compile-report"):
+                with self.subTest(declaration=declaration, mode=mode):
+                    options = ("-o", self.root / "invalid-inline") if mode == "compile-report" else ()
+                    result = self.run_core(mode, declaration + self.program("42"), *options)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn(message, result.stderr)
+
+    def test_inline_preserves_arguments_and_storage(self):
+        self.agrees("""
+(%variable trace i64 0)
+(%function mark ((digit i64)) i64
+  (do (store trace (%+-primitive-i64 (%*-primitive-i64 trace 10) digit)) digit))
+(%function ignore ((first i64) (second i64)) i64 trace)
+(%inline ignore)
+(%function main () i64 (ignore (mark 4) (mark 2)))
+""", 42)
+        self.agrees("""
+(%function snapshot ((value i64)) i64
+  (let ((pointer (& value)) (copy value)) (store (deref pointer) 2) copy))
+(%inline snapshot)
+(%function main () i64 (snapshot 42))
+""", 42)
+        self.agrees("""
+(%type Callback (pointer (function (i64) i64)))
+(%function helper ((value i64)) i64 (%+-primitive-i64 value 1))
+(%inline helper)
+(%function main () i64
+  (let ((callback Callback helper) (same Callback helper))
+    (if (== callback same) (callback 41) 0)))
+""", 42)
+        source = """
+(%function ignore ((first i64) (second i64)) i64 42)
+(%inline ignore)
+(%function main () i64
+  (ignore (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))
+"""
+        evaluated = self.run_core("eval", source)
+        self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
+        for level in ("-O0", "-O2"):
+            binary = self.root / "inline failure"
+            compiled = self.run_core("compile-report", source, "-o", binary, level)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(native.returncode, 70, native.stderr)
+            self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+
+    def test_inline_recursion_is_bounded_and_reported(self):
+        source = """
+(%function fib ((n i64)) i64
+  (if (%<-primitive-i64 n 2) n
+    (%+-primitive-i64 (fib (%--primitive-i64 n 1)) (fib (%--primitive-i64 n 2)))))
+(%inline fib)
+(native-export fib "fib_api")
+(%function main () i64 (fib 4))
+"""
+        self.agrees(source, 3)
+        compiled = self.run_core("compile-report", source, "-o", self.root / "fib", "-O2")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        self.assertIn("forced inlining left direct calls", compiled.stderr)
+        self.agrees("""
+(%inline even)
+(%inline odd)
+(%function even ((n i64)) bool (if (%=-primitive-i64 n 0) true (odd (%--primitive-i64 n 1))))
+(%function odd ((n i64)) bool (if (%=-primitive-i64 n 0) false (even (%--primitive-i64 n 1))))
+(%function main () i64 (if (even 10) 42 0))
+""", 42)
+
     def test_llvm_pipeline_removes_internal_functions(self):
         source = """
 (%function unreachable () i64 12345)

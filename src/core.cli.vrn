@@ -21,6 +21,7 @@
 (import core.check :as check)
 (import core.eval :as eval)
 (import core.emit :as emit)
+(import core.inline :as inline)
 (import core.link :as link)
 (import core.header :as header)
 (import core.format :as format)
@@ -263,6 +264,7 @@
 ; Release the machine and transferred diagnostics before returning the command status.
 (base:function compile
   ((c m:context)
+   (all u64)
    (owner llvm:session)
    (output (pointer u8))
    (optimization (pointer u8))
@@ -287,9 +289,11 @@
                exit-code
                (match (optimize-native owner machine optimization)
                  (0
-                   (match (equal kind "object")
-                     (true (emit-object owner machine output))
-                     (false (object-and-link c owner machine output links kind))))
+                   (do
+                     (inline:remarks c owner all all (equal optimization "-O0"))
+                     (match (equal kind "object")
+                       (true (emit-object owner machine output))
+                       (false (object-and-link c owner machine output links kind)))))
                  (failure failure))))
             (do (target:machine-dispose machine) result)))))))
 
@@ -331,7 +335,7 @@
                  (let
                    ((code
                       exit-code
-                      (compile c owner output optimization links kind)))
+                      (compile c all owner output optimization links kind)))
                    (match
                      (base:and-then
                        (== code 0)

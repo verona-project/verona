@@ -27,6 +27,9 @@
 
 (base:constant object-file i32 1)
 
+; LLVMAttributeFunctionIndex is the unsigned representation of -1.
+(base:constant attribute-function-index u32 4294967295)
+
 (base:constant int-ugt i32 34)
 
 (base:constant int-uge i32 35)
@@ -36,6 +39,7 @@
 (base:constant int-ule i32 37)
 
 (export
+  attribute-function-index
   int-ugt
   int-uge
   int-ult

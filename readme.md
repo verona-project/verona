@@ -87,7 +87,7 @@ Compilation additionally accepts:
 
 - `-o OUTPUT` or `--output OUTPUT` — select the output path;
 - `--emit object|executable|static-library|shared-library` — select the artifact;
-- `-O0`, `-O1`, `-O2`, or `-O3` — select the code-generation level;
+- `-O0`, `-O1`, `-O2`, or `-O3` — select the optimization level;
 - `--cpu CPU` — select the LLVM target CPU;
 - `--features FEATURES` — select LLVM machine features;
 - `--library NAME` or `-l NAME` — link a native library;
@@ -101,8 +101,49 @@ Static and shared libraries with native exports also receive a C header.
 execution, `eval` evaluates the checked program, and `emit-llvm` writes LLVM IR.
 `compile-report` creates an executable that prints the complete typed result.
 
+Native compilation at `-O1`, `-O2`, and `-O3` runs LLVM's corresponding standard
+optimization pipeline with the configured target machine before object emission.
+`-O0` skips LLVM middle-end passes. `emit-llvm` shows IR after Verona's local
+simplifications and before LLVM passes; native optimization flags remain specific
+to compilation commands. Modules are verified before and after LLVM optimization.
+
 The native tools can be selected with `VERONA_CORE_CLANG` and
 `VERONA_CORE_AR`, with `VERONA_LINKER` and `VERONA_AR` as fallbacks.
+
+## Inlining controls
+
+Without a directive, a function uses LLVM's automatic inlining policy. Use
+independent top-level declarations to request or forbid inlining:
+
+```lisp
+(%inline helper)
+(%function helper ((value i64)) i64
+  (+ value 1))
+
+(%function retained ((value i64)) i64
+  (+ value 2))
+(%noinline retained)
+```
+
+Directives may precede or follow a local function. Identical duplicates are
+idempotent; conflicting directives are errors. Targets must be unqualified,
+module-local Verona functions with bodies. Parametric functions pass the policy
+to their specializations. External declarations and overloaded generic or
+protocol declarations are not directive targets. These are declaration policies;
+there is no call-site override.
+
+Base provides `base:inline-function` and `base:noinline-function` macros. Each
+emits the ordinary `%function` declaration followed by the matching directive.
+The function body still follows normal macro expansion and generic dispatch.
+
+At `-O1` through `-O3`, `%inline` bypasses LLVM profitability thresholds using
+`alwaysinline`; `%noinline` supplies `noinline`. LLVM legality and recursion
+constraints still apply. Remaining direct calls from a forced request produce a
+nonfatal source-location remark. `-O0` retains the unoptimized path and reports
+forced requests as inactive. `emit-llvm` displays the attributes before LLVM
+passes. Native export and callback adapter symbols retain their ABI/identity;
+attributes apply to the underlying implementation bodies. `%noinline` prevents
+inlining, while other optimizations may still fold calls or delete unused bodies.
 
 ## Manifest files
 

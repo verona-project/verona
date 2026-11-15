@@ -1,0 +1,126 @@
+(import base)
+(import core.model :as m)
+(import llvm)
+(import llvm.types :as t)
+(import llvm.core :as ir)
+(import llvm.enums :as enum)
+(import allocator)
+(import arena)
+(import data)
+(import number)
+(import libc.string :as cstring)
+(import libc.constants :as constants)
+
+; Only explicit policies create attributes. No directive means automatic LLVM
+; profitability decisions. Attributes apply to implementation bodies, leaving
+; native export/callback adapter identity and ABI exposure unchanged.
+(base:function attribute
+  ((owner llvm:session) (slots (pointer t:value-ref)) (fn u64) (kind u64)) unit
+  (let ((name (pointer u8) (match kind (72 "alwaysinline") (_ "noinline"))))
+    (do
+      (ir:function-attribute
+        (deref (pointer-offset slots fn)) enum:attribute-function-index
+        (ir:enum-attribute (field owner context)
+          (ir:attribute-kind name (cstring:strlen name)) 0))
+      unit)))
+
+(base:function specialization-attributes
+  ((c m:context) (owner llvm:session) (slots (pointer t:value-ref))
+   (id u64) (template u64) (kind u64)) unit
+  (match id
+    (0 unit)
+    (_
+      (let ((v m:node (m:at c id)))
+        (do
+          ; Checked specialization=40; TARGET retains its template identity.
+          (match (base:and (== (field v kind) 40) (== (field v target) template))
+            (true (attribute owner slots id kind))
+            (false unit))
+          (specialization-attributes c owner slots (m:next c id) template kind))))))
+
+(base:function apply-directives
+  ((c m:context) (owner llvm:session) (slots (pointer t:value-ref))
+   (id u64) (all u64)) unit
+  (match id
+    (0 unit)
+    (_
+      (let ((v m:node (m:at c id)))
+        (do
+          (match
+            (base:and (> (field v target) 0)
+              (base:or (== (field v kind) 72) (== (field v kind) 73)))
+            (true
+              (match (field (m:at c (field v target)) kind)
+                (41 ; A parametric template is not itself lowered to LLVM.
+                  (specialization-attributes c owner slots all
+                    (field v target) (field v kind)))
+                (_ (attribute owner slots (field v target) (field v kind)))))
+            (false unit))
+          (apply-directives c owner slots (m:next c id) all))))))
+
+; Query only current LLVM handles after passes: cached lowering slots can point
+; to deleted functions. Looking up the original numeric symbol is safe even
+; when optimization has removed its body. Address-only uses do not prevent a
+; forced direct-call policy from being honored.
+(base:function direct-call ((fn t:value-ref) (use t:use-ref)) bool
+  (match (base:is-null use)
+    (true false)
+    (false
+      (let ((user t:value-ref (ir:use-user use)))
+        (base:or-else
+          (base:and-then
+            (base:or (base:not (base:is-null (ir:is-call user)))
+              (base:not (base:is-null (ir:is-invoke user))))
+            (== (ir:called-value user) fn))
+          (direct-call fn (ir:next-use use)))))))
+
+(base:function remaining ((c m:context) (owner llvm:session) (fn u64)) bool
+  (let ((name data:data (data:empty (arena:allocator (field c memory)))))
+    (do
+      (m:storage (number:format-u64 fn (& name)))
+      (m:storage (data:append (& name) 0))
+      (let ((value t:value-ref (ir:function-get (field owner module) (data:bytes name))))
+        (base:and-then (base:not (base:is-null value))
+          (direct-call value (ir:first-use value)))))))
+
+(base:function specialization-remaining
+  ((c m:context) (owner llvm:session) (id u64) (template u64)) bool
+  (match id
+    (0 false)
+    (_
+      (let ((v m:node (m:at c id)))
+        (base:or-else
+          (base:and-then (== (field v kind) 40)
+            (== (field v target) template) (remaining c owner id))
+          (specialization-remaining c owner (m:next c id) template))))))
+
+; These are nonfatal remarks, not semantic diagnostics. LLVM owns inlining
+; legality and recursion limits; an always request cannot override them.
+; O0 keeps the unoptimized baseline and explicitly reports inactive requests.
+(base:function remarks
+  ((c m:context) (owner llvm:session) (id u64) (all u64) (disabled bool)) unit
+  (match id
+    (0 unit)
+    (_
+      (let ((v m:node (m:at c id)))
+        (do
+          (match (base:and (== (field v kind) 72) (> (field v target) 0))
+            (false unit)
+            (true
+              (match
+                (base:or-else disabled
+                  (match (field (m:at c (field v target)) kind)
+                    (41 (specialization-remaining c owner all (field v target)))
+                    (_ (remaining c owner (field v target)))))
+                (false unit)
+                (true
+                  (do
+                    (m:location c (field v start))
+                    (m:text constants:STDERR-FILENO
+                      (match disabled
+                        (true "note: forced inlining is inactive at -O0\n")
+                        (false "note: forced inlining left direct calls (recursion or LLVM constraints)\n")))
+                    unit)))))
+          (remarks c owner (m:next c id) all disabled))))))
+
+(export apply-directives remarks)

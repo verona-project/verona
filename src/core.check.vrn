@@ -1588,6 +1588,10 @@
             ((variable-declaration c fn) (variable-signature c fn all))
             ((m:is c (m:child c fn) "native-export")
              (do (m:typed c fn 68 0 0 0) unit))
+            ((m:is c (m:child c fn) "%inline")
+             (do (m:typed c fn 72 0 0 0) unit))
+            ((m:is c (m:child c fn) "%noinline")
+             (do (m:typed c fn 73 0 0 0) unit))
             ((generic-declaration c fn) unit)
             ((== (field (m:at c fn) kind) 19) unit)
             ((>= (field (m:at c fn) kind) 20) unit)
@@ -3193,6 +3197,7 @@
     (register-protocols c functions functions)
     (register-protocol-instances c functions functions)
     (signatures c functions functions)
+    (inline-directives c functions functions)
     (check-external-symbols c functions)
     (native-exports c functions functions)
     (exports c functions 0)
@@ -3228,6 +3233,58 @@
 ; Existing evaluator/support callers still require an executable entry.
 (base:function check ((c m:context) (functions u64)) u64
   (check-with-entry c functions true))
+
+; A declaration policy is module-local and order-independent, like export.
+; Auto is represented by the absence of a directive. Repeated identical
+; directives are idempotent; opposite policies on the same identity conflict.
+(base:function prior-inline
+  ((c m:context) (id u64) (stop u64) (fn u64)) u64
+  (match (base:or (== id 0) (== id stop))
+    (true 0)
+    (false
+      (let ((v m:node (m:at c id)))
+        (match
+          (base:and (base:or (== (field v kind) 72) (== (field v kind) 73))
+            (== (field v target) fn))
+          (true (field v kind))
+          (false (prior-inline c (m:next c id) stop fn)))))))
+
+(base:function inline-directive ((c m:context) (id u64) (all u64)) unit
+  (let ((head u64 (m:child c id)) (name u64 (m:next c head)))
+    (base:cond
+      ((base:not (arity c head 2))
+       (m:report c id "inline directive requires exactly one local function name"))
+      ((base:not (plain-name c name))
+       (m:report c name "inline directive requires an unqualified local function name"))
+      (true
+        (let
+          ((fn u64 (named-in c all (m:owner c id) (m:spelling c name)))
+           (kind u64 (field (m:at c id) kind)))
+          (match
+            (base:and (> fn 0)
+              (base:or
+                (base:and (== (field (m:at c fn) kind) 1) (declaration-shape c fn))
+                (base:and (== (field (m:at c fn) kind) 41) (template-shape c fn))))
+            (false
+              (m:report c id "inline directive must name a local Verona function with a body"))
+            (true
+              (match (prior-inline c all id fn)
+                (0 (do (m:typed c id kind 0 fn 0) unit))
+                (previous
+                  (match (== previous kind)
+                    (true unit) ; The first identical directive already owns the policy.
+                    (false (m:report c id "conflicting inline and noinline directives"))))))))))))
+
+(base:function inline-directives ((c m:context) (id u64) (all u64)) unit
+  (match id
+    (0 unit)
+    (_
+      (do
+        (match (field (m:at c id) kind)
+          (72 (inline-directive c id all))
+          (73 (inline-directive c id all))
+          (_ unit))
+        (inline-directives c (m:next c id) all)))))
 
 ; Native export records retain their source syntax, resolved local function in
 ; TARGET, and a decoded data-literal node ID in VALUE (as external imports do).

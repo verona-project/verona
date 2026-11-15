@@ -52,7 +52,12 @@
 
 (base:type error-ref (pointer error-handle))
 
+(base:type use-handle)
+
+(base:type use-ref (pointer use-handle))
+
 (export
+  use-ref
   pass-options-ref
   error-ref
   attribute-ref

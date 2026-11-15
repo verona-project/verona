@@ -18,6 +18,7 @@
 (import core.cabi :as cabi)
 (import core.format :as format)
 (import core.optimize :as optimize)
+(import core.inline :as inline)
 
 ; Every checked node/binder/function has a unique syntax index. Its LLVM value
 ; lives in the matching slot, so lexical shadowing requires no textual names.
@@ -1788,6 +1789,7 @@
     (do
       (external-declarations c b all)
       (declarations c b all)
+      (inline:apply-directives c owner (field b slots) all all)
       (constants c b all)
       (native-exports c b all)
       (callback-addresses c b 1 (- (m:nodes-length (deref (field c items))) 1))
