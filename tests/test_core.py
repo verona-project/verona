@@ -4066,6 +4066,63 @@ int main(int argc, char **argv) {
             self.assertEqual(native.returncode, 0, native.stderr)
             self.assertEqual(native.stdout, "i64:41\n")
 
+    def test_llvm_pipeline_preserves_temporary_product_values(self):
+        source = """
+(%function project ((value (tuple i64 i64))) i64
+  (%+-primitive-i64 (tuple-get value 0) (tuple-get value 1)))
+(%function main () i64
+  (project (tuple (%+-primitive-i64 19 2) (%+-primitive-i64 20 1))))
+"""
+        self.agrees(source, 42)
+        for level in ("-O0", "-O2"):
+            binary = self.root / ("temporary-product-" + level[1:])
+            compiled = self.run_core("compile-report", source, "-o", binary, level)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            native = subprocess.run([str(binary)], capture_output=True, text=True,
+                                    timeout=10)
+            self.assertEqual(native.returncode, 0, native.stderr)
+            self.assertEqual(native.stdout, "i64:42\n")
+
+    def test_llvm_sroa_removes_non_escaping_temporary_array_storage(self):
+        opt = shutil.which("opt")
+        if opt is None:
+            self.skipTest("LLVM opt is required for the pinned SROA structural check")
+        source = self.program("(index (array-of (cast i64 40) 2) 0)")
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("alloca", emitted.stdout)
+
+        module = self.root / "temporary-array.ll"
+        module.write_text(emitted.stdout)
+        optimized = subprocess.run(
+            [opt, "-S", "-passes=default<O2>", str(module), "-o", "-"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(optimized.returncode, 0, optimized.stderr)
+        self.assertNotIn("alloca", optimized.stdout)
+        self.assertNotIn("array.index.oob", optimized.stdout)
+
+    def test_llvm_sroa_preserves_escaping_storage_and_effects(self):
+        opt = shutil.which("opt")
+        if opt is None:
+            self.skipTest("LLVM opt is required for the pinned SROA structural check")
+        source = """
+(%external-function inspect "inspect_scalar" ((pointer i64)) void)
+(%function keep ((value i64)) i64
+  (do (inspect (address-of value)) value))
+(%function main () i64 (keep 42))
+"""
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("alloca", emitted.stdout)
+        self.assertIn("@inspect_scalar", emitted.stdout)
+        module = self.root / "escaping-value.ll"
+        module.write_text(emitted.stdout)
+        optimized = subprocess.run(
+            [opt, "-S", "-passes=default<O2>", str(module), "-o", "-"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(optimized.returncode, 0, optimized.stderr)
+        self.assertIn("@inspect_scalar", optimized.stdout)
+
     def test_llvm_pipeline_preserves_callbacks(self):
         source = """
 (%type Callback (pointer (function (i32) i32)))

@@ -790,3 +790,22 @@ compares a function called with constant and dynamic modes at `-O0` and `-O2`
 and checks the runtime result. Optimization choices and clone counts remain
 LLVM-version and target dependent; the test does not promise that every
 constant call receives a clone.
+
+### Temporary product scalar replacement: existing LLVM SROA audited
+
+Verona lowers tuple/product constructors and projections to LLVM `insertvalue`
+and `extractvalue` SSA operations. Addressable array temporaries use LLVM
+allocas and are eligible for the standard pipeline's SROA pass when their
+accesses are analyzable and their addresses do not escape. The pinned LLVM 23
+default optimization pipeline includes SROA at `-O1` through `-O3`; `-O0`
+remains the comparison path. This audit adds no Verona aggregate rewrite or
+escape analysis, and LLVM decides when promotion is legal and profitable.
+
+A regression passes a temporary tuple through a function and projects both
+components at `-O0` and `-O2`, checking the same result as the evaluator. A
+structural check runs the pinned `opt` default O2 pipeline over Verona's emitted
+IR: the constant-index temporary array begins with an alloca and bounds-check
+blocks, then has neither after optimization. An escaping address passed to an
+unknown external call remains present after the same pipeline. These assertions
+verify an eligible promotion and a required escape boundary without asserting
+the exact LLVM IR beyond those stable properties.
