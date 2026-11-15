@@ -157,6 +157,14 @@ passes. Native export and callback adapter symbols retain their ABI/identity;
 attributes apply to the underlying implementation bodies. `%noinline` prevents
 inlining, while other optimizations may still fold calls or delete unused bodies.
 
+Automatic small-function inlining uses the standard LLVM pipeline after Verona's
+local simplification and ABI lowering. It adds no `alwaysinline` attribute or
+Verona source-size cutoff. LLVM decides profitability at each call site, so a
+small source body is not a promise of inlining. Decisions may vary with the
+target, optimization level and pinned LLVM version. `optimization-report`
+describes local simplification before that pipeline; it does not report LLVM's
+automatic inlining decisions.
+
 ## Manifest files
 
 The `build` command reads `verona.build` in the current directory. A manifest

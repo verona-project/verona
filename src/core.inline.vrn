@@ -14,6 +14,9 @@
 ; Only explicit policies create attributes. No directive means automatic LLVM
 ; profitability decisions. Attributes apply to implementation bodies, leaving
 ; native export/callback adapter identity and ABI exposure unchanged.
+; Small-function heuristics operate on lowered IR in the default<O1/O2/O3>
+; pipelines. Do not turn an automatic small-body candidate into alwaysinline:
+; LLVM still owns call-site profitability, legality and recursive expansion.
 (base:function attribute
   ((owner llvm:session) (slots (pointer t:value-ref)) (fn u64) (kind u64)) unit
   (let ((name (pointer u8) (match kind (72 "alwaysinline") (_ "noinline"))))

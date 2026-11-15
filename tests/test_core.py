@@ -3523,6 +3523,95 @@ int main(int argc, char **argv) {
                                         text=True, timeout=10)
                 self.assertEqual(native.returncode, 0, native.stderr)
 
+    def test_auto_inline_small_live_helper_with_runtime_effects(self):
+        client = self.root / "auto-inline-client.c"
+        client.write_text("""
+#include <stdint.h>
+#include <stdlib.h>
+extern int64_t small_api(int64_t);
+static int calls;
+static int64_t trace;
+int64_t heuristic_effect(int64_t n) {
+  ++calls;
+  trace = trace * 100 + n;
+  return n * 2;
+}
+int main(int argc, char **argv) {
+  int64_t n = argc > 1 ? strtoll(argv[1], 0, 10) : 2;
+  int64_t result = small_api(n);
+  return result == 4 * n + 4 && calls == 2 && trace == n * 100 + n + 1 ? 0 : 1;
+}
+""")
+        for policy in ("", "(%noinline small)"):
+            source = f"""
+(%external-function effect "heuristic_effect" (i64) i64)
+(%function small ((value i64)) i64 (%+-primitive-i64 (effect value) 1))
+{policy}
+(%function apply ((value i64)) i64
+  (%+-primitive-i64 (small value) (small (%+-primitive-i64 value 1))))
+(native-export apply "small_api")
+(%function main () i64 0)
+"""
+            emitted = self.run_core("emit-llvm", source)
+            self.assertEqual(emitted.returncode, 0, emitted.stderr)
+            functions = re.findall(
+                r'define internal i64 @("[^"\n]+"|[\w.]+)\(i64 %[\w.]+\)([^\n]*) \{\n(.*?)\n\}',
+                emitted.stdout, re.S)
+            helpers = [(name.strip('"'), suffix) for name, suffix, body in functions
+                       if "@heuristic_effect(" in body]
+            self.assertEqual(len(helpers), 1, emitted.stdout)
+            name, suffix = helpers[0]
+            if not policy:
+                # Automatic inlining must not be implemented as an always request.
+                self.assertNotIn("alwaysinline", emitted.stdout)
+                self.assertNotIn("noinline", emitted.stdout)
+                self.assertNotIn("#", suffix)
+            for level in ("-O0", "-O1", "-O2", "-O3"):
+                with self.subTest(policy=policy or "auto", level=level):
+                    artifact = self.root / "auto-inline.o"
+                    compiled = self.run_core("compile", source, "--emit", "object",
+                                             "-o", artifact, level)
+                    self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                    self.assertEqual(compiled.stderr, "")
+                    symbols = subprocess.run([shutil.which("llvm-nm") or "nm", str(artifact)],
+                                             capture_output=True, text=True, timeout=10)
+                    self.assertEqual(symbols.returncode, 0, symbols.stderr)
+                    helper = r"(?m)\b[tT] _?" + re.escape(name) + r"$"
+                    if policy or level == "-O0":
+                        self.assertRegex(symbols.stdout, helper)
+                    else:
+                        self.assertNotRegex(symbols.stdout, helper)
+                    self.assertRegex(symbols.stdout, r"(?m)\bT _?small_api$")
+                    binary = self.root / "auto-inline-client"
+                    linked = subprocess.run(["clang", str(client), str(artifact), "-o", str(binary)],
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(linked.returncode, 0, linked.stderr)
+                    for value in ("2", "17"):
+                        native = subprocess.run([str(binary), value], capture_output=True,
+                                                text=True, timeout=10)
+                        self.assertEqual(native.returncode, 0, native.stderr)
+
+    def test_auto_inline_recursion_and_unused_failing_arguments(self):
+        self.agrees("""
+(%function fib ((n i64)) i64
+  (if (%<-primitive-i64 n 2) n
+    (%+-primitive-i64 (fib (%--primitive-i64 n 1)) (fib (%--primitive-i64 n 2)))))
+(%function main () i64 (fib 10))
+""", 55)
+        source = """
+(%function ignore ((unused i64)) i64 42)
+(%function main () i64 (ignore (%/-primitive-i64 1 0)))
+"""
+        evaluated = self.run_core("eval", source)
+        self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
+        for level in ("-O0", "-O1", "-O2", "-O3"):
+            binary = self.root / "auto-inline-failure"
+            compiled = self.run_core("compile-report", source, "-o", binary, level)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(native.returncode, 70, native.stderr)
+            self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+
     def test_inline_directives_and_auto_default(self):
         source = """
 (%inline forced)
