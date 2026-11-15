@@ -772,3 +772,21 @@ that an unused call terminates. This first step adds no interprocedural function
 summaries: even a known Verona callee remains potentially effectful and
 diverging. Tests retain unknown external calls and mutable-global reads while
 removing a safe unused scalar tree.
+
+### Constant-argument specialization: existing LLVM pipeline audited
+
+The pinned LLVM 23 `default<O1>`, `default<O2>`, and `default<O3>` pipelines
+include `ipsccp`. LLVM's FunctionSpecialization implementation is part of that
+interprocedural constant-propagation machinery; it clones profitable internal
+functions for constant arguments, folds the clone, and redirects matching call
+sites. LLVM owns the profitability threshold, clone budget and recursion
+limits. No Verona source-body clone, specialization cache, or annotation syntax
+is added.
+
+The existing lowering keeps all original function bodies and call arguments
+available to LLVM. Dynamic arguments therefore continue through the generic
+implementation, while a specialized call may use a clone. The new regression
+compares a function called with constant and dynamic modes at `-O0` and `-O2`
+and checks the runtime result. Optimization choices and clone counts remain
+LLVM-version and target dependent; the test does not promise that every
+constant call receives a clone.

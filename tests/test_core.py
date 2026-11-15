@@ -4048,6 +4048,24 @@ int main(int argc, char **argv) {
         # would mean the optimizer incorrectly discarded a potentially diverging call.
         self.assertNotEqual(native.returncode, 0, native.stdout)
 
+    def test_llvm_pipeline_specializes_constant_arguments(self):
+        source = """
+(%function select ((mode i64) (value i64)) i64
+  (if (%=-primitive-i64 mode 0) value (%+-primitive-i64 value 1)))
+(%function dynamic ((mode i64) (value i64)) i64 (select mode value))
+(%function main () i64
+  (%+-primitive-i64 (select 0 20) (%+-primitive-i64 (select 1 20) (dynamic 0 0))))
+"""
+        self.agrees(source, 41)
+        for level in ("-O0", "-O2"):
+            binary = self.root / ("specialization-" + level[1:])
+            compiled = self.run_core("compile-report", source, "-o", binary, level)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            native = subprocess.run([str(binary)], capture_output=True, text=True,
+                                    timeout=10)
+            self.assertEqual(native.returncode, 0, native.stderr)
+            self.assertEqual(native.stdout, "i64:41\n")
+
     def test_llvm_pipeline_preserves_callbacks(self):
         source = """
 (%type Callback (pointer (function (i32) i32)))
