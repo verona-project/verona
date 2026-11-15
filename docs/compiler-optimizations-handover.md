@@ -731,3 +731,26 @@ the left canonical node in `selected`. `-O0` performs no analysis allocation or
 rewrite. Two regressions verify reuse of repeated multiplication trees, preserve
 the repeated calls that are outside the domain, and reject structurally similar
 computations separated by conditionals.
+
+### Self-tail-recursion elimination
+
+Enabled local lowering recognizes a resolved direct call to the function being
+lowered only when the call is in a tail result position. It emits the call as
+LLVM `musttail` followed by its required immediate return, which lets LLVM lower
+the self-recursive path without growing the native call stack. Tail position is
+propagated through `if` branches, the body of `let`, and the final item of `do`;
+their preceding conditions, initializers, and sequence items retain ordinary
+left-to-right, exactly-once evaluation.
+
+The implementation deliberately excludes indirect calls, mutual recursion,
+matches, and other contexts that need a value after the call. It also rejects a
+body containing a read of an addressable parameter or local, so a tail call
+cannot shorten the lifetime of storage whose address can escape. A bounded
+structural safety walk declines deeply nested bodies rather than guessing.
+`-O0` keeps the existing ordinary calls. `optimization-report` emits
+`self-tail-recursion` at each selected call; no checked nodes, binders, source
+locations, or evaluator behavior are changed.
+
+Regression coverage checks the emitted `musttail` IR and runs a one-million-step
+countdown through a native optimized executable. A second case makes a parameter
+addressable and confirms that it remains an ordinary call.

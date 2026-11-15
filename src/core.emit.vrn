@@ -468,6 +468,129 @@
       (let ((value t:value-ref (expression c b id)))
         (match (m:next c id) (0 value) (next (sequence c b next)))))))
 
+; A musttail call ends the current activation immediately.  Reusing a frame
+; whose addressable locals can escape would change their lifetime, so this
+; deliberately rejects a function body that reads any stored local or
+; parameter.  The bounded structural walk is conservative on deep trees.
+(base:function tail-storage-safe ((c m:context) (id u64) (fuel u64)) bool
+  (match fuel
+    (0 false)
+    (_
+      (let ((v m:node (m:at c id)))
+        (base:and-then
+          (match (field v kind)
+            (5 (base:not (check:stored-binder c (field v target))))
+            (_ true))
+          (tail-storage-safe-chain c (field v child) (- fuel 1)))))))
+
+(base:function tail-storage-safe-chain
+  ((c m:context) (id u64) (fuel u64)) bool
+  (match id
+    (0 true)
+    (_
+      (base:and-then
+        (tail-storage-safe c id fuel)
+        (tail-storage-safe-chain c (m:next c id) fuel)))))
+
+; Tail-position lowering is separate from EXPRESSION because it terminates the
+; current block.  It preserves ordinary left-to-right evaluation before a
+; direct self call, and recurses only through control-flow or sequencing forms
+; that preserve tail position.  Every other expression remains an ordinary
+; computation followed by return.
+(base:function tail-sequence
+  ((c m:context) (b backend) (fn u64) (safe bool) (id u64)) unit
+  (match id
+    (0
+      (do
+        (ir:build-ret
+          (field (field b owner) builder)
+          (integer (field b owner) 0))
+        unit))
+    (_
+      (match (m:next c id)
+        (0 (tail-expression c b fn safe id))
+        (next (do (expression c b id) (tail-sequence c b fn safe next)))))))
+
+(base:function tail-bindings
+  ((c m:context) (b backend) (fn u64) (safe bool) (id u64) (body u64)) unit
+  (match id
+    (0 (tail-sequence c b fn safe body))
+    (_
+      (let ((name u64 (m:child c id)) (init u64 (field (m:at c id) target)))
+        (do
+          (match (passes:dead (field b passes) id)
+            (true unit)
+            (false (bind-binder c b name (expression c b init))))
+          (tail-bindings c b fn safe (m:next c id) body))))))
+
+(base:function tail-conditional
+  ((c m:context) (b backend) (fn u64) (safe bool) (args u64)) unit
+  (let
+    ((owner llvm:session (field b owner))
+     (builder t:builder-ref (field owner builder))
+     (condition t:value-ref (expression c b args))
+     (function t:value-ref (ir:block-parent (ir:builder-block builder)))
+     (yes t:block-ref (ir:block-append (field owner context) function "tail.then"))
+     (no t:block-ref (ir:block-append (field owner context) function "tail.else")))
+    (do
+      (ir:build-cond-br
+        builder
+        (ir:build-icmp builder enum:int-ne condition (integer owner 0) "")
+        yes
+        no)
+      (ir:builder-position builder yes)
+      (tail-expression c b fn safe (m:next c args))
+      (ir:builder-position builder no)
+      (tail-expression c b fn safe (m:next c (m:next c args))))))
+
+(base:function tail-self-call
+  ((c m:context) (b backend) (id u64) (v m:node) (args u64)) unit
+  (let
+    ((buffer (pointer t:value-ref) (layout:values c constants:parameter-limit))
+     (count u64 (arguments c b args buffer 0))
+     (function t:value-ref (get b (field v target)))
+     (call
+       t:value-ref
+       (ir:build-call
+         (field (field b owner) builder)
+         (ir:function-type-of function)
+         function
+         buffer
+         (base:convert count)
+         "")))
+    (do
+      (ir:tail-call-kind-set call enum:tail-call-musttail)
+      (ir:build-ret (field (field b owner) builder) call)
+      unit)))
+
+(base:function tail-expression
+  ((c m:context) (b backend) (fn u64) (safe bool) (id u64)) unit
+  (let ((v m:node (m:at c id)) (args u64 (m:next c (field v child))))
+    (match (field v kind)
+      (6
+        (let ((selected u64 (passes:branch (field b passes) id args)))
+          (match selected
+            (0 (tail-conditional c b fn safe args))
+            (_ (tail-expression c b fn safe selected)))))
+      (7 (tail-bindings c b fn safe (m:child c args) (m:next c args)))
+      (56 (tail-sequence c b fn safe args))
+      (8
+        (match
+          (passes:self-tail
+            (field b passes)
+            id
+            fn
+            (base:and safe (== (field v target) fn)))
+          (true (tail-self-call c b id v args))
+          (false
+            (do
+              (ir:build-ret (field (field b owner) builder) (expression c b id))
+              unit))))
+      (_
+        (do
+          (ir:build-ret (field (field b owner) builder) (expression c b id))
+          unit)))))
+
 ; Lower sequential let initializers, associate binder IDs with their LLVM values, then lower the body.
 ; Keep initializer order. Skip only unreferenced bindings proven discardable.
 ; A copy from a stored local loads its current value here, preserving a snapshot.
@@ -1303,9 +1426,12 @@
         (do
           (entry owner function)
           (parameters c b function (m:child c (check:signature c fn)) 0)
-          (ir:build-ret
-            (field owner builder)
-            (expression c b (check:body c fn)))
+          (tail-expression
+            c
+            b
+            fn
+            (tail-storage-safe c (check:body c fn) 32)
+            (check:body c fn))
           (bodies c b (m:next c fn)))))))
 
 (base:function declarations ((c m:context) (b backend) (fn u64)) unit

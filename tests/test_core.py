@@ -3435,6 +3435,43 @@ int main(int argc, char **argv) {
         self.assertEqual(report.returncode, 0, report.stderr)
         self.assertNotIn("optimization: local-cse", report.stderr)
 
+    def test_self_tail_recursion_elimination(self):
+        source = """
+(%function count ((value i64) (total i64)) i64
+  (if (%=-primitive-i64 value 0)
+      total
+      (count (%--primitive-i64 value 1) (%+-primitive-i64 total 1))))
+(%function main () i64 (count 1000000 0))
+"""
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("musttail call i64", emitted.stdout)
+        report = self.run_core("optimization-report", source)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertIn("optimization: self-tail-recursion node=", report.stderr)
+
+        binary = self.root / "self-tail"
+        compiled = self.run_core("compile-report", source, "-o", binary, "-O1")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(native.returncode, 0, native.stderr)
+        self.assertEqual(native.stdout, "i64:1000000\n")
+
+        addressable = """
+(%function blocked ((value i64)) i64
+  (if (%=-primitive-i64 value 0)
+      0
+      (let ((address (pointer i64) (address-of value)))
+        (blocked (%--primitive-i64 (deref address) 1)))))
+(%function main () i64 (blocked 2))
+"""
+        rejected = self.run_core("optimization-report", addressable)
+        self.assertEqual(rejected.returncode, 0, rejected.stderr)
+        self.assertNotIn("optimization: self-tail-recursion", rejected.stderr)
+        emitted = self.run_core("emit-llvm", addressable)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertNotIn("musttail call", emitted.stdout)
+
     def test_optimization_report_decisions_and_stable_tape(self):
         source = """
 (%function main () i64

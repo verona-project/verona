@@ -45,6 +45,17 @@
             (_ (remark p (m:next (field p program) left) "local-cse" left)))
           left)))))
 
+; Tail lowering performs the actual rewrite, because only it knows that a
+; direct call is immediately returned.  Keep the optimization-level gate and
+; diagnostic policy here with the other lowering decisions.
+(base:function self-tail ((p context) (id u64) (fn u64) (eligible bool)) bool
+  (match (base:and (field p enabled) eligible)
+    (false false)
+    (true
+      (do
+        (remark p id "self-tail-recursion" fn)
+        true))))
+
 ; Remarks never increment the semantic error count. Node IDs and source spans
 ; refer to the original checked program, including imported module locations.
 (base:function remark ((p context) (id u64) (rule (pointer u8)) (selected u64))
@@ -172,4 +183,4 @@
     (m:text 1 "\n")
     (dump-range c 1 (- (m:nodes-length (deref (field c items))) 1))))
 
-(export limits context defaults prepare common-sibling fold branch arm dead dump)
+(export limits context defaults prepare common-sibling self-tail fold branch arm dead dump)
