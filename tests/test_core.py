@@ -75,8 +75,8 @@ class CoreTests(unittest.TestCase):
             if operation["status"] != "implemented":
                 continue
             expression = "(and " + " ".join(operation["positive"]) + ")"
-            source = ("(macro result () (cond (" + expression + " 42) (true 0)))"
-                      "(function main () exit-code (result))")
+            source = ("(%macro result () (cond (" + expression + " 42) (true 0)))"
+                      "(%function main () exit-code (result))")
             with self.subTest(operation=operation["name"]):
                 self.source.write_text(source)
                 binary = self.root / "reference-helper"
@@ -2410,15 +2410,15 @@ class CoreTests(unittest.TestCase):
         binary = self.root / "out" / "boolean"
         prefix = "(import base :as b)\n"
         body = """
-(external-function abort "abort" () void)
-(function fail () bool (do (abort) false))
-(function record ((trace (pointer i64)) (digit i64) (value bool)) bool
+(%external-function abort "abort" () void)
+(%function fail () bool (do (abort) false))
+(%function record ((trace (pointer i64)) (digit i64) (value bool)) bool
   (do (store (deref trace) (%+-primitive-i64 (%*-primitive-i64 (deref trace) 10) digit))
     value))
-(function guarded ((values (pointer bool)) (index u64) (count u64)) bool
+(%function guarded ((values (pointer bool)) (index u64) (count u64)) bool
   (b:and-then (%<-primitive-u64 index count) (deref (pointer-offset values index))))
 (b:macro nested (value) `(b:and-then ,value (b:not false)))
-(function main () exit-code
+(%function main () exit-code
   (let ((trace i64 0) (values bool true) (identity bool true) (primitive bool false)
         (eager-and bool (b:and (record (& trace) 1 false) (record (& trace) 2 true)))
         (eager-or bool (b:or (record (& trace) 3 true) (record (& trace) 4 false)))
@@ -2450,7 +2450,7 @@ class CoreTests(unittest.TestCase):
             "(b:or-else true (cast i64 1))",
         ):
             with self.subTest(expression=expression):
-                result = build(f"(function main () exit-code (match {expression} (true 0) (false 1)))", 0)
+                result = build(f"(%function main () exit-code (match {expression} (true 0) (false 1)))", 0)
                 self.assertNotEqual(result.returncode, 0)
 
     def test_constrained_function_specialization(self):
@@ -2803,10 +2803,10 @@ class CoreTests(unittest.TestCase):
                 host_directory.mkdir(parents=True)
                 for module, source in files.items():
                     (core_directory / f"{module}.vrn").write_text(source)
-                    translated = re.sub(r"\(%(function|type|import|export)\b", r"(\1", source)
+                    translated = source
                     if module == "input":
-                        translated = translated.replace("(function main () i64", "(function entry () i64")
-                        translated += "(function main () exit-code (%trunc-primitive-i64-i32 (entry)))"
+                        translated = translated.replace("(%function main () i64", "(%function entry () i64")
+                        translated += "(%function main () exit-code (%trunc-primitive-i64-i32 (entry)))"
                     (host_directory / f"{module}.vrn").write_text(translated)
                 core = subprocess.run([str(COMPILER), "eval", str(core_directory / "input.vrn")],
                                       capture_output=True, text=True, timeout=30)
@@ -3448,7 +3448,7 @@ int main(int argc, char **argv) {
         self.assertIn("musttail call i64", emitted.stdout)
         report = self.run_core("optimization-report", source)
         self.assertEqual(report.returncode, 0, report.stderr)
-        self.assertIn("optimization: self-tail-recursion node=", report.stderr)
+        self.assertIn("optimization: tail-call node=", report.stderr)
 
         binary = self.root / "self-tail"
         compiled = self.run_core("compile-report", source, "-o", binary, "-O1")
@@ -3467,7 +3467,7 @@ int main(int argc, char **argv) {
 """
         rejected = self.run_core("optimization-report", addressable)
         self.assertEqual(rejected.returncode, 0, rejected.stderr)
-        self.assertNotIn("optimization: self-tail-recursion", rejected.stderr)
+        self.assertNotIn("optimization: tail-call", rejected.stderr)
         emitted = self.run_core("emit-llvm", addressable)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         self.assertNotIn("musttail call", emitted.stdout)

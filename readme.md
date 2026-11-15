@@ -119,13 +119,14 @@ optimization pipeline with the configured target machine before object emission.
 simplifications and before LLVM passes; native optimization flags remain specific
 to compilation commands. Modules are verified before and after LLVM optimization.
 
-With local optimization enabled, direct self-recursive calls in tail position
-are emitted as LLVM `musttail` calls. The supported tail contexts are the final
-result of a function, `if` branch, `let` body, or `do` sequence. Calls through
-values, mutual recursion, matches, and bodies that use addressable parameters
-or locals remain ordinary calls. Arguments still evaluate once from left to
-right before the call; `-O0` keeps ordinary recursion. `optimization-report`
-emits `self-tail-recursion` only when this lowering is selected.
+With local optimization enabled, a resolved direct call in tail position is
+emitted as LLVM `musttail` when its LLVM function type matches the current
+function. The supported tail contexts are the final result of a function, `if`
+branch, `let` body, or `do` sequence, and include eligible mutual recursion.
+Calls through values, type-mismatched direct calls, matches, and bodies that
+read addressable parameters or locals remain ordinary calls. Arguments still
+evaluate once from left to right before the call; `-O0` keeps ordinary calls.
+`optimization-report` emits `tail-call` only when this lowering is selected.
 
 Optimized native output also removes unreachable internal functions, including
 dead recursive groups. A source-level `export` controls Verona module visibility;

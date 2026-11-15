@@ -494,7 +494,7 @@
 
 ; Tail-position lowering is separate from EXPRESSION because it terminates the
 ; current block.  It preserves ordinary left-to-right evaluation before a
-; direct self call, and recurses only through control-flow or sequencing forms
+; direct call, and recurses only through control-flow or sequencing forms
 ; that preserve tail position.  Every other expression remains an ordinary
 ; computation followed by return.
 (base:function tail-sequence

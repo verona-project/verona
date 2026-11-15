@@ -2474,6 +2474,10 @@
     ((m:is c head "min") 7)
     ((m:is c head "max") 8)
     ((m:is c head "abs") 9)
+    ; `=` is the historical compile-time numeric equality helper.  This is
+    ; confined to macro evaluation: runtime `=` remains a resolved generic,
+    ; never a concrete primitive alias.
+    ((m:is c head "=") 10)
     ((m:is c head "==") 10)
     ((m:is c head "/=") 11)
     ((m:is c head "<") 12)

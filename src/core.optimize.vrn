@@ -443,7 +443,10 @@
           (3 true)
           (5 (base:not (check:stored-binder c (field v target))))
           (9
-            (let ((ty u64 (field (m:at c (field v child)) ty)))
+            ; CHILD is the primitive's operation-head syntax.  Its type is
+            ; not the checked expression type, so use the primitive node's
+            ; resolved result type when deciding whether scalar CSE is safe.
+            (let ((ty u64 (field v ty)))
               (base:and-then
                 (base:or (== ty 2) (num:integer-type ty))
                 (base:and-then
@@ -522,11 +525,20 @@
                     (match (m:next c right)
                       (0
                         (match
+                          ; Reusing an equal leaf is already free in SSA and
+                          ; produces no eliminated computation.  Restrict
+                          ; candidates to primitive trees, which also keeps
+                          ; nested branches from receiving misleading local
+                          ; CSE remarks for their repeated parameter reads.
                           (base:and-then
-                            (cse-safe c left 32)
+                            (== (field (m:at c left) kind) 9)
                             (base:and-then
-                              (cse-safe c right 32)
-                              (cse-equal c left right 32)))
+                              (== (field (m:at c right) kind) 9)
+                              (base:and-then
+                                (cse-safe c left 32)
+                                (base:and-then
+                                  (cse-safe c right 32)
+                                  (cse-equal c left right 32)))))
                           (true left)
                           (false 0)))
                       (_ 0)))))))))
