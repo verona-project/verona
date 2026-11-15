@@ -1332,6 +1332,10 @@
           (_ unit))
         (external-declarations c b (m:next c id))))))
 
+; Internal implementations can be removed by LLVM when their entire call/use
+; graph is unreachable, including recursive groups. Source-level exports alone
+; do not create native roots. Native entry points and escaping callback uses
+; retain their reachable implementations/adapters through ordinary LLVM edges.
 ; Export only explicit C entry points. Cache the first native adapter so
 ; addresses of an exported function use that same entry point.
 (base:function native-exports ((c m:context) (b backend) (id u64)) unit

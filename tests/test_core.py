@@ -3779,6 +3779,130 @@ int main(int argc, char **argv) {
 (%function main () i64 (if (even 10) 42 0))
 """, 42)
 
+    def test_dead_functions_remove_unreachable_chains_and_recursive_groups(self):
+        source = """
+(%type Callback (pointer (function (i64) i64)))
+(%external-function effect-a "dead_effect_a" (i64) i64)
+(%external-function effect-b "dead_effect_b" (i64) i64)
+(%external-function effect-c "dead_effect_c" (i64) i64)
+(%function first ((value i64)) i64 (do (effect-a value) (second value)))
+(%function second ((value i64)) i64 (do (effect-b value) (first value)))
+(%function chain ((value i64)) i64
+  (let ((callback Callback first)) (do (effect-c value) (callback value))))
+(%noinline first)
+(%noinline second)
+(%noinline chain)
+(export first)
+(%function live ((value i64)) i64 (%+-primitive-i64 value 1))
+(native-export live "live_api")
+(%function main () i64 0)
+"""
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        functions = re.findall(
+            r'define internal i64 @("[^"\n]+"|[\w.]+)\(i64 %[\w.]+\)[^\n]* \{\n(.*?)\n\}',
+            emitted.stdout, re.S)
+        dead = [name.strip('"') for name, body in functions if "@dead_effect_" in body]
+        self.assertEqual(len(dead), 3, emitted.stdout)
+        client = self.root / "dead-functions-client.c"
+        client.write_text("""
+#include <stdint.h>
+#include <stdlib.h>
+extern int64_t live_api(int64_t);
+static int calls;
+int64_t dead_effect_a(int64_t n) { ++calls; return n; }
+int64_t dead_effect_b(int64_t n) { ++calls; return n; }
+int64_t dead_effect_c(int64_t n) { ++calls; return n; }
+int main(int argc, char **argv) {
+  int64_t n = argc > 1 ? strtoll(argv[1], 0, 10) : 41;
+  return live_api(n) == n + 1 && calls == 0 ? 0 : 1;
+}
+""")
+        for level in ("-O0", "-O1", "-O2", "-O3"):
+            with self.subTest(level=level):
+                artifact = self.root / "dead-functions.o"
+                compiled = self.run_core("compile", source, "--emit", "object",
+                                         "-o", artifact, level)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                symbols = subprocess.run([shutil.which("llvm-nm") or "nm", str(artifact)],
+                                         capture_output=True, text=True, timeout=10)
+                self.assertEqual(symbols.returncode, 0, symbols.stderr)
+                for name in dead:
+                    pattern = r"(?m)\b[tT] _?" + re.escape(name) + r"$"
+                    if level == "-O0":
+                        self.assertRegex(symbols.stdout, pattern)
+                    else:
+                        self.assertNotRegex(symbols.stdout, pattern)
+                if level != "-O0":
+                    self.assertNotIn("dead_effect_", symbols.stdout)
+                self.assertRegex(symbols.stdout, r"(?m)\bT _?live_api$")
+                binary = self.root / "dead-functions-client"
+                linked = subprocess.run(["clang", str(client), str(artifact), "-o", str(binary)],
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(linked.returncode, 0, linked.stderr)
+                native = subprocess.run([str(binary), "17"], capture_output=True,
+                                        text=True, timeout=10)
+                self.assertEqual(native.returncode, 0, native.stderr)
+
+    def test_dead_functions_preserve_escaping_library_callbacks(self):
+        source = """
+(%type Callback (pointer (function (i64) i64)))
+(%function original ((value i64)) i64 (%+-primitive-i64 value 1))
+(%function forward ((value i64)) i64 (original value))
+(%function first () Callback original)
+(%function second () Callback forward)
+(%function invoke ((callback Callback) (value i64)) i64 (callback value))
+(native-export first "first_callback")
+(native-export second "second_callback")
+(native-export invoke "invoke_callback")
+"""
+        client = self.root / "callback-roots-client.c"
+        client.write_text("""
+#include <stdint.h>
+#include <stdlib.h>
+typedef int64_t (*callback)(int64_t);
+extern callback first_callback(void);
+extern callback second_callback(void);
+extern int64_t invoke_callback(callback, int64_t);
+static int64_t twice(int64_t n) { return n * 2; }
+int main(int argc, char **argv) {
+  int64_t n = argc > 1 ? strtoll(argv[1], 0, 10) : 41;
+  callback a = first_callback(), b = second_callback();
+  return a != b && a == first_callback() && b == second_callback()
+      && a(n) == n + 1 && b(n) == n + 1
+      && invoke_callback(twice, n) == n * 2 ? 0 : 1;
+}
+""")
+        for kind, extension in (("object", ".o"), ("static-library", ".a"),
+                                ("shared-library", ".dylib" if sys.platform == "darwin" else ".so")):
+            for level in ("-O0", "-O2"):
+                with self.subTest(kind=kind, level=level):
+                    artifact = self.root / ("callback-roots" + extension)
+                    compiled = self.run_core("compile", source, "--emit", kind,
+                                             "-o", artifact, level)
+                    self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                    symbols = subprocess.run([shutil.which("llvm-nm") or "nm", str(artifact)],
+                                             capture_output=True, text=True, timeout=10)
+                    self.assertEqual(symbols.returncode, 0, symbols.stderr)
+                    for name in ("first_callback", "second_callback", "invoke_callback"):
+                        self.assertRegex(symbols.stdout, r"(?m)\bT _?" + name + r"$")
+                    binary = self.root / "callback-roots-client"
+                    linked = subprocess.run(["clang", str(client), str(artifact), "-o", str(binary)],
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(linked.returncode, 0, linked.stderr)
+                    native = subprocess.run([str(binary), "17"], capture_output=True,
+                                            text=True, timeout=10)
+                    self.assertEqual(native.returncode, 0, native.stderr)
+
+    def test_dead_functions_keep_diagnostics_in_unreachable_bodies(self):
+        source = "(%function unreachable () i64 missing)" + self.program("42")
+        for mode in ("check", "eval", "emit-llvm", "compile-report"):
+            options = ("-o", self.root / "invalid-dead", "-O2") if mode == "compile-report" else ()
+            with self.subTest(mode=mode):
+                result = self.run_core(mode, source, *options)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("unknown local name", result.stderr)
+
     def test_llvm_pipeline_removes_internal_functions(self):
         source = """
 (%function unreachable () i64 12345)
