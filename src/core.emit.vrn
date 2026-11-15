@@ -683,6 +683,10 @@
     (word owner ty (base:convert (num:width ty)))
     ""))
 
+; Immutable function-value bindings can retain a concrete LLVM callee here.
+; Evaluate that value before arguments; arguments are then evaluated once,
+; left to right. LLVM's inliner owns body substitution and fresh SSA identities
+; for supported noncapturing applications, respecting the callee's attributes.
 (base:function indirect-call ((c m:context) (b backend) (v m:node) (args u64))
   t:value-ref
   (match (cabi:compatible c (field v target))
@@ -1357,6 +1361,9 @@
 
 ; C-compatible function pointers always carry native entry points. Private
 ; direct calls retain their existing representation, including tuple callbacks.
+; A forwarding function still has its own observable address. Cache by source
+; declaration, never by its forwarded target; LLVM may simplify calls without
+; identifying these distinct callable values (eta replacement).
 (base:function callback-adapter
   ((c m:context) (b backend) (function u64) (site u64)) t:value-ref
   (let

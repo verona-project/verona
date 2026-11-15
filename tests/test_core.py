@@ -3142,6 +3142,219 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn(message, result.stderr)
 
+    def test_beta_known_function_binding_eliminates_calls(self):
+        source = """
+(%type Callback (pointer (function (i64) i64)))
+(%function twice ((value i64)) i64 (%+-primitive-i64 value value))
+(%function apply ((value i64)) i64
+  (let ((bound Callback twice) (alias bound)) (alias value)))
+(%function apply-unknown ((callback Callback) (value i64)) i64 (callback value))
+(native-export apply "apply_bound")
+(native-export apply-unknown "apply_unknown")
+(%function main () i64 (apply 21))
+"""
+        self.agrees(source, 42)
+        nm = shutil.which("llvm-nm") or shutil.which("nm")
+        self.assertIsNotNone(nm)
+        client = self.root / "beta-client.c"
+        client.write_text("""
+#include <stdint.h>
+#include <stdlib.h>
+typedef int64_t (*callback)(int64_t);
+extern int64_t apply_bound(int64_t);
+extern int64_t apply_unknown(callback, int64_t);
+static int64_t triple(int64_t n) { return n * 3; }
+int main(int argc, char **argv) {
+  int64_t n = argc > 1 ? strtoll(argv[1], 0, 10) : 21;
+  return apply_bound(n) == n * 2 && apply_unknown(triple, 14) == 42 ? 0 : 1;
+}
+""")
+        for level in ("-O0", "-O1", "-O2", "-O3"):
+            with self.subTest(level=level):
+                artifact = self.root / "beta.o"
+                compiled = self.run_core("compile", source, "--emit", "object",
+                                         "-o", artifact, level)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                symbols = subprocess.run([nm, str(artifact)], capture_output=True,
+                                         text=True, timeout=10)
+                self.assertEqual(symbols.returncode, 0, symbols.stderr)
+                # Private implementations/adapters use numeric symbols. Their
+                # removal proves the used bodies were substituted, with exported
+                # APIs still accepting runtime inputs from a separately built client.
+                pattern = r"(?m)\b[tT] _?\d+(?:\.[\w.]+)?$"
+                if level == "-O0":
+                    self.assertRegex(symbols.stdout, pattern)
+                else:
+                    self.assertNotRegex(symbols.stdout, pattern)
+                binary = self.root / "beta-client"
+                linked = subprocess.run(["clang", str(client), str(artifact), "-o", str(binary)],
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(linked.returncode, 0, linked.stderr)
+                native = subprocess.run([str(binary), "21"], capture_output=True,
+                                        text=True, timeout=10)
+                self.assertEqual(native.returncode, 0, native.stderr)
+
+    def test_beta_arguments_evaluated_once_and_in_order(self):
+        self.agrees("""
+(%type Callback (pointer (function (i64 i64) i64)))
+(%variable trace i64 0)
+(%function mark ((digit i64)) i64
+  (do (store trace (%+-primitive-i64 (%*-primitive-i64 trace 10) digit)) digit))
+(%function duplicate ((value i64) (ignored i64)) i64 (%+-primitive-i64 value value))
+(%function main () i64
+  (let ((bound Callback duplicate) (result (bound (mark 4) (mark 2))))
+    (%+-primitive-i64 result trace)))
+""", 50)
+
+    def test_beta_shadowing_and_repeated_applications(self):
+        self.agrees("""
+(%type Callback (pointer (function (i64 i64) i64)))
+(%function add ((value i64) (other i64)) i64
+  (let ((saved value) (value other)) (%+-primitive-i64 saved value)))
+(%function main () i64
+  (let ((value i64 100) (bound Callback add)
+        (first (bound 20 1)) (second (bound 19 2)))
+    (if (%=-primitive-i64 value 100) (%+-primitive-i64 first second) 0)))
+""", 42)
+
+    def test_beta_stored_functions_and_callee_order(self):
+        self.agrees("""
+(%type Callback (pointer (function (i64) i64)))
+(%function twice ((value i64)) i64 (%+-primitive-i64 value value))
+(%function other ((value i64)) i64 (%+-primitive-i64 value 11))
+(%function main () i64
+  (let ((bound Callback twice) (snapshot bound) (pointer (& bound)))
+    (store (deref pointer) other)
+    (%+-primitive-i64 (snapshot 10) (bound 11))))
+""", 42)
+        self.agrees("""
+(%type Callback (pointer (function (i64) i64)))
+(%function twice ((value i64)) i64 (%+-primitive-i64 value value))
+(%function other ((value i64)) i64 (%+-primitive-i64 value 1))
+(%function replace ((slot (pointer Callback))) i64
+  (do (store (deref slot) other) 21))
+(%function main () i64
+  (let ((bound Callback twice)) ((do bound) (replace (& bound)))))
+""", 42)
+        self.agrees("""
+(%type Callback (pointer (function (i64) i64)))
+(%function snapshot ((value i64)) i64
+  (let ((pointer (& value)) (copy value)) (store (deref pointer) 0) copy))
+(%function main () i64 (let ((bound Callback snapshot)) (bound 42)))
+""", 42)
+
+    def test_beta_respects_noinline(self):
+        source = """
+(%type Callback (pointer (function (i64) i64)))
+(%function twice ((value i64)) i64 (%+-primitive-i64 value value))
+(%noinline twice)
+(%function apply ((value i64)) i64 (let ((bound Callback twice)) (bound value)))
+(native-export apply "apply_bound")
+(%function main () i64 (apply 21))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        functions = re.findall(
+            r'define internal i64 @("[^"\n]+"|[\w.]+)\(i64 %[\w.]+\)[^\n]* \{\n(.*?)\n\}',
+            emitted.stdout, re.S)
+        names = [name.strip('"') for name, body in functions
+                 if re.search(r"add i64 (%[\w.]+), \1", body)]
+        self.assertEqual(len(names), 1, emitted.stdout)
+        artifact = self.root / "no-beta.o"
+        compiled = self.run_core("compile", source, "--emit", "object", "-o", artifact, "-O2")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        symbols = subprocess.run([shutil.which("llvm-nm") or "nm", str(artifact)],
+                                 capture_output=True, text=True, timeout=10)
+        self.assertEqual(symbols.returncode, 0, symbols.stderr)
+        self.assertRegex(symbols.stdout, r"(?m)\b[tT] _?" + re.escape(names[0]) + r"$")
+
+    def test_beta_preserves_unused_argument_failures(self):
+        source = """
+(%type Callback (pointer (function (i64 i64) i64)))
+(%function ignore ((first i64) (second i64)) i64 42)
+(%function main () i64
+  (let ((bound Callback ignore))
+    (bound (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1))))
+"""
+        evaluated = self.run_core("eval", source)
+        self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
+        self.assertIn("division by zero", evaluated.stderr)
+        for level in ("-O0", "-O2"):
+            binary = self.root / "beta failure"
+            compiled = self.run_core("compile-report", source, "-o", binary, level)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(native.returncode, 70, native.stderr)
+            self.assertEqual(native.stdout, "")
+            self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+
+    def test_eta_forwarder_preserves_identity(self):
+        self.agrees("""
+(%type Callback (pointer (function (i64) i64)))
+(%function target ((value i64)) i64 (%+-primitive-i64 value 1))
+(%function forward ((value i64)) i64 (target value))
+(%function main () i64
+  (let ((original Callback target) (wrapper Callback forward) (again Callback forward))
+    (if (!= original wrapper)
+      (if (== wrapper again) (wrapper 41) 0) 0)))
+""", 42)
+
+    def test_eta_dynamic_target_and_effects(self):
+        self.agrees("""
+(%type Callback (pointer (function (i64) i64)))
+(%variable calls i64 0)
+(%function first ((value i64)) i64 (%+-primitive-i64 value 1))
+(%function second ((value i64)) i64 (%+-primitive-i64 value 2))
+(%function forward ((callback Callback) (value i64)) i64
+  (do (store calls (%+-primitive-i64 calls 1)) (callback value)))
+(%function main () i64
+  (let ((a Callback first) (b Callback second))
+    (do (forward a 0)
+      (if (== (forward b 40) 42) (if (== calls 2) 42 0) 0))))
+""", 42)
+
+    def test_eta_forwarder_optimization_keeps_export(self):
+        source = """
+(%function target ((value i64)) i64 (%+-primitive-i64 value 1))
+(%function forward ((value i64)) i64 (target value))
+(native-export forward "forward_api")
+(%function main () i64 (forward 41))
+"""
+        self.agrees(source, 42)
+        client = self.root / "eta-client.c"
+        client.write_text("""
+#include <stdint.h>
+#include <stdlib.h>
+extern int64_t forward_api(int64_t);
+int main(int argc, char **argv) {
+  int64_t n = argc > 1 ? strtoll(argv[1], 0, 10) : 41;
+  return forward_api(n) == n + 1 ? 0 : 1;
+}
+""")
+        for level in ("-O0", "-O1", "-O2", "-O3"):
+            with self.subTest(level=level):
+                artifact = self.root / "eta.o"
+                compiled = self.run_core("compile", source, "--emit", "object",
+                                         "-o", artifact, level)
+                self.assertEqual(compiled.returncode, 0, compiled.stderr)
+                symbols = subprocess.run([shutil.which("llvm-nm") or "nm", str(artifact)],
+                                         capture_output=True, text=True, timeout=10)
+                self.assertEqual(symbols.returncode, 0, symbols.stderr)
+                self.assertRegex(symbols.stdout, r"(?m)\bT _?forward_api$")
+                private = r"(?m)\b[tT] _?\d+(?:\.[\w.]+)?$"
+                if level == "-O0":
+                    self.assertRegex(symbols.stdout, private)
+                else:
+                    self.assertNotRegex(symbols.stdout, private)
+                binary = self.root / "eta-client"
+                linked = subprocess.run(["clang", str(client), str(artifact), "-o", str(binary)],
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(linked.returncode, 0, linked.stderr)
+                native = subprocess.run([str(binary), "123"], capture_output=True,
+                                        text=True, timeout=10)
+                self.assertEqual(native.returncode, 0, native.stderr)
+
     def test_inline_directives_and_auto_default(self):
         source = """
 (%inline forced)
