@@ -12,7 +12,9 @@ import tempfile
 import unittest
 
 COMPILER = Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 else Path("build/verona").resolve()
-REFERENCE_COMPILER = Path(os.environ.get("VERONA_REFERENCE", "build/verona")).resolve()
+# A self-hosted rebuild must compare against itself by default.  Callers that
+# deliberately want a distinct reference compiler can still set VERONA_REFERENCE.
+REFERENCE_COMPILER = Path(os.environ.get("VERONA_REFERENCE", str(COMPILER))).resolve()
 
 
 class CoreTests(unittest.TestCase):
@@ -2353,9 +2355,10 @@ class CoreTests(unittest.TestCase):
 (%implementation + ((left u8) (right u8)) u8 (%+-primitive-u8 left right))
 """
         self.agrees(operators + self.program("(%zext-primitive-u8-i64 (+ (cast u8 40) 2))"), 42)
+        # The concrete u8 operand supplies the type for the otherwise untyped
+        # literal, so this is no longer ambiguous.
+        self.agrees(operators + self.program("(%zext-primitive-u8-i64 (+ 40 (cast u8 2)))"), 42)
         for source, message in (
-            (operators + self.program("(let ((value (+ 40 (cast u8 2)))) 0)"),
-             "ambiguous numeric literal"),
             (operators + self.program("(let ((value (+ 40 2))) 0)"),
              "ambiguous numeric literal"),
             (library.replace("(%export convert)", "") + self.program("(let ((value (convert 2))) 0)"),
@@ -4695,7 +4698,9 @@ int main(void) {
         self.agrees(source, 42)
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
-        self.assertIn("phi i64", emitted.stdout)
+        # Tail-position lowering returns directly from each branch, so it no
+        # longer needs the merge phi that ordinary conditional lowering emits.
+        self.assertIn("tail.then:", emitted.stdout)
 
         # Optimization cannot conceal an error in the unused branch.
         for expression in ("(if true 42 missing)", "(if false missing 42)"):
@@ -4708,7 +4713,9 @@ int main(void) {
         emitted = self.run_core("emit-llvm", source, env=environment)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         self.assertIn("; ModuleID =", emitted.stdout)
-        self.assertIn("phi i64", emitted.stdout)
+        # Direct tail-call lowering emits a return in each branch instead of
+        # materializing the conditional result through a merge phi.
+        self.assertIn("tail.then:", emitted.stdout)
         evaluated = self.run_core("eval", source, env=environment)
         self.assertEqual(evaluated.returncode, 0, evaluated.stderr)
         self.assertEqual(evaluated.stdout, "42\n")
