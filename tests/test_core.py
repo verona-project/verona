@@ -4158,6 +4158,26 @@ int main(void) {
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         self.assertIn("load i64", emitted.stdout)
 
+    def test_effect_analysis_keeps_unknown_calls_and_memory_reads(self):
+        source = """
+(%external-function observe "effect_observe" (i64) i64)
+(%variable mutable i64 17)
+(%function main () i64
+  (let ((call (observe 1)) (load mutable) (known (%+-primitive-i64 20 22)))
+    known))
+"""
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("@effect_observe", emitted.stdout)
+        self.assertIn("load i64", emitted.stdout)
+        self.assertNotIn("add i64 20, 22", emitted.stdout)
+
+        safe = self.run_core("emit-llvm", self.program(
+            "(let ((unused (%+-primitive-i64 (%*-primitive-i64 6 7) 0))) 42)"))
+        self.assertEqual(safe.returncode, 0, safe.stderr)
+        self.assertNotIn("mul i64", safe.stdout)
+        self.assertNotIn("add i64", safe.stdout)
+
     def test_dead_bindings_preserve_failures_and_diagnostics(self):
         cases = [
             (self.program("(let ((unused (%/-primitive-i64 1 0))) 42)"),

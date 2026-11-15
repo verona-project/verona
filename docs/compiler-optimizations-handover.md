@@ -754,3 +754,21 @@ locations, or evaluator behavior are changed.
 Regression coverage checks the emitted `musttail` IR and runs a one-million-step
 countdown through a native optimized executable. A second case makes a parameter
 addressable and confirms that it remains an ordinary call.
+
+### Conservative expression effect analysis
+
+`core.optimize:effect` now returns independent facts for discardability,
+duplication, memory reads, memory writes, possible traps and possible divergence.
+Facts combine across checked child expressions under the existing bounded
+traversal. Literals and supported immutable SSA scalar operations have a safe
+summary. Reads through stored locals are retained as observable/trapping, and
+division is discardable only when constant evaluation proves it succeeds.
+Calls, global reads, pointer operations and unsupported nodes return conservative
+unknown effects; recursion-budget exhaustion does the same.
+
+Dead-binding elimination now consumes only the summary's discardability field.
+It does not infer that a non-writing expression can be duplicated or moved, nor
+that an unused call terminates. This first step adds no interprocedural function
+summaries: even a known Verona callee remains potentially effectful and
+diverging. Tests retain unknown external calls and mutable-global reads while
+removing a safe unused scalar tree.
