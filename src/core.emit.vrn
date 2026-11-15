@@ -543,7 +543,7 @@
       (ir:builder-position builder no)
       (tail-expression c b fn safe (m:next c (m:next c args))))))
 
-(base:function tail-self-call
+(base:function tail-direct-call
   ((c m:context) (b backend) (id u64) (v m:node) (args u64)) unit
   (let
     ((buffer (pointer t:value-ref) (layout:values c constants:parameter-limit))
@@ -575,17 +575,24 @@
       (7 (tail-bindings c b fn safe (m:child c args) (m:next c args)))
       (56 (tail-sequence c b fn safe args))
       (8
+        (let
+          ((caller t:value-ref (get b fn))
+           (callee t:value-ref (get b (field v target))))
         (match
-          (passes:self-tail
+          (passes:tail-call
             (field b passes)
             id
             fn
-            (base:and safe (== (field v target) fn)))
-          (true (tail-self-call c b id v args))
+            (base:and
+              safe
+              (==
+                (m:address (cast (pointer void) (ir:function-type-of caller)))
+                (m:address (cast (pointer void) (ir:function-type-of callee))))))
+          (true (tail-direct-call c b id v args))
           (false
             (do
               (ir:build-ret (field (field b owner) builder) (expression c b id))
-              unit))))
+              unit)))))
       (_
         (do
           (ir:build-ret (field (field b owner) builder) (expression c b id))

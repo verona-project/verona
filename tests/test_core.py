@@ -3472,6 +3472,27 @@ int main(int argc, char **argv) {
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         self.assertNotIn("musttail call", emitted.stdout)
 
+    def test_general_tail_calls_same_signature_mutual_recursion(self):
+        source = """
+(%function even ((value i64)) i64
+  (if (%=-primitive-i64 value 0) 1 (odd (%--primitive-i64 value 1))))
+(%function odd ((value i64)) i64
+  (if (%=-primitive-i64 value 0) 0 (even (%--primitive-i64 value 1))))
+(%function main () i64 (even 1000000))
+"""
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertGreaterEqual(emitted.stdout.count("musttail call i64"), 2)
+        report = self.run_core("optimization-report", source)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertIn("optimization: tail-call node=", report.stderr)
+        binary = self.root / "mutual-tail"
+        compiled = self.run_core("compile-report", source, "-o", binary, "-O1")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+        self.assertEqual(native.returncode, 0, native.stderr)
+        self.assertEqual(native.stdout, "i64:1\n")
+
     def test_optimization_report_decisions_and_stable_tape(self):
         source = """
 (%function main () i64
