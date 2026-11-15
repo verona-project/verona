@@ -119,6 +119,14 @@ optimization pipeline with the configured target machine before object emission.
 simplifications and before LLVM passes; native optimization flags remain specific
 to compilation commands. Modules are verified before and after LLVM optimization.
 
+Optimized native output also removes unreachable internal functions, including
+dead recursive groups. A source-level `export` controls Verona module visibility;
+it does not keep a native function alive. `native-export` supplies a native entry
+point, and callbacks escaping through live code retain callable entry points.
+Taking an address only inside unreachable code does not retain it. `%noinline`
+prevents inlining but does not keep an unreachable function. All bodies are
+checked before elimination, so unused functions still produce checking errors.
+
 The native tools can be selected with `VERONA_CORE_CLANG` and
 `VERONA_CORE_AR`, with `VERONA_LINKER` and `VERONA_AR` as fallbacks.
 

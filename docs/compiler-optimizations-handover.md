@@ -590,3 +590,144 @@ constant-result elimination from masquerading as wrapper optimization. -O0
 retains the private functions as a comparison. These tests and the six beta
 regressions pass against the current compiler. Changes are comments and tests;
 no compiler rebuild is necessary.
+
+### Constant propagation through immutable local bindings
+
+The pass coordinator now builds an arena-owned initializer index after checking
+and specialization. It maps resolved immutable `let` binder IDs to checked
+initializer IDs; zero means no fact. Parameters, pattern binders and globals
+receive no entry, and checking's final storage flags exclude every addressable
+or writable local. Disabled optimization allocates no initializer index.
+
+The constant query follows integer/boolean local references through this index,
+then reuses the existing checked primitive folding rules. Each alias hop consumes
+the same 32-level budget as primitive nesting. Calls, stored-local/global reads,
+floating-point operations, pointers, aggregates, control-flow joins and other
+unsupported initializers remain unknown. There is no interprocedural inference
+or propagation from caller arguments. The tape, identities and source locations
+remain unchanged, and original initializers retain their evaluation order.
+
+Known branches, scalar matches and constructor component comparisons can use
+the new local facts. Discardability queries can also prove division through
+constant aliases safe, while division by zero and signed overflow remain runtime
+failures. No facts are inferred from memory reads or unknown calls. Storage is
+one eight-byte initializer ID per tape identity, in addition to the existing
+reference map; queries remain bounded and do not grow or mutate the graph.
+
+`optimization-report` emits `constant-propagation` for local reads replaced by a
+proven scalar. The same facts can appear as `constant-fold`, `known-branch`,
+`known-match` or `dead-binding` decisions when consumed by those existing rules.
+`-O0` and the evaluator keep their comparison behavior.
+
+Six focused regression methods cover alias-driven branch/match elimination,
+safe dead division, shadowing and multiple generic specializations, unknown
+parameters, signed/unsigned widths and wrapping, addressable local/global
+snapshots across writes, effectful initializers evaluated once, source-located
+division failures, and conservative fallback for long alias chains.
+
+Validation: source checking, the pinned LLVM23 compiler rebuild and a second
+self-host build succeeded. All 29 selected regression methods passed against
+the rebuilt compiler, and all six new methods passed against the self-built
+compiler. The fail-fast core suite still stops at
+`test_addressable_storage_and_aliases`; the shared suite still stops at
+`pointer-equality-offset-handles/eval`. Both are the previously observed
+evaluator invalid-pointer-access failures, outside this change.
+
+### Small-function heuristic inlining: existing LLVM policy verified
+
+Automatic inlining is already supplied by the `default<O1>`, `default<O2>` and
+`default<O3>` pipelines after local simplification and ABI lowering. The pinned
+LLVM23 `llvm/Analysis/InlineCost.h` describes its call-site cost/threshold model.
+No new source-node counting heuristic, threshold option, inline hint or forced
+attribute is introduced. Ordinary functions remain automatic, explicit
+`%noinline` forbids substitution, and `%inline` retains its forced-request
+policy. LLVM owns legality and recursive expansion. There is no new checked
+body-cloning pass, growth policy, or general lambda support in this delivery.
+
+The new live-helper regression verifies that an automatic function has neither
+`alwaysinline` nor `noinline` in the pre-pipeline IR. Its body calls an unknown
+external function and adjusts the result; an exported caller invokes it twice
+with different runtime arguments. The helper symbol disappears at -O1 through
+-O3 but remains at -O0, and the same source with `%noinline` retains the helper
+at every level. A separately compiled C client supplies two different runtime
+inputs and verifies the returned value, exact external call count and effect
+order. This prevents dead-code elimination, constant-result folding or a simple
+forwarding alias from masquerading as successful inlining.
+
+A second regression checks automatic recursion and source-located failure of an
+unused argument at all four optimization levels. Existing tests cover forced
+policies, specialization, addressable storage and callbacks. Automatic choices
+are implementation-dependent, not a language guarantee about every small body
+or an asserted performance improvement. `optimization-report` remains a local
+lowering report and does not run/report LLVM automatic inlining. Compiler
+changes are explanatory comments only; this item adds regression coverage and
+documentation for an existing optimization, with no behavior change.
+
+Validation: both new methods and eight related inlining, specialization,
+callback and propagation regression methods passed against the current rebuilt
+compiler (10 methods total). Object inspection and separately linked clients
+cover automatic and forbidden policies at -O0 through -O3. No compiler behavior
+changed, so another self-rebuild was not required.
+
+### Dead internal function elimination: existing LLVM reachability verified
+
+All Verona implementation functions have internal LLVM linkage. The optimized
+native pipelines already perform global dead-code elimination; the pinned
+LLVM23 `llvm/Transforms/IPO/GlobalDCE.h` explicitly describes elimination of
+unreachable recursive groups. This delivery adds no second source-level call
+graph or pre-check pruning pass. `emit-llvm` remains pre-pipeline, and -O0
+remains the comparison path with internal bodies retained.
+
+Native exports create externally visible C entry points, and LLVM use edges
+retain reachable implementations and callable values escaping through live
+code. Source-level `export` only grants Verona module visibility; it is not a
+native retention root. `%noinline` likewise does not retain an unreachable
+body. Taking an address inside code that is itself unreachable is insufficient
+to keep a function alive. LLVM preserves dynamic incoming callback arguments;
+the optimizer must not restrict those calls to locally known functions.
+Current global initializers are restricted to supported static values; this
+audit does not add runtime initializer or new callable-global syntax.
+
+The first new regression checks an unreachable, effectful mutually recursive
+group and its caller, including a callback address taken only in the dead
+caller. All three bodies have `%noinline`, and one is source-exported. Their
+symbols and unused external dependencies remain at -O0 and disappear at
+-O1 through -O3. A live exported API still accepts runtime input from a separate
+C client, and dead effects are never executed.
+
+The second regression builds object, static-library and shared-library output
+without a Verona main. C clients retrieve two callbacks with equal results but
+distinct identities, call them with runtime input, check repeated pointer
+identity, and supply an independently compiled C callback to an exported
+unknown-callee invocation. This verifies reachability and ABI retention from
+library roots rather than relying only on an executable entry point. A third
+regression ensures unused erroneous bodies still fail checking in all command
+paths before any elimination. Changes are comments, tests and documentation;
+the existing LLVM transformation already supplies the implementation.
+
+Validation: all three new regression methods and seven related pipeline,
+artifact, export, inlining and identity methods passed (10 total). There is no
+compiler behavior change, so another compiler rebuild was not required.
+
+### Local common subexpression elimination
+
+The initial implementation is intentionally narrower than general local value
+numbering. At binary primitive lowering, after the left operand has been
+materialized, it compares the left and right checked trees. If they are equal
+safe scalar trees, lowering reuses the left LLVM value for the right operand.
+This establishes dominance without a CFG, mutation, a value-numbering table, or
+a second lowering sweep.
+
+The safe tree domain contains integer/boolean literals, nonstored local reads,
+and integer/boolean primitive operations other than division. Matching includes
+the resolved primitive opcode, concrete types, literal bits, and resolved binder
+IDs, so shadowing and integer widths remain distinct. Calls, external calls,
+loads, pointers, floating-point values, aggregates, stores, division, lets,
+sequences, branches and matches are excluded. In particular, no fact crosses a
+control-flow boundary, and no unknown operation is reordered or omitted.
+
+`optimization-report` emits `local-cse` at the replaced right operand and names
+the left canonical node in `selected`. `-O0` performs no analysis allocation or
+rewrite. Two regressions verify reuse of repeated multiplication trees, preserve
+the repeated calls that are outside the domain, and reject structurally similar
+computations separated by conditionals.

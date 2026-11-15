@@ -409,6 +409,111 @@
               (m:fatal "optimizer initializer storage allocation failed")
               (cast (pointer u64) (m:empty-env)))))))))
 
+; A deliberately small local CSE domain.  Leaves are stable scalar values and
+; internal nodes are integer/boolean primitives which cannot read memory, call,
+; or fail.  The comparison is used only for the two operands of one primitive:
+; the left operand is consequently lowered first and dominates the right.
+; This is not a general purity proof or a cross-block value-numbering pass.
+(base:function cse-safe
+  ((c m:context) (id u64) (fuel u64)) bool
+  (match fuel
+    (0 false)
+    (_
+      (let ((v m:node (m:at c id)) (args u64 (m:next c (field v child))))
+        (match (field v kind)
+          (2 true)
+          (3 true)
+          (5 (base:not (check:stored-binder c (field v target))))
+          (9
+            (let ((ty u64 (field (m:at c (field v child)) ty)))
+              (base:and-then
+                (base:or (== ty 2) (num:integer-type ty))
+                (base:and-then
+                  (base:or
+                    (base:and (>= (field v target) 1) (<= (field v target) 3))
+                    (base:and (>= (field v target) 5) (<= (field v target) 15))
+                    (== (field v target) 17)
+                    (base:and
+                      (== (field v target) 16)
+                      (num:integer-type (field v ty))))
+                  (cse-safe-chain c args (- fuel 1))))))
+          (_ false))))))
+
+(base:function cse-safe-chain
+  ((c m:context) (id u64) (fuel u64)) bool
+  (match id
+    (0 true)
+    (_
+      (base:and-then
+        (cse-safe c id fuel)
+        (cse-safe-chain c (m:next c id) fuel)))))
+
+; Structural equality is bounded and is invoked only after both candidates
+; satisfy CSE-SAFE.  Resolved local binder IDs, types and primitive opcodes keep
+; shadowed names and integer widths distinct.
+(base:function cse-equal
+  ((c m:context) (left u64) (right u64) (fuel u64)) bool
+  (match fuel
+    (0 false)
+    (_
+      (let ((a m:node (m:at c left)) (b m:node (m:at c right)))
+        (base:and-then
+          (base:and
+            (== (field a kind) (field b kind))
+            (== (field a ty) (field b ty)))
+          (match (field a kind)
+            (2 (== (field a value) (field b value)))
+            (3 (== (field a value) (field b value)))
+            (5 (== (field a target) (field b target)))
+            (9
+              (base:and-then
+                (== (field a target) (field b target))
+                (cse-equal-chain
+                  c
+                  (m:next c (field a child))
+                  (m:next c (field b child))
+                  (- fuel 1))))
+            (_ false)))))))
+
+(base:function cse-equal-chain
+  ((c m:context) (left u64) (right u64) (fuel u64)) bool
+  (match left
+    (0 (== right 0))
+    (_
+      (match right
+        (0 false)
+        (_
+          (base:and-then
+            (cse-equal c left right fuel)
+            (cse-equal-chain c (m:next c left) (m:next c right) fuel)))))))
+
+; Query the same conservative relation at the precise lowering site.  The
+; caller has already emitted LEFT before it asks whether RIGHT can reuse it.
+(base:function common-sibling ((c m:context) (id u64)) u64
+  (let ((v m:node (m:at c id)))
+    (match (field v kind)
+      (9
+        (let ((left u64 (m:next c (field v child))))
+          (match left
+            (0 0)
+            (_
+              (let ((right u64 (m:next c left)))
+                (match right
+                  (0 0)
+                  (_
+                    (match (m:next c right)
+                      (0
+                        (match
+                          (base:and-then
+                            (cse-safe c left 32)
+                            (base:and-then
+                              (cse-safe c right 32)
+                              (cse-equal c left right 32)))
+                          (true left)
+                          (false 0)))
+                      (_ 0)))))))))
+      (_ 0))))
+
 ; A discardability proof, not a general purity/movement/duplication summary.
 ; Unknown nodes and exhausted budgets must keep their original evaluation.
 (base:function discardable-chain
@@ -484,4 +589,5 @@
   known-match
   references
   initializers
+  common-sibling
   dead-binding)

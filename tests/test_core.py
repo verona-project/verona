@@ -3394,6 +3394,47 @@ int main(int argc, char **argv) {
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         self.assertIn("then", emitted.stdout)
 
+    def test_local_cse_reuses_safe_sibling_primitive_tree(self):
+        source = """
+(%function square ((value i64)) i64 (%*-primitive-i64 value value))
+(%function helper ((value i64)) i64
+  (%+-primitive-i64 (square value) (square value)))
+(%function main () i64 (helper 21))
+"""
+        self.agrees(source, 882)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        # Calls are deliberately excluded from the initial CSE domain.
+        self.assertEqual(len(re.findall(r'call i64 @"12"?', emitted.stdout)), 2)
+
+        direct = """
+(%function helper ((value i64)) i64
+  (%+-primitive-i64
+    (%*-primitive-i64 value value)
+    (%*-primitive-i64 value value)))
+(%function main () i64 (helper 21))
+"""
+        self.agrees(direct, 882)
+        emitted = self.run_core("emit-llvm", direct)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertEqual(len(re.findall(r'mul i64', emitted.stdout)), 1, emitted.stdout)
+        report = self.run_core("optimization-report", direct)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertIn("optimization: local-cse node=", report.stderr)
+
+    def test_local_cse_rejects_memory_and_control_flow(self):
+        source = """
+(%function helper ((flag bool) (value i64)) i64
+  (%+-primitive-i64
+    (if flag (%*-primitive-i64 value value) 0)
+    (if flag (%*-primitive-i64 value value) 0)))
+(%function main () i64 (helper true 21))
+"""
+        self.agrees(source, 882)
+        report = self.run_core("optimization-report", source)
+        self.assertEqual(report.returncode, 0, report.stderr)
+        self.assertNotIn("optimization: local-cse", report.stderr)
+
     def test_optimization_report_decisions_and_stable_tape(self):
         source = """
 (%function main () i64

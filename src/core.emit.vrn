@@ -948,7 +948,14 @@
                   (layout:integer-type (field b owner))
                   ""))
               (_
-                (let ((right t:value-ref (expression c b (m:next c args))))
+                (let
+                  ((right-id u64 (m:next c args))
+                   (canonical u64 (passes:common-sibling (field b passes) id))
+                   (right
+                     t:value-ref
+                     (match canonical
+                       (0 (expression c b right-id))
+                       (_ (put b right-id (get b canonical))))))
                   (match (num:float-type ty)
                     (true
                       (float-primitive

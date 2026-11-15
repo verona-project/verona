@@ -32,6 +32,19 @@
     (simplify:references c enabled)
     (simplify:initializers c enabled)))
 
+; Called by primitive lowering after its left operand is materialized.  Return
+; that left ID only when its right sibling is a safe structural duplicate.
+(base:function common-sibling ((p context) (id u64)) u64
+  (match (field p enabled)
+    (false 0)
+    (true
+      (let ((left u64 (simplify:common-sibling (field p program) id)))
+        (do
+          (match left
+            (0 unit)
+            (_ (remark p (m:next (field p program) left) "local-cse" left)))
+          left)))))
+
 ; Remarks never increment the semantic error count. Node IDs and source spans
 ; refer to the original checked program, including imported module locations.
 (base:function remark ((p context) (id u64) (rule (pointer u8)) (selected u64))
@@ -159,4 +172,4 @@
     (m:text 1 "\n")
     (dump-range c 1 (- (m:nodes-length (deref (field c items))) 1))))
 
-(export limits context defaults prepare fold branch arm dead dump)
+(export limits context defaults prepare common-sibling fold branch arm dead dump)
