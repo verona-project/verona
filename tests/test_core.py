@@ -4146,6 +4146,28 @@ int main(int argc, char **argv) {
         self.assertEqual(optimized.returncode, 0, optimized.stderr)
         self.assertNotRegex(optimized.stdout, r"call i64 %[-a-zA-Z$._0-9]+")
 
+    def test_llvm_inlining_is_followed_by_constant_simplification(self):
+        opt = shutil.which("opt")
+        if opt is None:
+            self.skipTest("LLVM opt is required for the pinned inline simplification check")
+        source = """
+(%function choose ((mode i64) (value i64)) i64
+  (if (%=-primitive-i64 mode 0) value (%+-primitive-i64 value 1)))
+(%function main () i64 (choose 0 42))
+"""
+        self.agrees(source, 42)
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        module = self.root / "inline-simplify.ll"
+        module.write_text(emitted.stdout)
+        optimized = subprocess.run(
+            [opt, "-S", "-passes=default<O2>", str(module), "-o", "-"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(optimized.returncode, 0, optimized.stderr)
+        self.assertNotIn("choose", optimized.stdout)
+        self.assertNotIn("phi i64", optimized.stdout)
+        self.assertRegex(optimized.stdout, r"ret i32 42")
+
     def test_llvm_pipeline_preserves_callbacks(self):
         source = """
 (%type Callback (pointer (function (i32) i32)))

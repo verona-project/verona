@@ -821,3 +821,16 @@ blocks, then has neither after optimization. An escaping address passed to an
 unknown external call remains present after the same pipeline. These assertions
 verify an eligible promotion and a required escape boundary without asserting
 the exact LLVM IR beyond those stable properties.
+
+### Speculative inlining with simplification: boundary and regression
+
+The standard LLVM pipelines inline according to LLVM's ordinary call-site cost
+model and run simplification passes afterward. A structural regression confirms
+that a constant argument exposed by inlining removes the helper, conditional,
+and phi, leaving the folded result. This verifies inline-then-cleanup behavior,
+but does not implement the distinct speculative policy from the roadmap: clone
+a candidate before committing, simplify the clone, and compare estimated
+runtime savings against code growth and compile cost. Verona has no
+candidate-cloning pass or speculative budget/remark model. That policy remains
+open; this test records the existing LLVM baseline and prevents overstating it
+as speculative inlining.
