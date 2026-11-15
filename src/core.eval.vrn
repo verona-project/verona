@@ -1762,8 +1762,10 @@
        (match (num:signed-type (field value ty))
          (true (< (field value scalar) 0))
          (false false)))
-     (bits u64 (base:convert (field value scalar)))
-     (magnitude u64 (match negative (true (- (cast u64 0) bits)) (false bits)))
+     ; Keep BITS as the pointer handle.  Shadowing it with the integer offset
+     ; made every nonzero pointer-offset resolve the offset as an address.
+     (offset u64 (base:convert (field value scalar)))
+     (magnitude u64 (match negative (true (- (cast u64 0) offset)) (false offset)))
      (stride u64 (field (mem:of (field c program) element) size)))
     (do
       (match stride
