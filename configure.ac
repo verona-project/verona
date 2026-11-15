@@ -12,7 +12,10 @@ AC_ARG_VAR([VERONA_SEED], [compatible Verona compiler used to build this checkou
 AC_ARG_WITH([seed],
   [AS_HELP_STRING([--with-seed=PATH], [compatible Verona compiler used to build this checkout])],
   [VERONA_SEED=$withval])
-AS_IF([test -z "$VERONA_SEED"], [VERONA_SEED="$srcdir/build/verona"])
+AS_IF([test -z "$VERONA_SEED"], [VERONA_SEED="verona"])
+AS_CASE([$VERONA_SEED],
+  [*/*], [],
+  [AC_PATH_PROG([VERONA_SEED], [$VERONA_SEED])])
 AS_IF([test ! -x "$VERONA_SEED"],
   [AC_MSG_ERROR([a compatible executable seed compiler is required; pass --with-seed=PATH or set VERONA_SEED])])
 VERONA_SEED_DIR=`dirname "$VERONA_SEED"`
