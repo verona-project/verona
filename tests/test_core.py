@@ -4698,9 +4698,9 @@ int main(void) {
         self.agrees(source, 42)
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
-        # Tail-position lowering returns directly from each branch, so it no
-        # longer needs the merge phi that ordinary conditional lowering emits.
-        self.assertIn("tail.then:", emitted.stdout)
+        # This conditional is followed by VALUE, so it is not in tail position
+        # and ordinary lowering still merges its branch results through a phi.
+        self.assertIn("phi i64", emitted.stdout)
 
         # Optimization cannot conceal an error in the unused branch.
         for expression in ("(if true 42 missing)", "(if false missing 42)"):
