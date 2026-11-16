@@ -39,16 +39,16 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (= errors 0))
-         (testing:check (= (field first code) code))
-         (testing:check (= (field second code) code))
+         (testing:check (== errors 0))
+         (testing:check (== (field first code) code))
+         (testing:check (== (field second code) code))
          (match code
            (0
              (testing:checks
-               (testing:check (= (field (field first result) scalar) expected))
-               (testing:check (= (field (field second result) scalar) expected))
-               (testing:check (= (field (field first result) ty) 3))
-               (testing:check (= (e:frames-length (field first trace)) 0))))
+               (testing:check (== (field (field first result) scalar) expected))
+               (testing:check (== (field (field second result) scalar) expected))
+               (testing:check (== (field (field first result) ty) 3))
+               (testing:check (== (e:frames-length (field first trace)) 0))))
            (_
              (testing:checks
                (testing:check (> (field first site) 0))
@@ -104,9 +104,9 @@
         (e:destroy (& result))
         (testing:checks
           (testing:check valid)
-          (testing:check (= live 0))
+          (testing:check (== live 0))
           (match limit
-            (100 (testing:check (= (field result code) 0)))
+            (100 (testing:check (== (field result code) 0)))
             (_ (allocation-cases c main args (+ limit 1)))))))))
 
 (testing:test reusable-and-storage
@@ -142,11 +142,11 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (= (field failed code) 1))
-         (testing:check (= (field success code) 0))
-         (testing:check (= (field (field success result) scalar) 21))
-         (testing:check (= (field (m:at c (field failed site)) kind) 9))
-         (testing:check (= (e:frames-length (field failed trace)) 1)))))
+         (testing:check (== (field failed code) 1))
+         (testing:check (== (field success code) 0))
+         (testing:check (== (field (field success result) scalar) 21))
+         (testing:check (== (field (m:at c (field failed site)) kind) 9))
+         (testing:check (== (e:frames-length (field failed trace)) 1)))))
     (do
       (e:destroy (& failed))
       (e:destroy (& success))
@@ -193,8 +193,8 @@
      (checks
        testing:result
        (testing:checks
-         (testing:check (= (field result code) 0))
-         (testing:check (= (field (field result result) scalar) 2001)))))
+         (testing:check (== (field result code) 0))
+         (testing:check (== (field (field result result) scalar) 2001)))))
     (do (e:destroy (& result)) (e:values-destroy (& args)) (arena:destroy (& memory)) checks)))
 
 (base:function typed-entry ((text (pointer u8)) (ty u64) (scalar i64)) testing:result
@@ -221,10 +221,10 @@
      (checks
        testing:result
        (testing:checks
-         (testing:check (= (field result code) 0))
-         (testing:check (= (field (field result result) ty) ty))
-         (testing:check (= (field (field result result) scalar) scalar))
-         (testing:check (= (field invalid code) 6)))))
+         (testing:check (== (field result code) 0))
+         (testing:check (== (field (field result result) ty) ty))
+         (testing:check (== (field (field result result) scalar) scalar))
+         (testing:check (== (field invalid code) 6)))))
     (do
       (e:destroy (& result))
       (e:destroy (& invalid))
@@ -278,12 +278,12 @@
      (checks
        testing:result
        (testing:checks
-         (testing:check (= errors 0))
-         (testing:check (= (field copy code) 0))
-         (testing:check (= (field unbacked code) 6))
-         (testing:check (= (field (e:values-at (field copy aggregates) inner) scalar) 42))
+         (testing:check (== errors 0))
+         (testing:check (== (field copy code) 0))
+         (testing:check (== (field unbacked code) 6))
+         (testing:check (== (field (e:values-at (field copy aggregates) inner) scalar) 42))
          (testing:check
-           (= (field (e:values-at (field copy aggregates) (+ inner 1)) scalar) 1)))))
+           (== (field (e:values-at (field copy aggregates) (+ inner 1)) scalar) 1)))))
     (do
       (e:destroy (& copy))
       (e:destroy (& unbacked))
@@ -350,11 +350,11 @@
      (checks
        testing:result
        (testing:checks
-         (testing:check (= errors 0))
-         (testing:check (= (field one code) 0))
-         (testing:check (= (field two code) 0))
-         (testing:check (= (field (field one result) scalar) 42))
-         (testing:check (= (field (field two result) scalar) 42)))))
+         (testing:check (== errors 0))
+         (testing:check (== (field one code) 0))
+         (testing:check (== (field two code) 0))
+         (testing:check (== (field (field one result) scalar) 42))
+         (testing:check (== (field (field two result) scalar) 42)))))
     (do
       (e:destroy (& one))
       (e:destroy (& two))
@@ -397,7 +397,7 @@
     ((result
        e:outcome
        (e:run-with-aggregates c entry args borrowed (e:options 0 0) (system:create)))
-     (checks testing:result (testing:check (= (field result code) code))))
+     (checks testing:result (testing:check (== (field result code) code))))
     (do (e:destroy (& result)) checks)))
 
 (testing:test structured-invalid-inputs
@@ -510,11 +510,11 @@
               (result
                 testing:result
                 (testing:checks
-                  (testing:check (= errors 0))
-                  (testing:check (= (field one code) 0))
-                  (testing:check (= (field two code) 0))
-                  (testing:check (= (field (field one result) scalar) 42))
-                  (testing:check (= (field (field two result) scalar) 42)))))
+                  (testing:check (== errors 0))
+                  (testing:check (== (field one code) 0))
+                  (testing:check (== (field two code) 0))
+                  (testing:check (== (field (field one result) scalar) 42))
+                  (testing:check (== (field (field two result) scalar) 42)))))
              (do (e:destroy (& one)) (e:destroy (& two)) result))))))
     (do (e:values-destroy (& args)) (arena:destroy (& memory)) result)))
 
@@ -528,7 +528,7 @@
      (errors u64 0)
      (text
        (pointer u8)
-       "(%function compare ((left (pointer void)) (right (pointer void))) i64 (if (= left right) 42 0))(%function main () i64 0)")
+       "(%function compare ((left (pointer void)) (right (pointer void))) i64 (if (== left right) 42 0))(%function main () i64 0)")
      (c
        m:context
        (m:context
@@ -549,9 +549,9 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (= errors 0))
-         (testing:check (= (field out code) 0))
-         (testing:check (= (field (field out result) scalar) expected)))))
+         (testing:check (== errors 0))
+         (testing:check (== (field out code) 0))
+         (testing:check (== (field (field out result) scalar) expected)))))
     (do (e:destroy (& out)) (e:values-destroy (& args)) (arena:destroy (& memory)) result)))
 
 (testing:test pointer-identity
@@ -561,13 +561,13 @@
     (opaque-pointer-equality 1 1 42)
     (opaque-pointer-equality 1 2 0)
     (case
-      "(%function main () i64 (let ((x i64 1) (p (& x)) (q (pointer-offset p 0))) (if (= p q) 42 0)))"
+      "(%function main () i64 (let ((x i64 1) (p (& x)) (q (pointer-offset p 0))) (if (== p q) 42 0)))"
       (e:options 0 0)
       0
       42)
     ; Equality neither dereferences nor tests the lifetime of the pointee.
     (case
-      "(%function escaped () (pointer i64) (let ((x i64 7)) (& x)))(%function main () i64 (let ((p (escaped))) (if (= p p) 42 0)))"
+      "(%function escaped () (pointer i64) (let ((x i64 7)) (& x)))(%function main () i64 (let ((p (escaped))) (if (== p p) 42 0)))"
       (e:options 0 0)
       0
       42)))
@@ -608,7 +608,7 @@
      (args e:values-array (e:values-new (system:create)))
      (checks
        testing:result
-       (testing:checks (testing:check (= errors 0)) (allocation-cases c main args 0))))
+       (testing:checks (testing:check (== errors 0)) (allocation-cases c main args 0))))
     (do (e:values-destroy (& args)) (arena:destroy (& memory)) checks)))
 
 (export

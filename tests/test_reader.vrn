@@ -35,55 +35,55 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (= (field d code) 0))
+         (testing:check (== (field d code) 0))
          (testing:check
-           (=
+           (==
              (-
                (m:address (cast (pointer void) (pointer-offset (tuple-get (field tree items) 0) 1)))
                (m:address (cast (pointer void) (tuple-get (field tree items) 0))))
              56))
          (testing:check
-           (=
+           (==
              (-
                (m:address
                  (cast (pointer void) (pointer-offset (tuple-get (field tree lexemes) 0) 1)))
                (m:address (cast (pointer void) (tuple-get (field tree lexemes) 0))))
              40))
-         (testing:check (= (r:nodes-length (field tree items)) 8))
-         (testing:check (= (r:ids-length (field tree roots)) 3))
-         (testing:check (= (r:tokens-length (field tree lexemes)) 11))
-         (testing:check (= (field (deref (tuple-get (field tree lexemes) 0)) kind) 2))
+         (testing:check (== (r:nodes-length (field tree items)) 8))
+         (testing:check (== (r:ids-length (field tree roots)) 3))
+         (testing:check (== (r:tokens-length (field tree lexemes)) 11))
+         (testing:check (== (field (deref (tuple-get (field tree lexemes) 0)) kind) 2))
          (testing:check
-           (= (field (field (deref (tuple-get (field tree lexemes) 0)) location) start) 0))
+           (== (field (field (deref (tuple-get (field tree lexemes) 0)) location) start) 0))
          (testing:check
-           (= (field (field (deref (tuple-get (field tree lexemes) 0)) location) length) 1))
+           (== (field (field (deref (tuple-get (field tree lexemes) 0)) location) length) 1))
          (testing:check
-           (=
+           (==
              (field
                (field (deref (pointer-offset (tuple-get (field tree lexemes) 0) 4)) location)
                start)
              6))
          (testing:check
-           (=
+           (==
              (field
                (field (deref (pointer-offset (tuple-get (field tree lexemes) 0) 4)) location)
                length)
              3))
-         (testing:check (= (field (at tree 2) kind) 1))
-         (testing:check (= (field (at tree 7) kind) 1))
+         (testing:check (== (field (at tree 2) kind) 1))
+         (testing:check (== (field (at tree 7) kind) 1))
          (testing:check
-           (=
+           (==
              (field (field (at tree 0) location) name)
              (field (field (at tree 1) location) name)))
-         (testing:check (= (field (field (at tree 0) location) file) 42))
-         (testing:check (= (field (field (at tree 2) location) start) 6))
-         (testing:check (= (field (field (at tree 2) location) length) 3))
-         (testing:check (= (field (at tree 4) count) 0))
-         (testing:check (= (field (at tree 5) count) 3))
-         (testing:check (= (field (field (at tree 5) location) length) 14))
-         (testing:check (= (child tree (field (at tree 5) first)) 0))
-         (testing:check (= (child tree (+ (field (at tree 5) first) 1)) 3))
-         (testing:check (= (child tree (+ (field (at tree 5) first) 2)) 4)))))
+         (testing:check (== (field (field (at tree 0) location) file) 42))
+         (testing:check (== (field (field (at tree 2) location) start) 6))
+         (testing:check (== (field (field (at tree 2) location) length) 3))
+         (testing:check (== (field (at tree 4) count) 0))
+         (testing:check (== (field (at tree 5) count) 3))
+         (testing:check (== (field (field (at tree 5) location) length) 14))
+         (testing:check (== (child tree (field (at tree 5) first)) 0))
+         (testing:check (== (child tree (+ (field (at tree 5) first) 1)) 3))
+         (testing:check (== (child tree (+ (field (at tree 5) first) 2)) 4)))))
     (do (r:destroy (& tree)) (names:names-destroy (& table)) (arena:destroy (& memory)) result)))
 
 (base:function platform-case
@@ -109,21 +109,21 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (= (field d code) 0))
-         (testing:check (= (r:nodes-length (field tree items)) 3))
-         (testing:check (= (r:ids-length (field tree roots)) 1))
-         (testing:check (= (field (at tree 2) count) 2))
-         (testing:check (= (child tree 0) 0))
-         (testing:check (= (child tree 1) 1))
+         (testing:check (== (field d code) 0))
+         (testing:check (== (r:nodes-length (field tree items)) 3))
+         (testing:check (== (r:ids-length (field tree roots)) 1))
+         (testing:check (== (field (at tree 2) count) 2))
+         (testing:check (== (child tree 0) 0))
+         (testing:check (== (child tree 1) 1))
          (let
            ((offset u64 (field (field (at tree 0) location) start))
             (other u64 (field (field (at tree 1) location) start)))
            (testing:checks
-             (testing:check (= (tuple-get (r:position tree offset) 0) line))
+             (testing:check (== (tuple-get (r:position tree offset) 0) line))
              (testing:check
-               (= (base:convert (deref (pointer-offset text offset))) (base:convert digit)))
+               (%=-primitive-u8 (deref (pointer-offset text offset)) digit))
              (testing:check
-               (= (base:convert (deref (pointer-offset text other))) (base:convert negative))))))))
+               (%=-primitive-u8 (deref (pointer-offset text other)) negative)))))))
     (do (r:destroy (& tree)) (names:names-destroy (& table)) (arena:destroy (& memory)) result)))
 
 (testing:test platform-conditionals
@@ -141,10 +141,10 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (= (field d code) code))
-         (testing:check (= (field (field d location) file) 7))
-         (testing:check (= (field (field d location) start) offset))
-         (testing:check (= (field (field d location) length) length)))))
+         (testing:check (== (field d code) code))
+         (testing:check (== (field (field d location) file) 7))
+         (testing:check (== (field (field d location) start) offset))
+         (testing:check (== (field (field d location) length) length)))))
     (do (r:destroy (& tree)) (names:names-destroy (& table)) (arena:destroy (& memory)) result)))
 
 (testing:test errors
@@ -179,14 +179,14 @@
      (result
        testing:result
        (testing:checks
-         (testing:check (= (field d code) 0))
-         (testing:check (= (names:names-count table) 8))
-         (testing:check (= (r:ids-length (field tree lines)) 4))
-         (testing:check (= (tuple-get (r:position tree 0) 0) 1))
-         (testing:check (= (tuple-get (r:position tree 27) 0) 2))
-         (testing:check (= (tuple-get (r:position tree 27) 1) 1))
-         (testing:check (= (tuple-get (r:position tree (cstring:strlen text)) 0) 4))
-         (testing:check (= (tuple-get (r:position tree (cstring:strlen text)) 1) 1)))))
+         (testing:check (== (field d code) 0))
+         (testing:check (== (names:names-count table) 8))
+         (testing:check (== (r:ids-length (field tree lines)) 4))
+         (testing:check (== (tuple-get (r:position tree 0) 0) 1))
+         (testing:check (== (tuple-get (r:position tree 27) 0) 2))
+         (testing:check (== (tuple-get (r:position tree 27) 1) 1))
+         (testing:check (== (tuple-get (r:position tree (cstring:strlen text)) 0) 4))
+         (testing:check (== (tuple-get (r:position tree (cstring:strlen text)) 1) 1)))))
     (do
       (data:destroy (& buffer))
       (r:destroy (& tree))
@@ -229,10 +229,10 @@
         (names:names-destroy (& table))
         (arena:destroy (& memory))
         (testing:checks
-          (testing:check (= live 0))
+          (testing:check (== live 0))
           (match limit
-            (0 (testing:check (= (field d code) 5)))
-            (80 (testing:check (= (field d code) 0)))
+            (0 (testing:check (== (field d code) 5)))
+            (80 (testing:check (== (field d code) 0)))
             (_ (testing:check (match (field d code) (0 true) (5 true) (_ false))))))))))
 
 (base:function allocation-cases ((limit u64)) testing:result

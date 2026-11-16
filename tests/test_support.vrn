@@ -28,32 +28,32 @@
      (padded-slot slot-probe (slot-probe 0 slot)))
     (testing:checks
       (testing:check
-        (=
+        (==
           (-
             (m:address (cast (pointer void) (pointer-offset (& item) 1)))
             (m:address (cast (pointer void) (& item))))
           32))
       (testing:check
-        (=
+        (==
           (-
             (m:address (cast (pointer void) (pointer-offset (& slot) 1)))
             (m:address (cast (pointer void) (& slot))))
           40))
       (testing:check
-        (=
+        (==
           (-
             (m:address (cast (pointer void) (pointer-offset (& padded-span) 1)))
             (m:address (cast (pointer void) (& padded-span))))
           40))
       (testing:check
-        (=
+        (==
           (-
             (m:address (cast (pointer void) (pointer-offset (& padded-slot) 1)))
             (m:address (cast (pointer void) (& padded-slot))))
           48)))))
 
 (base:function append-spans ((items (pointer span:span-array)) (index u64)) testing:result
-  (match (= index 100)
+  (match (== index 100)
     (true (testing:empty))
     (false
       (testing:checks
@@ -71,14 +71,14 @@
        testing:result
        (testing:checks
          (append-spans (& items) 0)
-         (testing:check (= (span:spans-length items) 100))
-         (testing:check (= (field (deref (tuple-get items 0)) name) 1))
-         (testing:check (= (field (deref (pointer-offset (tuple-get items 0) 99)) start) 99)))))
+         (testing:check (== (span:spans-length items) 100))
+         (testing:check (== (field (deref (tuple-get items 0)) name) 1))
+         (testing:check (== (field (deref (pointer-offset (tuple-get items 0) 99)) start) 99)))))
     (do (span:spans-destroy (& items)) (arena:destroy (& memory)) result)))
 
 (base:function add-names
   ((table (pointer names:names-table)) (memory (pointer arena:arena)) (index u64)) testing:result
-  (match (= index 100)
+  (match (== index 100)
     (true (testing:empty))
     (false
       (let ((byte u8 (base:convert index)))
@@ -86,17 +86,17 @@
           ((tuple status id)
            (testing:checks
              (testing:check (match status ((ok) true) (_ false)))
-             (testing:check (= id (+ index 1)))
+             (testing:check (== id (+ index 1)))
              (add-names table memory (+ index 1)))))))))
 
 (base:function verify-names ((table names:names-table) (index u64)) testing:result
-  (match (= index 100)
+  (match (== index 100)
     (true (testing:empty))
     (false
       (let ((byte u8 (base:convert index)) (id u64 0))
         (testing:checks
           (testing:check (names:names-get table (data:view (& byte) 1) (& id)))
-          (testing:check (= id (+ index 1)))
+          (testing:check (== id (+ index 1)))
           (verify-names table (+ index 1)))))))
 
 (testing:test interned-ids-survive-growth-and-key-storage-is-copied
@@ -108,14 +108,14 @@
        (testing:checks
          (add-names (& table) (& memory) 0)
          (verify-names table 0)
-         (testing:check (= (names:names-count table) 100))
+         (testing:check (== (names:names-count table) 100))
          (let ((byte u8 42))
            (match (names:intern (& table) (& memory) (data:view (& byte) 1))
              ((tuple status id)
               (testing:checks
                 (testing:check (match status ((ok) true) (_ false)))
-                (testing:check (= id 43))
-                (testing:check (= (names:names-count table) 100)))))))))
+                (testing:check (== id 43))
+                (testing:check (== (names:names-count table) 100)))))))))
     (do (names:names-destroy (& table)) (arena:destroy (& memory)) result)))
 
 ; The runner owns this private temporary path for the duration of the tests.
@@ -134,7 +134,7 @@
              u64
              (io:fwrite (cast (pointer void) (field bytes bytes)) 1 (field bytes length) file))
            (closed i32 (io:fclose file)))
-          (match closed (0 (= written (field bytes length))) (_ false)))))))
+          (match closed (0 (== written (field bytes length))) (_ false)))))))
 
 (base:function read-size ((size u64)) testing:result
   (let
@@ -147,7 +147,7 @@
           (testing:checks
             (testing:check (write-fixture (data:borrow fixture)))
             (testing:check (match (source:read path (& input)) ((ok) true) (_ false)))
-            (testing:check (= (data:length input) size))
+            (testing:check (== (data:length input) size))
             (testing:check (data:equal (data:borrow input) (data:borrow fixture)))))
          (_ (testing:fail)))))
     (do (data:destroy (& fixture)) (data:destroy (& input)) result)))
@@ -198,7 +198,7 @@
   (out-of-memory))
 
 (base:function acquire ((context (pointer void)) (size u64) (alignment u64)) a:result
-  (match (= budget 0)
+  (match (== budget 0)
     (true (a:failure (oom)))
     (false
       (do
@@ -239,7 +239,7 @@
         (arena:destroy (& compilation))
         (arena:destroy (& session))
         (testing:checks
-          (testing:check (= live 0))
+          (testing:check (== live 0))
           (match limit
             (0 (testing:check (match status ((allocation-error _) true) (_ false))))
             (16 (testing:check (match status ((ok) true) (_ false))))

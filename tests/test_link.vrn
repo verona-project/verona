@@ -68,14 +68,14 @@
                (testing:checks
                  (testing:check (match status ((ok) true) (_ false)))
                  (testing:check
-                   (=
+                   (%=-primitive-u64
                      (link:strings-length args)
                      (match (cstring:strcmp kind "static-library")
-                       (0 5)
+                       (0 (cast u64 5))
                        (_
                          (+
-                           (match (link:frameworks-supported) (true 10) (false 8))
-                           (match (cstring:strcmp kind "shared-library") (0 1) (_ 0)))))))
+                           (match (link:frameworks-supported) (true (cast u64 10)) (false (cast u64 8)))
+                           (match (cstring:strcmp kind "shared-library") (0 (cast u64 1)) (_ (cast u64 0))))))))
                  (testing:check
                    (match (cstring:strcmp kind "static-library")
                      (0 (match (cstring:strcmp (link:strings-at args 1) "rcs") (0 true) (_ false)))
@@ -99,7 +99,7 @@
         (arena:destroy (& memory))
         (testing:checks
           checks
-          (testing:check (= live 0))
+          (testing:check (== live 0))
           (match limit (20 (testing:empty)) (_ (allocation-case (+ limit 1) kind))))))))
 
 (testing:test argument-storage-and-allocation-cleanup

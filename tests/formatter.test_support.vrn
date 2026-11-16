@@ -22,12 +22,12 @@
 
 (base:function token-equality ((left data:view) (right data:view) (a m:tape) (b m:tape) (i u64))
   testing:result
-  (match (= i (m:nodes-length a))
+  (match (== i (m:nodes-length a))
     (true (testing:empty))
     (false
       (let ((first m:node (m:at a i)) (second m:node (m:at b i)))
         (testing:checks
-          (testing:check (= (field first kind) (field second kind)))
+          (testing:check (== (field first kind) (field second kind)))
           (testing:check
             (data:equal
               (data:view
@@ -46,7 +46,7 @@
        testing:result
        (match (m:steps (lexer:scan left (& a)) (lexer:scan right (& b)))
          ((ok)
-          (match (= (m:nodes-length a) (m:nodes-length b))
+          (match (== (m:nodes-length a) (m:nodes-length b))
             (true (token-equality left right a b 0))
             (false (testing:fail))))
          (_ (testing:fail)))))
@@ -79,7 +79,7 @@
      (result
        testing:result
        (match (formatter:format (view input) 100 (& output) (system:create))
-         ((syntax-error position message) (testing:check (= position offset)))
+         ((syntax-error position message) (testing:check (== position offset)))
          (_ (testing:fail)))))
     (do (data:destroy (& output)) result)))
 
@@ -97,7 +97,7 @@
   (out-of-memory))
 
 (base:function acquire ((context (pointer void)) (size u64) (alignment u64)) allocator:result
-  (match (= budget 0)
+  (match (== budget 0)
     (true (allocator:failure (oom)))
     (false
       (do
