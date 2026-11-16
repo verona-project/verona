@@ -64,7 +64,10 @@
                     (false
                       (match (cstring:strcmp argument "--help")
                         (0 true)
-                        (_ false))))
+                        (_
+                          (match (cstring:strcmp argument "-h")
+                            (0 true)
+                            (_ false))))))
                   (true
                     (parse
                       argc

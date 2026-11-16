@@ -702,6 +702,28 @@
       "Usage: verona-project COMMAND [ARGUMENTS]\n\nCommands:\n  new NAME    Create an executable project\n  libraries   List libraries and available versions in VERONA_SOURCE_DIR\n  help        Show this help\n")
     0))
 
+(base:function new-help () exit-code
+  (do
+    (emit
+      1
+      "usage: verona-project new NAME\n\nCreate an executable project named NAME. Names begin with an ASCII letter and may contain letters, digits, '-' and '_'.\n")
+    0))
+
+(base:function libraries-help () exit-code
+  (do
+    (emit
+      1
+      "usage: verona-project libraries\n\nList library names and available versions immediately below the absolute directory in VERONA_SOURCE_DIR.\n")
+    0))
+
+(base:function help-argument ((argument (pointer u8))) bool
+  (match (text:strcmp argument "--help")
+    (0 true)
+    (_
+      (match (text:strcmp argument "-h")
+        (0 true)
+        (_ (match (text:strcmp argument "help") (0 true) (_ false)))))))
+
 (base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (match (< argc 2)
     (true (fail "usage: verona-project COMMAND [ARGUMENTS]"))
@@ -710,7 +732,10 @@
         (match (text:strcmp command "new")
           (0
             (match argc
-              (3 (create-project (deref (pointer-offset argv 2))))
+              (3
+                (match (help-argument (deref (pointer-offset argv 2)))
+                  (true (new-help))
+                  (false (create-project (deref (pointer-offset argv 2))))))
               (_ (fail "usage: verona-project new NAME"))))
           (_
             (match argc
@@ -718,6 +743,13 @@
                 (match (text:strcmp command "libraries")
                   (0 (list-libraries))
                   (_ (help-command command))))
+              (3
+                (match (text:strcmp command "libraries")
+                  (0
+                    (match (help-argument (deref (pointer-offset argv 2)))
+                      (true (libraries-help))
+                      (false (fail "unknown command or extra arguments"))))
+                  (_ (fail "unknown command or extra arguments"))))
               (_ (fail "unknown command or extra arguments")))))))))
 
 (base:function help-command ((command (pointer u8))) exit-code

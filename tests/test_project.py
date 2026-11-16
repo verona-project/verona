@@ -113,6 +113,10 @@ def test_command_errors():
     result = invoke(None, "--help")
     assert_result(result, 0, result.stdout)
     assert "libraries" in result.stdout and result.stderr == ""
+    for command in (("new", "--help"), ("libraries", "--help")):
+        result = invoke(None, *command)
+        assert_result(result, 0, result.stdout)
+        assert result.stderr == "" and result.stdout.startswith("usage: verona-project")
 
 
 def test_new_project(root):

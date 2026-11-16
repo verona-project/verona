@@ -190,6 +190,32 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(native.returncode, 0, native.stderr)
         self.assertEqual(native.stdout, "i64:42\n")
 
+    def test_cli_help_and_flexible_option_placement(self):
+        top = subprocess.run([str(COMPILER), "--help"], capture_output=True, text=True, timeout=10)
+        self.assertEqual(top.returncode, 0, top.stderr)
+        self.assertIn("compile FILE", top.stdout)
+        self.assertEqual(top.stderr, "")
+        for command in ("read", "compile", "build"):
+            help_result = subprocess.run([str(COMPILER), command, "--help"],
+                                         capture_output=True, text=True, timeout=10)
+            self.assertEqual(help_result.returncode, 0, help_result.stderr)
+            self.assertIn("usage: verona " + command, help_result.stdout)
+            self.assertEqual(help_result.stderr, "")
+
+        self.source.write_text(self.program("42"))
+        before = subprocess.run(
+            [str(COMPILER), "check", "--target", "native", str(self.source)],
+            capture_output=True, text=True, timeout=10)
+        after = subprocess.run(
+            [str(COMPILER), "check", str(self.source), "--target", "native"],
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(before.returncode, 0, before.stderr)
+        self.assertEqual(after.returncode, 0, after.stderr)
+        malformed = subprocess.run(
+            [str(COMPILER), "check", "--target=native", str(self.source)],
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(malformed.returncode, 2, malformed.stderr)
+
     def test_cli_cpu_features_and_default_outputs(self):
         source = """
 (%macro selected-cpu ()

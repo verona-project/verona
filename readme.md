@@ -71,10 +71,10 @@ tools. For a source release, pass the recorded seed artifact explicitly with
 ## Command line options
 
 ```text
-verona {read|check|eval|emit-llvm|optimization-report} FILE [OPTIONS]
-verona {compile|compile-report} FILE [OPTIONS]
-verona build TARGET OUTPUT-DIRECTORY [--feature NAME ...]
-verona {--version|-V}
+verona [--help|-h] [--version|-V] COMMAND [OPTIONS]
+verona {read|check|eval|emit-llvm|optimization-report} [OPTIONS] FILE
+verona {compile|compile-report} [OPTIONS] FILE
+verona build [--feature NAME ...] TARGET OUTPUT-DIRECTORY
 ```
 
 Source commands accept:
@@ -82,6 +82,11 @@ Source commands accept:
 - `--module-path DIRECTORY` — add a module search root;
 - `--feature NAME` — add a reader feature; and
 - `--target TRIPLE` — select an LLVM target triple instead of the native target.
+
+Compiler options may appear before or after their operands; `--` stops option
+processing. `--option=value` and attached short-option values are intentionally
+unsupported, so option values remain separate arguments. Use `verona --help`
+or `verona COMMAND --help` for the complete, command-specific contract.
 
 Compilation additionally accepts:
 
@@ -121,8 +126,8 @@ to compilation commands. Modules are verified before and after LLVM optimization
 
 With local optimization enabled, a resolved direct call in tail position is
 emitted as LLVM `musttail` when its LLVM function type matches the current
-function. The supported tail contexts are the final result of a function, `if`
-branch, `let` body, or `do` sequence, and include eligible mutual recursion.
+function. The supported tail contexts are the final result of a function,
+`match` arm, `let` body, or `do` sequence, and include eligible mutual recursion.
 Calls through values, type-mismatched direct calls, matches, and bodies that
 read addressable parameters or locals remain ordinary calls. Arguments still
 evaluate once from left to right before the call; `-O0` keeps ordinary calls.
