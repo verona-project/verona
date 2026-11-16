@@ -1,0 +1,148 @@
+#+title: Verona command-line reference
+#+author: Verona Project
+#+options: toc:2
+
+* Status and conventions
+
+This is the command-line contract for the executables in this repository.
+
+The main compiler executable is named =verona=. =verona --help=, =verona -h=,
+and =verona help= print top-level help; =verona COMMAND --help=, =-h=, or
+=help= print command help. Help succeeds and writes to standard output. Invalid
+invocations write the compact usage synopsis to standard error and return 2.
+=verona --version= and =verona -V= must be used without any other arguments.
+
+* Compiler (=verona=)
+
+** Synopsis
+
+#+begin_example
+verona {read|check|eval|emit-llvm|optimization-report} [OPTIONS] FILE
+
+verona {compile|compile-report} [OPTIONS] FILE
+  [-o OUTPUT] [--emit object|executable|static-library|shared-library] \
+  [-O0|-O1|-O2|-O3] [--module-path DIRECTORY ...] \
+  [--library NAME ...] [--library-path DIRECTORY ...] [--framework NAME ...] \
+  [--feature NAME ...] [--target TRIPLE] [--cpu CPU] [--features FEATURES]
+
+verona build [--feature NAME ...] TARGET OUTPUT-DIRECTORY
+verona --version | -V
+#+end_example
+
+For every compiler command, options may occur before or after positional
+operands. =--= stops option processing; use it for an operand beginning with a
+dash. Option abbreviations, attached short-option values (such as =-oout=),
+and =--option=value= are rejected. Every long option that takes a value uses a
+separate following argument.
+
+** Source inspection and analysis commands
+
+| Command | Effect | Accepted options |
+|----------+--------+------------------|
+| =read FILE= | Read and dump the parsed source representation. | =--module-path DIRECTORY=, =--feature NAME=, =--target TRIPLE= |
+| =check FILE= | Load modules and type-check the program. | =--module-path DIRECTORY=, =--feature NAME=, =--target TRIPLE= |
+| =eval FILE= | Check and evaluate a parameterless =main=; print its result. | =--module-path DIRECTORY=, =--feature NAME=, =--target TRIPLE= |
+| =emit-llvm FILE= | Check, lower, verify, and print LLVM IR to standard output. | =--module-path DIRECTORY=, =--feature NAME=, =--target TRIPLE= |
+| =optimization-report FILE= | Print pre-lowering and post-lowering optimization reports. | =--module-path DIRECTORY=, =--feature NAME=, =--target TRIPLE= |
+
+=eval= rejects a =main= that accepts command-line arguments.  These commands
+do not accept output, artifact-kind, optimization, native-link, CPU, or target
+feature options.
+
+** Compilation commands
+
+| Command | Effect | Additional restriction |
+|----------+--------+------------------------|
+| =compile FILE= | Compile and emit the selected artifact. | Any artifact kind is allowed. |
+| =compile-report FILE= | Compile while retaining information for the report path. | Artifact kind must remain =executable=. |
+
+Both commands accept every option below.
+
+| Option | Argument | Meaning and current parser behavior |
+|--------+----------+-------------------------------------|
+| =-o=, =--output= | =OUTPUT= | Output path.  It may be specified only once. |
+| =--emit= | =object=, =executable=, =static-library=, or =shared-library= | Select artifact kind.  Later occurrences replace earlier ones. |
+| =-O0= through =-O3= | none | Select optimization level.  The default is =-O0=; the last specified level wins. |
+| =--module-path= | =DIRECTORY= | Add a module-search directory.  Repeatable; values must be nonempty. |
+| =-l=, =--library= | =NAME= | Add a native library to link.  Repeatable. |
+| =-L=, =--library-path= | =DIRECTORY= | Add a native library-search path.  Repeatable. |
+| =--framework= | =NAME= | Add a Darwin framework.  Repeatable; compilation fails on non-Darwin targets. |
+| =--feature= | =NAME= | Enable a Verona configuration feature.  Repeatable; values must be nonempty. |
+| =--target= | =TRIPLE= | Select target triple; default =native=.  Later occurrences replace earlier ones. |
+| =--cpu= | =CPU= | Select target CPU; default =generic=.  Later occurrences replace earlier ones. |
+| =--features= | =FEATURES= | Pass target-machine feature text; default is empty.  Later occurrences replace earlier ones. |
+
+When =--output= is absent, the compiler derives a source-adjacent output name:
+=a.out= (or the source stem) for executables, =.o= for objects, =lib*.a= for
+static libraries, and =lib*.so= or =lib*.dylib= for shared libraries.
+
+** Manifest build command
+
+#+begin_example
+verona build [--feature NAME ...] TARGET OUTPUT-DIRECTORY
+#+end_example
+
+The command reads =verona.build= from the current directory, selects =TARGET=,
+and writes the artifact below =OUTPUT-DIRECTORY=.  The only command-line option
+is repeatable =--feature NAME=, whose value must be nonempty.  All other build
+settings are read from the manifest.
+
+Supported top-level manifest forms are =executable=, =static-library=, and
+=shared-library=.  Each takes a target name and must contain exactly one
+=root= option.  Supported target options are:
+
+| Option | Value | Multiplicity |
+|--------+-------+--------------|
+| =root= | dotted module name | exactly one (required) |
+| =target= | =native= or a target-triple string | zero or one |
+| =optimize= | integer 0 through 3 | zero or one |
+| =version= | nonempty one-line string | zero or one |
+| =features= | one or more feature names | zero or one |
+| =module-path= | string path, relative to the manifest if not absolute | repeatable |
+| =library-path= | string path, relative to the manifest if not absolute | repeatable |
+| =library= | string library name | repeatable |
+| =framework= | string framework name | repeatable |
+
+If no =module-path= is specified, the manifest directory is searched.
+
+* Auxiliary executables
+
+** Project tool (=verona-project=)
+
+#+begin_example
+verona-project new NAME
+verona-project libraries
+verona-project help | --help | -h
+#+end_example
+
+=new= creates a minimal executable project.  =libraries= lists library names
+and versions immediately below the absolute directory in =VERONA_SOURCE_DIR=.
+It takes no arguments.  The help spellings likewise take no additional
+arguments. =verona-project new --help= and =verona-project libraries --help=
+provide command-specific help; =-h= and =help= are aliases in those positions.
+
+** Formatter (=verona-formatter=)
+
+#+begin_example
+verona-formatter [--check] [--width 20..240] [--] [FILE|-]
+#+end_example
+
+| Option | Meaning |
+|--------+---------|
+| =--check= | Exit nonzero when formatting would change the input; otherwise write formatted source to standard output. |
+| =--width INTEGER= | Set line width, inclusive range 20--240; default 100. |
+| =--help= | Print usage to standard output. |
+| =-h= | Alias for =--help=. |
+| =--= | Stop option processing. |
+
+The formatter accepts at most one input file.  The default input is =-=, which
+means standard input; an explicit =-= also selects standard input.
+
+* Migration note
+
+Scripts that previously placed compiler options after =FILE= remain valid.
+They may move options before operands, and can now use =--= for dash-prefixed
+operand names. The compiler intentionally continues to reject =--option=value=
+and attached short-option values, so scripts should retain separate option
+arguments. Artifact kinds, linker flags, target selection, and manifest
+semantics are unchanged.
