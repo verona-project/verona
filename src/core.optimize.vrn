@@ -411,8 +411,7 @@
 ; or fail.  The comparison is used only for the two operands of one primitive:
 ; the left operand is consequently lowered first and dominates the right.
 ; This is not a general purity proof or a cross-block value-numbering pass.
-(base:function cse-safe
-  ((c m:context) (id u64) (fuel u64)) bool
+(base:function cse-safe ((c m:context) (id u64) (fuel u64)) bool
   (match fuel
     (0 false)
     (_
@@ -439,20 +438,16 @@
                   (cse-safe-chain c args (- fuel 1))))))
           (_ false))))))
 
-(base:function cse-safe-chain
-  ((c m:context) (id u64) (fuel u64)) bool
+(base:function cse-safe-chain ((c m:context) (id u64) (fuel u64)) bool
   (match id
     (0 true)
     (_
-      (base:and-then
-        (cse-safe c id fuel)
-        (cse-safe-chain c (m:next c id) fuel)))))
+      (base:and-then (cse-safe c id fuel) (cse-safe-chain c (m:next c id) fuel)))))
 
 ; Structural equality is bounded and is invoked only after both candidates
 ; satisfy CSE-SAFE.  Resolved local binder IDs, types and primitive opcodes keep
 ; shadowed names and integer widths distinct.
-(base:function cse-equal
-  ((c m:context) (left u64) (right u64) (fuel u64)) bool
+(base:function cse-equal ((c m:context) (left u64) (right u64) (fuel u64)) bool
   (match fuel
     (0 false)
     (_
@@ -475,8 +470,8 @@
                   (- fuel 1))))
             (_ false)))))))
 
-(base:function cse-equal-chain
-  ((c m:context) (left u64) (right u64) (fuel u64)) bool
+(base:function cse-equal-chain ((c m:context) (left u64) (right u64) (fuel u64))
+  bool
   (match left
     (0 (== right 0))
     (_
@@ -556,8 +551,12 @@
         (0 (safe-effects))
         (_
           (let
-            ((head effects (effect c locals (m:next c (m:child c arm)) (- fuel 1)))
-             (tail effects (match-arm-effects c locals (m:next c arm) (- fuel 1))))
+            ((head
+               effects
+               (effect c locals (m:next c (m:child c arm)) (- fuel 1)))
+             (tail
+               effects
+               (match-arm-effects c locals (m:next c arm) (- fuel 1))))
             (effects
               (base:and (field head discardable) (field tail discardable))
               (base:and (field head duplicable) (field tail duplicable))
@@ -567,7 +566,8 @@
               (base:or (field head may-diverge) (field tail may-diverge)))))))))
 
 (base:function match-effects
-  ((c m:context) (locals (pointer u64)) (subject u64) (arms u64) (fuel u64)) effects
+  ((c m:context) (locals (pointer u64)) (subject u64) (arms u64) (fuel u64))
+  effects
   (match fuel
     (0 (unknown-effects))
     (_
@@ -582,8 +582,8 @@
           (base:or (field head may-trap) (field tail may-trap))
           (base:or (field head may-diverge) (field tail may-diverge)))))))
 
-(base:function effect
-  ((c m:context) (locals (pointer u64)) (id u64) (fuel u64)) effects
+(base:function effect ((c m:context) (locals (pointer u64)) (id u64) (fuel u64))
+  effects
   (match fuel
     (0 (unknown-effects))
     (_
@@ -607,8 +607,7 @@
                     (4 ; Division is discardable only when proven to succeed.
                       (match (constant c locals id fuel)
                         ((known value) (effect-chain c locals args (- fuel 1)))
-                        ((unknown)
-                          (effects false false false false true false))))
+                        ((unknown) (effects false false false false true false))))
                     (_
                       (match
                         (base:or

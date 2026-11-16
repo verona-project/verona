@@ -38,8 +38,8 @@ must not be summed as an overall schedule.
 - Collect surface `import` and `export` before expanding later declarations;
   retain `%import` and `%export` for expanded-core callers.
 - Compiler implementation code imports Base normally. Test input programs use
-  expanded declarations such as `%function`; existing core `let` and `if` remain
-  unprefixed. Do not introduce `%let` or `%if` aliases.
+  expanded declarations such as `%function`; existing core `let` remains
+  unprefixed. There is no core `if` or `%if`: use exhaustive boolean `match`.
 - Use `.vrn` for Verona sources. Preserve arena ownership and established node
   lifetime rules. Do not add a separate general-purpose IR as a prerequisite.
 - Preserve unrelated working-tree changes. In particular, `src/core.cli.vrn`
@@ -615,8 +615,8 @@ one eight-byte initializer ID per tape identity, in addition to the existing
 reference map; queries remain bounded and do not grow or mutate the graph.
 
 `optimization-report` emits `constant-propagation` for local reads replaced by a
-proven scalar. The same facts can appear as `constant-fold`, `known-branch`,
-`known-match` or `dead-binding` decisions when consumed by those existing rules.
+proven scalar. The same facts can appear as `constant-fold`, `known-match` or
+`dead-binding` decisions when consumed by those existing rules.
 `-O0` and the evaluator keep their comparison behavior.
 
 Six focused regression methods cover alias-driven branch/match elimination,
@@ -738,7 +738,7 @@ Enabled local lowering recognizes a resolved direct call in tail position when
 the callee has the same LLVM function type as the function being lowered. It
 emits the call as LLVM `musttail` followed by its required immediate return,
 which lets LLVM lower eligible self and mutual recursion without growing the
-native call stack. Tail position is propagated through `if` branches, the body
+native call stack. Tail position is propagated through `match` arms, the body
 of `let`, and the final item of `do`; their preceding conditions, initializers,
 and sequence items retain ordinary left-to-right, exactly-once evaluation.
 

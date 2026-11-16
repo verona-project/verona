@@ -51,10 +51,7 @@
 (base:function tail-call ((p context) (id u64) (fn u64) (eligible bool)) bool
   (match (base:and (field p enabled) eligible)
     (false false)
-    (true
-      (do
-        (remark p id "tail-call" fn)
-        true))))
+    (true (do (remark p id "tail-call" fn) true))))
 
 ; Remarks never increment the semantic error count. Node IDs and source spans
 ; refer to the original checked program, including imported module locations.
@@ -167,4 +164,14 @@
     (m:text 1 "\n")
     (dump-range c 1 (- (m:nodes-length (deref (field c items))) 1))))
 
-(export limits context defaults prepare common-sibling tail-call fold arm dead dump)
+(export
+  limits
+  context
+  defaults
+  prepare
+  common-sibling
+  tail-call
+  fold
+  arm
+  dead
+  dump)

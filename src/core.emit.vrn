@@ -483,8 +483,7 @@
             (_ true))
           (tail-storage-safe-chain c (field v child) (- fuel 1)))))))
 
-(base:function tail-storage-safe-chain
-  ((c m:context) (id u64) (fuel u64)) bool
+(base:function tail-storage-safe-chain ((c m:context) (id u64) (fuel u64)) bool
   (match id
     (0 true)
     (_
@@ -556,21 +555,23 @@
         (let
           ((caller t:value-ref (get b fn))
            (callee t:value-ref (get b (field v target))))
-        (match
-          (passes:tail-call
-            (field b passes)
-            id
-            fn
-            (base:and
-              safe
-              (==
-                (m:address (cast (pointer void) (ir:function-type-of caller)))
-                (m:address (cast (pointer void) (ir:function-type-of callee))))))
-          (true (tail-direct-call c b id v args))
-          (false
-            (do
-              (ir:build-ret (field (field b owner) builder) (expression c b id))
-              unit)))))
+          (match
+            (passes:tail-call
+              (field b passes)
+              id
+              fn
+              (base:and
+                safe
+                (==
+                  (m:address (cast (pointer void) (ir:function-type-of caller)))
+                  (m:address (cast (pointer void) (ir:function-type-of callee))))))
+            (true (tail-direct-call c b id v args))
+            (false
+              (do
+                (ir:build-ret
+                  (field (field b owner) builder)
+                  (expression c b id))
+                unit)))))
       (_
         (do
           (ir:build-ret (field (field b owner) builder) (expression c b id))
@@ -608,7 +609,9 @@
    (value t:value-ref)) unit
   (let
     ((builder t:builder-ref (field (field b owner) builder))
-     (tag t:value-ref (match sum (true (ir:build-extract builder value 0 "")) (false value))))
+     (tag
+       t:value-ref
+       (match sum (true (ir:build-extract builder value 0 "")) (false value))))
     (tail-arms c b fn safe (m:next c args) value tag sum tuple)))
 
 (base:function tail-arms
@@ -630,8 +633,12 @@
         (let
           ((target u64 (field (m:at c arm) target))
            (function t:value-ref (ir:block-parent (ir:builder-block builder)))
-           (yes t:block-ref (ir:block-append (field owner context) function "case"))
-           (no t:block-ref (ir:block-append (field owner context) function "next.case")))
+           (yes
+             t:block-ref
+             (ir:block-append (field owner context) function "case"))
+           (no
+             t:block-ref
+             (ir:block-append (field owner context) function "next.case")))
           (do
             (match target
               (0 (do (ir:build-br builder yes) unit))
@@ -639,13 +646,23 @@
                 (match tuple
                   (true
                     (component-tests
-                      c b (m:next c (m:child c (m:child c arm))) value 0 yes no))
+                      c
+                      b
+                      (m:next c (m:child c (m:child c arm)))
+                      value
+                      0
+                      yes
+                      no))
                   (false
                     (let
                       ((constant
                          t:value-ref
                          (match sum
-                           (true (ir:const-int (layout:integer-type owner) (- target 1) 0))
+                           (true
+                             (ir:const-int
+                               (layout:integer-type owner)
+                               (- target 1)
+                               0))
                            (false
                              (word
                                owner
@@ -656,7 +673,12 @@
                           (do
                             (ir:build-cond-br
                               builder
-                              (ir:build-icmp builder enum:int-eq tag constant "")
+                              (ir:build-icmp
+                                builder
+                                enum:int-eq
+                                tag
+                                constant
+                                "")
                               yes
                               no)
                             unit))
@@ -664,11 +686,19 @@
                           (let
                             ((payload-test
                                t:block-ref
-                               (ir:block-append (field owner context) function "pattern.payload")))
+                               (ir:block-append
+                                 (field owner context)
+                                 function
+                                 "pattern.payload")))
                             (do
                               (ir:build-cond-br
                                 builder
-                                (ir:build-icmp builder enum:int-eq tag constant "")
+                                (ir:build-icmp
+                                  builder
+                                  enum:int-eq
+                                  tag
+                                  constant
+                                  "")
                                 payload-test
                                 no)
                               (ir:builder-position builder payload-test)
@@ -676,7 +706,11 @@
                                 c
                                 b
                                 (m:next c (m:child c (m:child c arm)))
-                                (ir:build-extract builder value (base:convert target) "")
+                                (ir:build-extract
+                                  builder
+                                  value
+                                  (base:convert target)
+                                  "")
                                 0
                                 yes
                                 no))))))))))
