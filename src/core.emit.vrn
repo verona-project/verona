@@ -523,26 +523,6 @@
             (false (bind-binder c b name (expression c b init))))
           (tail-bindings c b fn safe (m:next c id) body))))))
 
-(base:function tail-conditional
-  ((c m:context) (b backend) (fn u64) (safe bool) (args u64)) unit
-  (let
-    ((owner llvm:session (field b owner))
-     (builder t:builder-ref (field owner builder))
-     (condition t:value-ref (expression c b args))
-     (function t:value-ref (ir:block-parent (ir:builder-block builder)))
-     (yes t:block-ref (ir:block-append (field owner context) function "tail.then"))
-     (no t:block-ref (ir:block-append (field owner context) function "tail.else")))
-    (do
-      (ir:build-cond-br
-        builder
-        (ir:build-icmp builder enum:int-ne condition (integer owner 0) "")
-        yes
-        no)
-      (ir:builder-position builder yes)
-      (tail-expression c b fn safe (m:next c args))
-      (ir:builder-position builder no)
-      (tail-expression c b fn safe (m:next c (m:next c args))))))
-
 (base:function tail-direct-call
   ((c m:context) (b backend) (id u64) (v m:node) (args u64)) unit
   (let
@@ -567,13 +547,11 @@
   ((c m:context) (b backend) (fn u64) (safe bool) (id u64)) unit
   (let ((v m:node (m:at c id)) (args u64 (m:next c (field v child))))
     (match (field v kind)
-      (6
-        (let ((selected u64 (passes:branch (field b passes) id args)))
-          (match selected
-            (0 (tail-conditional c b fn safe args))
-            (_ (tail-expression c b fn safe selected)))))
       (7 (tail-bindings c b fn safe (m:child c args) (m:next c args)))
       (56 (tail-sequence c b fn safe args))
+      (16 (tail-match c b fn safe id args true))
+      (55 (tail-match c b fn safe id args false))
+      (61 (tail-match c b fn safe id args false))
       (8
         (let
           ((caller t:value-ref (get b fn))
@@ -598,6 +576,116 @@
           (ir:build-ret (field (field b owner) builder) (expression c b id))
           unit)))))
 
+; A tail-position match must lower each selected arm directly. Lowering it as
+; a value would insert a merge phi and hide direct tail calls from LLVM.
+(base:function tail-match
+  ((c m:context)
+   (b backend)
+   (fn u64)
+   (safe bool)
+   (id u64)
+   (args u64)
+   (sum bool)) unit
+  (let
+    ((value t:value-ref (expression c b args))
+     (tuple bool (== (check:type-kind c (field (m:at c args) ty)) 22))
+     (arm u64 (passes:arm (field b passes) id args sum tuple)))
+    (match arm
+      (0 (tail-match-unfolded c b fn safe args sum tuple value))
+      (_
+        (do
+          (bind-arm c b arm value sum tuple)
+          (tail-expression c b fn safe (m:next c (m:child c arm))))))))
+
+(base:function tail-match-unfolded
+  ((c m:context)
+   (b backend)
+   (fn u64)
+   (safe bool)
+   (args u64)
+   (sum bool)
+   (tuple bool)
+   (value t:value-ref)) unit
+  (let
+    ((builder t:builder-ref (field (field b owner) builder))
+     (tag t:value-ref (match sum (true (ir:build-extract builder value 0 "")) (false value))))
+    (tail-arms c b fn safe (m:next c args) value tag sum tuple)))
+
+(base:function tail-arms
+  ((c m:context)
+   (b backend)
+   (fn u64)
+   (safe bool)
+   (arm u64)
+   (value t:value-ref)
+   (tag t:value-ref)
+   (sum bool)
+   (tuple bool)) unit
+  (let
+    ((owner llvm:session (field b owner))
+     (builder t:builder-ref (field owner builder)))
+    (match arm
+      (0 (do (ir:build-unreachable builder) unit))
+      (_
+        (let
+          ((target u64 (field (m:at c arm) target))
+           (function t:value-ref (ir:block-parent (ir:builder-block builder)))
+           (yes t:block-ref (ir:block-append (field owner context) function "case"))
+           (no t:block-ref (ir:block-append (field owner context) function "next.case")))
+          (do
+            (match target
+              (0 (do (ir:build-br builder yes) unit))
+              (_
+                (match tuple
+                  (true
+                    (component-tests
+                      c b (m:next c (m:child c (m:child c arm))) value 0 yes no))
+                  (false
+                    (let
+                      ((constant
+                         t:value-ref
+                         (match sum
+                           (true (ir:const-int (layout:integer-type owner) (- target 1) 0))
+                           (false
+                             (word
+                               owner
+                               (field (m:at c (m:child c arm)) ty)
+                               (field (m:at c arm) value))))))
+                      (match sum
+                        (false
+                          (do
+                            (ir:build-cond-br
+                              builder
+                              (ir:build-icmp builder enum:int-eq tag constant "")
+                              yes
+                              no)
+                            unit))
+                        (true
+                          (let
+                            ((payload-test
+                               t:block-ref
+                               (ir:block-append (field owner context) function "pattern.payload")))
+                            (do
+                              (ir:build-cond-br
+                                builder
+                                (ir:build-icmp builder enum:int-eq tag constant "")
+                                payload-test
+                                no)
+                              (ir:builder-position builder payload-test)
+                              (component-tests
+                                c
+                                b
+                                (m:next c (m:child c (m:child c arm)))
+                                (ir:build-extract builder value (base:convert target) "")
+                                0
+                                yes
+                                no))))))))))
+            (ir:builder-position builder yes)
+            (bind-arm c b arm value sum tuple)
+            (tail-expression c b fn safe (m:next c (m:child c arm)))
+            (ir:builder-position builder no)
+            (tail-arms c b fn safe (m:next c arm) value tag sum tuple)))))))
+
 ; Lower sequential let initializers, associate binder IDs with their LLVM values, then lower the body.
 ; Keep initializer order. Skip only unreferenced bindings proven discardable.
 ; A copy from a stored local loads its current value here, preserving a snapshot.
@@ -612,55 +700,6 @@
             (true unit)
             (false (bind-binder c b name (expression c b init))))
           (bindings c b (m:next c id) body))))))
-
-; Build branches and a phi for a checked if expression.
-; Use each branch's actual final block so nested conditionals produce valid incoming edges.
-(base:function conditional ((c m:context) (b backend) (args u64)) t:value-ref
-  (let
-    ((owner llvm:session (field b owner))
-     (builder t:builder-ref (field owner builder))
-     (condition t:value-ref (expression c b args))
-     (function t:value-ref (ir:block-parent (ir:builder-block builder)))
-     (yes-block
-       t:block-ref
-       (ir:block-append (field owner context) function "then"))
-     (no-block
-       t:block-ref
-       (ir:block-append (field owner context) function "else"))
-     (end t:block-ref (ir:block-append (field owner context) function "merge")))
-    (do
-      (ir:build-cond-br
-        builder
-        (ir:build-icmp builder enum:int-ne condition (integer owner 0) "")
-        yes-block
-        no-block)
-      (ir:builder-position builder yes-block)
-      (let
-        ((yes t:value-ref (expression c b (m:next c args)))
-         (yes-end t:block-ref (ir:builder-block builder)))
-        (do
-          (ir:build-br builder end)
-          (ir:builder-position builder no-block)
-          (let
-            ((no t:value-ref (expression c b (m:next c (m:next c args))))
-             (no-end t:block-ref (ir:builder-block builder)))
-            (do
-              (ir:build-br builder end)
-              (ir:builder-position builder end)
-              (let
-                ((phi
-                   t:value-ref
-                   (ir:build-phi
-                     builder
-                     (layout:value-type
-                       c
-                       owner
-                       (field (m:at c (m:next c args)) ty))
-                     "")))
-                (do
-                  (llvm:incoming phi yes yes-end)
-                  (llvm:incoming phi no no-end)
-                  phi)))))))))
 
 ; Append source-location digits without resetting the existing string.
 (base:function append-number ((out (pointer data:data)) (v u64)) unit
@@ -1012,11 +1051,6 @@
           (match (uses-storage c id)
             (true (load-place c b id))
             (false (get b (field v target)))))
-        (6
-          (let ((selected u64 (passes:branch (field b passes) id args)))
-            (match selected
-              (0 (conditional c b args))
-              (_ (expression c b selected)))))
         (7 (bindings c b (m:child c args) (m:next c args)))
         (8
           (let

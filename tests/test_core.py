@@ -296,7 +296,7 @@ class CoreTests(unittest.TestCase):
             ]
             body = "42"
             for test in reversed(tests):
-                body = f"(if {test} {body} 0)"
+                body = f"(match {test} (true {body}) (false 0))"
             with self.subTest(type=ty):
                 self.agrees(f"""
 (%function exercise ((left {ty}) (right {ty})) i64 {body})
@@ -305,7 +305,7 @@ class CoreTests(unittest.TestCase):
         self.agrees("""
 (%function main () i64
   (let ((nan (/ (cast f64 0.0) 0.0)) (infinity (/ (cast f32 1.0) 0.0)))
-    (if (!= nan nan) (if (== nan nan) 0 (if (> infinity (cast f32 42.0)) 42 0)) 0)))
+    (match (!= nan nan) (true (match (== nan nan) (true 0) (false (match (> infinity (cast f32 42.0)) (true 42) (false 0))))) (false 0))))
 """, 42)
 
     def test_default_operator_literal_inference(self):
@@ -343,7 +343,8 @@ class CoreTests(unittest.TestCase):
         # Same input types, different results: context selects the implementation.
         self.agrees("""
 (%implementation + ((left i64) (right i64)) bool true)
-(%function main () i64 (if (+ (cast i64 1) 2) (+ 40 2) 0))
+(%function boolean ((value bool)) bool value)
+(%function main () i64 (match (boolean (+ (cast i64 1) 2)) (true (+ 40 2)) (false 0)))
 """, 42)
         self.agrees("""
 (%type Callback (pointer (function (i64 i64) i64)))
@@ -383,7 +384,7 @@ class CoreTests(unittest.TestCase):
 
     def test_default_division_failures(self):
         self.agrees(self.program("(/ (cast i64 -85) 2)"), -42)
-        self.agrees(self.program("(if (> (cast u64 18446744073709551615) 1) 42 0)"), 42)
+        self.agrees(self.program("(match (> (cast u64 18446744073709551615) 1) (true 42) (false 0))"), 42)
         for ty, expression, message in (
             ("i8", "(/ (cast i8 -128) -1)", "signed division overflow"),
             ("i64", "(/ (cast i64 -9223372036854775808) -1)", "signed division overflow"),
@@ -425,7 +426,7 @@ class CoreTests(unittest.TestCase):
 (%function main () i64
   (let ((value i64 (identity (cast i64 (identity 2)))))
     (do (identity unit)
-      (if (identity true) (%+-primitive-i64 (%sext-primitive-i8-i64 (narrow)) (identity value)) 0))))
+      (match (identity true) (true (%+-primitive-i64 (%sext-primitive-i8-i64 (narrow)) (identity value))) (false 0)))))
 """, 42)
         self.agrees("""
 (%macro identity (form) form)
@@ -510,7 +511,7 @@ class CoreTests(unittest.TestCase):
 (%macro define ()
   `(%function choose (for (T)) ((value T)) bool ,(not false)))
 (define)
-(%function main () i64 (if (choose (cast i64 0)) 42 0))
+(%function main () i64 (match (choose (cast i64 0)) (true 42) (false 0)))
 """, 42)
 
     def test_macro_compile_time_state(self):
@@ -547,7 +548,7 @@ class CoreTests(unittest.TestCase):
 (%function value () i64 (once))
 (%macro result ()
   (cond ((equal? (compiler:state-ref 'calls) '(call)) 42) (true 0)))
-(%function main () i64 (if (%=-primitive-i64 (value) 42) (result) 0))
+(%function main () i64 (match (%=-primitive-i64 (value) 42) (true (result)) (false 0)))
 """, 42)
         # Previously returned lists must not change when a key is replaced.
         self.agrees("""
@@ -724,9 +725,7 @@ class CoreTests(unittest.TestCase):
 (%macro right (initial &rest values)
   (compiler:reduce-right '%--primitive-i64 initial values))
 (%function main () i64
-  (if (%=-primitive-i64 (left 2 50 10) -58)
-    (if (%=-primitive-i64 (right 2 50 10) 42)
-      (if (%=-primitive-i64 (left 42) (right 42)) 42 0) 0) 0))
+  (match (%=-primitive-i64 (left 2 50 10) -58) (true (match (%=-primitive-i64 (right 2 50 10) 42) (true (match (%=-primitive-i64 (left 42) (right 42)) (true 42) (false 0))) (false 0))) (false 0)))
 """, 42)
         # Construction must not call or resolve the head, nor mutate shared
         # values when the same input/initial form is used in both directions.
@@ -1113,7 +1112,7 @@ class CoreTests(unittest.TestCase):
     def test_tuple_patterns(self):
         self.agrees("""
 (%function choose ((value (tuple bool i64))) i64
-  (match value ((tuple false _) 0) ((tuple ok total) (if ok total 1))))
+  (match value ((tuple false _) 0) ((tuple ok total) (match ok (true total) (false 1)))))
 (%function main () i64 (choose (tuple true (cast i64 42))))
 """, 42)
         self.agrees("""
@@ -1199,13 +1198,13 @@ class CoreTests(unittest.TestCase):
   (do (store (field record value) 40) (store (field record flag) true)
     (let ((pointer (& (field record value))))
       (store (deref pointer) (%+-primitive-i32 (deref pointer) 2))
-      (if (field record flag) (%sext-primitive-i32-i64 (field record value)) 0))))
+      (match (field record flag) (true (%sext-primitive-i32-i64 (field record value))) (false 0)))))
 (%function main () i64 (update (Record 1 false)))
 """, 42)
         self.agrees("""
 (%function update ((value (tuple i64 bool))) i64
   (do (store (tuple-get value 0) 42) (store (tuple-get value 1) true)
-    (if (tuple-get value 1) (tuple-get value 0) 0)))
+    (match (tuple-get value 1) (true (tuple-get value 0)) (false 0))))
 (%function main () i64 (update (tuple (cast i64 0) false)))
 """, 42)
         self.agrees("""
@@ -1230,9 +1229,8 @@ class CoreTests(unittest.TestCase):
     (store (field (deref pointer) flag) true)
     (store (field (deref pointer) value) 40.0)
     (store (index (field (deref pointer) bytes) 1) 2)
-    (if (field snapshot flag) 0
-      (%+-primitive-i64 (%fptosi-primitive-f32-i64 (field record value))
-        (%zext-primitive-u8-i64 (index (field record bytes) 1))))))
+    (match (field snapshot flag) (true 0) (false (%+-primitive-i64 (%fptosi-primitive-f32-i64 (field record value))
+        (%zext-primitive-u8-i64 (index (field record bytes) 1)))))))
 """, 42)
         self.agrees("""
 (%function main () i64
@@ -1469,7 +1467,7 @@ class CoreTests(unittest.TestCase):
 (%function address () (pointer bool) (& flag))
 (%variable flag bool true)
 (%function main () i64
-  (do (store (deref (address)) false) (if flag 0 42)))
+  (do (store (deref (address)) false) (match flag (true 0) (false 42))))
 """, 42)
         self.agrees("""
 (%variable text (pointer u8) "old")
@@ -1530,7 +1528,7 @@ class CoreTests(unittest.TestCase):
     (store s:counter counter)
     (s:bump)
     (store (deref (& other:counter)) (%+-primitive-i64 s:counter 1))
-    (if (%=-primitive-i64 (let ((counter i64 99)) counter) 99) other:counter 0)))
+    (match (%=-primitive-i64 (let ((counter i64 99)) counter) 99) (true other:counter) (false 0))))
 """, 42)
         result = self.run_core("check", """
 (%import state :as s)
@@ -1558,7 +1556,7 @@ class CoreTests(unittest.TestCase):
 (%external-function change "change" ((pointer bool) (pointer u8) (pointer f64)) void)
 (%function main () i64
   (do (change (& flag) (& byte) (& value))
-      (if flag (if (== value 1.5) (%zext-primitive-u8-i64 byte) 0) 0)))
+      (match flag (true (match (== value 1.5) (true (%zext-primitive-u8-i64 byte)) (false 0))) (false 0))))
 """
         binary = self.root / "C global executable"
         result = self.run_core("compile-report", program, "-o", binary,
@@ -1675,13 +1673,13 @@ class CoreTests(unittest.TestCase):
 (%function bump-choice ((value Choice)) Choice
   (match value ((Small x flag) (Real 42.5)) ((Real x) (Wrapped (Record 42 true)))
                ((Wrapped x) (Small 42 true))))
-(%function invert ((value bool)) bool (if value false true))
+(%function invert ((value bool)) bool (match value (true false) (false true)))
 (%function bump-quad ((value Quad)) Quad
   (Quad (%+-primitive-f64 (field value a) 1.0) (field value b) (field value c) (field value d)))
 """
         cases = (
-            ("(let ((r (record (Record 40 false)))) (if (field r flag) (%sext-primitive-i32-i64 (field r value)) 0))", 42),
-            ("(let ((r (Record 40 false))) (mutate-record (& r)) (if (field r flag) (%sext-primitive-i32-i64 (field r value)) 0))", 42),
+            ("(let ((r (record (Record 40 false)))) (match (field r flag) (true (%sext-primitive-i32-i64 (field r value))) (false 0)))", 42),
+            ("(let ((r (Record 40 false))) (mutate-record (& r)) (match (field r flag) (true (%sext-primitive-i32-i64 (field r value))) (false 0)))", 42),
             ("(%fptosi-primitive-f32-i64 (field (floats (Floats 1.5 2.5)) y))", 4),
             ("(%fptosi-primitive-f64-i64 (field (quad (Quad 40.0 1.0 2.0 3.0)) a))", 42),
             ("(%fptosi-primitive-f32-i64 (index (float-array (array-of 1.0 2.0 40.0)) 2))", 42),
@@ -1690,15 +1688,15 @@ class CoreTests(unittest.TestCase):
             ("(let ((r (mixed (Mixed 1.5 38)))) (%+-primitive-i64 (%fptosi-primitive-f64-i64 (field r x)) (field r y)))", 43),
             ("(index (field (large (Large (array-of 10 20 30))) elements) 2)", 33),
             ("(%sext-primitive-i16-i64 (index (array (array-of 1 2 3)) 2))", 4),
-            ("(match (choice (Small 40 false)) ((Small x flag) (if flag (%zext-primitive-u8-i64 x) 0)) ((Real x) 0) ((Wrapped x) 0))", 42),
+            ("(match (choice (Small 40 false)) ((Small x flag) (match flag (true (%zext-primitive-u8-i64 x)) (false 0))) ((Real x) 0) ((Wrapped x) 0))", 42),
             ("(match (choice (Real 2.25)) ((Small x flag) 0) ((Real x) (%fptosi-primitive-f64-i64 x)) ((Wrapped x) 0))", 3),
             ("(match (choice (Wrapped (Record 40 true))) ((Small x flag) 0) ((Real x) 0) ((Wrapped x) (%sext-primitive-i32-i64 (field x value))))", 42),
-            ("(let ((r (nested (Nested (Record 40 false) (array-of 1 2 3) false)))) (if (field r flag) (%sext-primitive-i32-i64 (field (field r record) value)) 0))", 42),
+            ("(let ((r (nested (Nested (Record 40 false) (array-of 1 2 3) false)))) (match (field r flag) (true (%sext-primitive-i32-i64 (field (field r record) value))) (false 0)))", 42),
             ("(%sext-primitive-i8-i64 (narrow -1 -2 20 25))", 42),
             ("(%sext-primitive-i32-i64 (field (record-callback bump (Record 40 false)) value))", 42),
             ("(index (field (large-callback bump-large (Large (array-of 41 0 0))) elements) 0)", 42),
             ("(match (choice-callback bump-choice (Small 1 false)) ((Small x flag) 0) ((Real x) (%fptosi-primitive-f64-i64 x)) ((Wrapped x) 0))", 42),
-            ("(if (bool-callback invert false) 42 0)", 42),
+            ("(match (bool-callback invert false) (true 42) (false 0))", 42),
             ("(%fptosi-primitive-f64-i64 (field (quad-callback bump-quad (Quad 40.0 1.0 2.0 3.0)) a))", 42),
             ("(let ((f (get-record))) (%sext-primitive-i32-i64 (field (f (Record 40 false)) value)))", 42),
             ("(%sext-primitive-i32-i64 (field (record-callback record (Record 39 false)) value))", 42),
@@ -1731,7 +1729,7 @@ class CoreTests(unittest.TestCase):
 (%import native :as lib)
 (%external-function length "strlen" ((pointer u8)) u64)
 (%function main () i64
-  (if true 42 (%reinterpret-primitive-u64-i64 (lib:length "hello"))))
+  (match true (true 42) (false (%reinterpret-primitive-u64-i64 (lib:length "hello")))))
 """
         self.agrees(source, 42)
         emitted = self.run_core("emit-llvm", source)
@@ -1905,7 +1903,7 @@ class CoreTests(unittest.TestCase):
     def test_data_and_character_literals(self):
         source = r"""
 (%function choose ((flag bool)) (pointer u8)
-  (if flag "a\n\t\"\\%" ""))
+  (match flag (true "a\n\t\"\\%") (false "")))
 (%function main () (tuple (pointer u8) (pointer u8) u8 u8)
   (tuple (choose true) (choose false) #\NeWlInE #\)))
 """
@@ -2041,12 +2039,7 @@ class CoreTests(unittest.TestCase):
 (%function main () i64
   (let ((value i64 7) (other i64 7) (p (& value))
         (items (array-of (cast i64 1) 2)) (first (& (index items 0))))
-    (if (== p (& value))
-      (if (!= p (& other))
-        (if (== p (pointer-offset p 0))
-          (if (== (pointer-offset first 1) (& (index items 1)))
-            (if (== (pointer-offset first 2) (pointer-offset first 2))
-              (if (== (address) (& total)) 42 0) 0) 0) 0) 0) 0)))
+    (match (== p (& value)) (true (match (!= p (& other)) (true (match (== p (pointer-offset p 0)) (true (match (== (pointer-offset first 1) (& (index items 1))) (true (match (== (pointer-offset first 2) (pointer-offset first 2)) (true (match (== (address) (& total)) (true 42) (false 0))) (false 0))) (false 0))) (false 0))) (false 0))) (false 0))))
 """, 42)
         self.agrees("""
 (%type Opaque)
@@ -2054,19 +2047,16 @@ class CoreTests(unittest.TestCase):
   (let ((text "abc") (p (pointer-offset text 1))
         (back (pointer-offset p -1))
         (opaque (cast (pointer Opaque) (cast (pointer void) text))))
-    (if (== text (pointer-offset text 0))
-      (if (== text back)
-        (if (!= text p)
-          (if (== (cast (pointer void) opaque) (cast (pointer void) back)) 42 0) 0) 0) 0)))
+    (match (== text (pointer-offset text 0)) (true (match (== text back) (true (match (!= text p) (true (match (== (cast (pointer void) opaque) (cast (pointer void) back)) (true 42) (false 0))) (false 0))) (false 0))) (false 0))))
 """, 42)
         # Argument side effects run once, left to right, before comparison.
         self.agrees("""
 (%variable calls i64 0)
 (%variable value i64 42)
 (%function next ((expected i64)) (pointer i64)
-  (do (store calls (if (%=-primitive-i64 calls expected) (%+-primitive-i64 calls 1) 99)) (& value)))
+  (do (store calls (match (%=-primitive-i64 calls expected) (true (%+-primitive-i64 calls 1)) (false 99))) (& value)))
 (%function main () i64
-  (if (== (next 0) (next 1)) (if (%=-primitive-i64 calls 2) 42 0) 0))
+  (match (== (next 0) (next 1)) (true (match (%=-primitive-i64 calls 2) (true 42) (false 0))) (false 0)))
 """, 42)
         emitted = self.run_core("emit-llvm", """
 (%function same ((left (pointer i64)) (right (pointer i64))) bool (== left right))
@@ -2085,10 +2075,7 @@ class CoreTests(unittest.TestCase):
 (%function get () Callback first)
 (%function main () i64
   (let ((a Callback first) (b Callback first) (other Callback second))
-    (if (== a b)
-      (if (== a (get))
-        (if (!= a other)
-          (if (== (cast (pointer void) a) (cast (pointer void) b)) 42 0) 0) 0) 0)))
+    (match (== a b) (true (match (== a (get)) (true (match (!= a other) (true (match (== (cast (pointer void) a) (cast (pointer void) b)) (true 42) (false 0))) (false 0))) (false 0))) (false 0))))
 """, 42)
 
         # Two declarations of one native symbol denote the same function.
@@ -2097,19 +2084,19 @@ class CoreTests(unittest.TestCase):
 (%external-function first "getpid" () i32)
 (%external-function second "getpid" () i32)
 (%function main () i64
-  (let ((a Callback first) (b Callback second)) (if (== a b) 42 0)))
+  (let ((a Callback first) (b Callback second)) (match (== a b) (true 42) (false 0))))
 """, 42)
 
     def test_pointer_equality_dispatch(self):
-        for operator, value, body in (("==", "false", "(if (== p p) 0 42)"),
-                                      ("!=", "true", "(if (!= p p) 42 0)")):
+        for operator, value, body in (("==", "false", "(match (== p p) (true 0) (false 42))"),
+                                      ("!=", "true", "(match (!= p p) (true 42) (false 0))")):
             self.agrees(f"""
 (%implementation {operator} ((left (pointer i64)) (right (pointer i64))) bool {value})
 (%function main () i64 (let ((value i64 0) (p (& value))) {body}))
 """, 42)
         self.agrees("""
 (%function == ((a (pointer i64)) (b (pointer i64))) bool false)
-(%function main () i64 (let ((value i64 0)) (if (== (& value) (& value)) 0 42)))
+(%function main () i64 (let ((value i64 0)) (match (== (& value) (& value)) (true 0) (false 42))))
 """, 42)
         self.agrees("""
 (%protocol Custom (a) (== ((left a) (right a)) bool))
@@ -2117,12 +2104,12 @@ class CoreTests(unittest.TestCase):
   (function == ((left (pointer i64)) (right (pointer i64))) bool false))
 (%function apply (for (a) ((Custom a))) ((left a) (right a)) bool (== left right))
 (%function main () i64
-  (let ((value i64 0)) (if (apply (& value) (& value)) 0 42)))
+  (let ((value i64 0)) (match (apply (& value) (& value)) (true 0) (false 42))))
 """, 42)
         # The reference also permits fallback for a source-declared equality generic.
         self.agrees("""
 (%generic == (left right))
-(%function main () i64 (let ((value i64 0)) (if (== (& value) (& value)) 42 0)))
+(%function main () i64 (let ((value i64 0)) (match (== (& value) (& value)) (true 42) (false 0))))
 """, 42)
 
     def test_invalid_pointer_equality(self):
@@ -2157,9 +2144,7 @@ class CoreTests(unittest.TestCase):
 (%external-function absent "absent" () (pointer u8))
 (%external-function present "present" () (pointer u8))
 (%function main () i64
-  (if (%is-null-primitive-pointer (absent))
-    (if (%is-null-primitive-pointer (present)) 0 42)
-    0))
+  (match (%is-null-primitive-pointer (absent)) (true (match (%is-null-primitive-pointer (present)) (true 0) (false 42))) (false 0)))
 """
         for level in ("-O0", "-O2"):
             binary = self.root / "null pointer executable"
@@ -2388,10 +2373,10 @@ class CoreTests(unittest.TestCase):
         body = "42"
         for expression, expected in reversed(cases):
             yes, no = (body, "0") if expected else ("0", body)
-            body = f"(if {expression} {yes} {no})"
+            body = f"(match {expression} (true {yes}) (false {no}))"
         self.agrees(self.program(body), 42)
         for operation in ("%and-primitive-bool false", "%or-primitive-bool true"):
-            source = self.program(f"(if ({operation} (%=-primitive-i64 (%/-primitive-i64 1 0) 0)) 1 0)")
+            source = self.program(f"(match ({operation} (%=-primitive-i64 (%/-primitive-i64 1 0) 0)) (true 1) (false 0))")
             evaluated = self.run_core("eval", source)
             self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
             for level in ("-O0", "-O2"):
@@ -2402,7 +2387,7 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(native.returncode, 70, native.stderr)
         for expression in ("(%not-primitive-bool)", "(%not-primitive-bool true false)",
                            "(%and-primitive-bool true)", "(%=-primitive-bool (cast i64 0) true)"):
-            result = self.run_core("check", self.program(f"(if {expression} 42 0)"))
+            result = self.run_core("check", self.program(f"(match {expression} (true 42) (false 0))"))
             self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_base_boolean_operations(self):
@@ -2478,8 +2463,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(len(re.findall(r'define internal i8 @"[0-9]+"\(', ir.stdout)), 2)
         self.agrees(prelude + """
 (%function countdown (for (a) ((numeric a))) ((value a) (depth i64)) a
-  (if (%=-primitive-i64 depth 0) value
-    (countdown (add value value) (%--primitive-i64 depth 1))))
+  (match (%=-primitive-i64 depth 0) (true value) (false (countdown (add value value) (%--primitive-i64 depth 1)))))
 (%function main () i64 (countdown (cast i64 21) 1))
 """, 42)
         self.agrees("""
@@ -2863,9 +2847,7 @@ class CoreTests(unittest.TestCase):
 
     def test_factorial(self):
         source = """(%function factorial ((n i64)) i64
-  (if (%=-primitive-i64 n 0)
-      1
-      (%*-primitive-i64 n (factorial (%--primitive-i64 n 1)))))
+  (match (%=-primitive-i64 n 0) (true 1) (false (%*-primitive-i64 n (factorial (%--primitive-i64 n 1))))))
 (%function main () i64
   (let ((input i64 5)) (factorial input)))"""
         self.agrees(source, 120)
@@ -2879,13 +2861,13 @@ class CoreTests(unittest.TestCase):
             "(%*-primitive-i64 9223372036854775807 2)": -2,
             "(%/-primitive-i64 -7 3)": -2, "(%/-primitive-i64 7 -3)": -2, "(%/-primitive-i64 -7 -3)": 2,
             "(%+-primitive-i64 (%*-primitive-i64 4 5) (%--primitive-i64 9 3))": 26,
-            "(if true 42 (%/-primitive-i64 1 0))": 42,
-            "(if false (%/-primitive-i64 1 0) 7)": 7,
-            "(if (if true false true) 1 (if false 3 4))": 4,
+            "(match true (true 42) (false (%/-primitive-i64 1 0)))": 42,
+            "(match false (true (%/-primitive-i64 1 0)) (false 7))": 7,
+            "(match (match true (true false) (false true)) (true 1) (false (match false (true 3) (false 4))))": 4,
             "(let ((x i64 7) (y i64 (%+-primitive-i64 x 2))) (%*-primitive-i64 x y))": 63,
             "(let ((x i64 9)) (%+-primitive-i64 (let ((x i64 (%+-primitive-i64 x 1))) x) x))": 19,
             "(let () 13)": 13,
-            "(let ((u unit unit) (b bool true)) (if b 17 2))": 17,
+            "(let ((u unit unit) (b bool true)) (match b (true 17) (false 2)))": 17,
         }
         for expression, expected in examples.items():
             with self.subTest(expression=expression):
@@ -2898,14 +2880,14 @@ class CoreTests(unittest.TestCase):
                                 "<=": left <= right, ">": left > right,
                                 ">=": left >= right}[op])
                 with self.subTest(op=op, left=left, right=right):
-                    self.agrees(self.program(f"(if (%{op}-primitive-i64 {left} {right}) 1 0)"), expected)
+                    self.agrees(self.program(f"(match (%{op}-primitive-i64 {left} {right}) (true 1) (false 0))"), expected)
 
     def test_calls_and_mutual_recursion(self):
         self.agrees("""(%function main () i64 (%+-primitive-i64 (add 3 5) (add 7 11)))
           (%function add ((a i64) (b i64)) i64 (%+-primitive-i64 a b))""", 26)
-        self.agrees("""(%function main () i64 (if (even 10) (id 29) 0))
-          (%function even ((n i64)) bool (if (%=-primitive-i64 n 0) true (odd (%--primitive-i64 n 1))))
-          (%function odd ((n i64)) bool (if (%=-primitive-i64 n 0) false (even (%--primitive-i64 n 1))))
+        self.agrees("""(%function main () i64 (match (even 10) (true (id 29)) (false 0)))
+          (%function even ((n i64)) bool (match (%=-primitive-i64 n 0) (true true) (false (odd (%--primitive-i64 n 1)))))
+          (%function odd ((n i64)) bool (match (%=-primitive-i64 n 0) (true false) (false (even (%--primitive-i64 n 1)))))
           (%function id ((x i64)) i64 x)""", 29)
         self.agrees("""(%function noop ((u unit)) unit u)
           (%function main () i64 (let ((u unit (noop unit))) 8))""", 8)
@@ -2917,7 +2899,7 @@ class CoreTests(unittest.TestCase):
         self.agrees(identity + self.program("(identity -9223372036854775808)"), -9223372036854775808)
         self.agrees(identity + self.program(
             "(let ((x i64 -9223372036854775808)) "
-            "(if (%=-primitive-i64 (identity x) x) 41 2))"), 41)
+            "(match (%=-primitive-i64 (identity x) x) (true 41) (false 2)))"), 41)
 
     def test_invalid_programs(self):
         cases = [
@@ -2935,9 +2917,9 @@ class CoreTests(unittest.TestCase):
             (self.program("(missing)"), "unknown function: missing"),
             (self.program("(%+-primitive-i64 1 true)"), "type mismatch"),
             (self.program("(%+-primitive-i64 1)"), "primitive requires"),
-            (self.program("(if 1 2 3)"), "type mismatch"),
-            (self.program("(if true 1 false)"), "type mismatch"),
-            (self.program("(if true 1)"), "if requires"),
+            (self.program("(match 1 (true 2) (false 3))"), "ambiguous numeric literal"),
+            (self.program("(match true (true 1) (false false))"), "type mismatch"),
+            (self.program("(if true 1)"), "unknown function: if"),
             (self.program("(let ((x bool 1)) 0)"), "type mismatch"),
             (self.program("(let ((x i64 x)) x)"), "unknown local"),
             (self.program("(let ((x i64 1) (x i64 2)) x)"), "duplicate local"),
@@ -2948,7 +2930,7 @@ class CoreTests(unittest.TestCase):
             ("(%function f () i64 1)" + self.program("(f 2)"), "too many arguments"),
             ("(%function f () i64 1)" + self.program("(let ((f i64 1)) (f))"), "not callable"),
             ("(%function unused () i64 true)" + self.program("0"), "type mismatch"),
-            (self.program("(if true 1 (%+-primitive-i64 false 2))"), "type mismatch"),
+            (self.program("(match true (true 1) (false (%+-primitive-i64 false 2)))"), "type mismatch"),
             (self.program("0") + "\0", "NUL byte"),
         ]
         for source, message in cases:
@@ -2966,7 +2948,7 @@ class CoreTests(unittest.TestCase):
         self.agrees(self.program(
             "(let ((x (cast i64 3)) (y (%+-primitive-i64 x 4))) "
             "(let ((x (%+-primitive-i64 x y)) (ok true) (u unit)) "
-            "(if ok x 0)))"), 10)
+            "(match ok (true x) (false 0))))"), 10)
         self.agrees("(%function id ((x i64)) i64 x)" + self.program(
             "(let ((id (cast i64 8))) id)"), 8)
         for expression, message in (
@@ -2989,7 +2971,7 @@ class CoreTests(unittest.TestCase):
             ("(%function bad () i64 (%+-primitive-i64 missing 1))\n"
              "(%function other () bool 1)\n" + self.program("0"),
              ("unknown local", "expected bool, actual i64"), 2),
-            (self.program("(if true missing absent)"),
+            (self.program("(match true (true missing) (false absent))"),
              ("unknown local",), 2),
             ("(%function malformed)\n(%function other () i64 missing)\n" + self.program("0"),
              ("%function requires", "unknown local"), 2),
@@ -3097,7 +3079,9 @@ class CoreTests(unittest.TestCase):
 #+unknown-feature (%function broken () Missing invalid)
 (%function main () i64
   (%zext-primitive-PLATFORM-i64
-    (if true #+darwin (cast Platform 42) #+linux (cast Platform 42) (cast Platform 0))))
+    (match true
+      (true #+darwin (cast Platform 42) #+linux (cast Platform 42))
+      (false (cast Platform 0)))))
 """.replace("PLATFORM", "u16" if sys.platform == "darwin" else "u32")
         self.agrees(source, 42)
         for text, message in (
@@ -3217,7 +3201,7 @@ int main(int argc, char **argv) {
 (%function main () i64
   (let ((value i64 100) (bound Callback add)
         (first (bound 20 1)) (second (bound 19 2)))
-    (if (%=-primitive-i64 value 100) (%+-primitive-i64 first second) 0)))
+    (match (%=-primitive-i64 value 100) (true (%+-primitive-i64 first second)) (false 0))))
 """, 42)
 
     def test_beta_stored_functions_and_callee_order(self):
@@ -3297,7 +3281,7 @@ int main(int argc, char **argv) {
 (%function main () i64
   (let ((seed i64 40) (alias seed) (answer (%+-primitive-i64 alias 2))
         (ready (%=-primitive-i64 answer 42)) (unused (%/-primitive-i64 answer 1)))
-    (if ready (match answer (42 answer) (_ 0)) 0)))
+    (match ready (true (match answer (42 answer) (_ 0))) (false 0))))
 """
         self.agrees(source, 42)
         emitted = self.run_core("emit-llvm", source)
@@ -3308,7 +3292,7 @@ int main(int argc, char **argv) {
         self.assertNotIn("call i64 @core.div", emitted.stdout)
         report = self.run_core("optimization-report", source)
         self.assertEqual(report.returncode, 0, report.stderr)
-        for rule in ("constant-propagation", "known-branch", "known-match", "dead-binding"):
+        for rule in ("constant-propagation", "known-match", "dead-binding"):
             self.assertIn(f"optimization: {rule} node=", report.stderr)
 
     def test_constant_propagation_shadowing_and_specializations(self):
@@ -3321,7 +3305,7 @@ int main(int argc, char **argv) {
     (%+-primitive-i64 (pick saved) (%zext-primitive-u8-i64 other))))
 """, 42)
         source = """
-(%function choose ((flag bool)) i64 (let ((alias flag)) (if alias 42 0)))
+(%function choose ((flag bool)) i64 (let ((alias flag)) (match alias (true 42) (false 0))))
 (%function main () i64 (choose true))
 """
         self.agrees(source, 42)
@@ -3358,7 +3342,7 @@ int main(int argc, char **argv) {
 (%function obtain () i64 (do (store calls (%+-primitive-i64 calls 1)) 21))
 (%function main () i64
   (let ((value (obtain)) (alias value))
-    (if (%=-primitive-i64 calls 1) (%+-primitive-i64 value alias) 0)))
+    (match (%=-primitive-i64 calls 1) (true (%+-primitive-i64 value alias)) (false 0))))
 """
         self.agrees(source, 42)
         report = self.run_core("optimization-report", source)
@@ -3388,14 +3372,14 @@ int main(int argc, char **argv) {
 
     def test_constant_propagation_alias_budget(self):
         bindings = ["(v0 bool true)"] + [f"(v{i} v{i - 1})" for i in range(1, 40)]
-        source = self.program(f"(let ({' '.join(bindings)}) (if v39 42 0))")
+        source = self.program(f"(let ({' '.join(bindings)}) (match v39 (true 42) (false 0)))")
         self.agrees(source, 42)
         report = self.run_core("optimization-report", source)
         self.assertEqual(report.returncode, 0, report.stderr)
         self.assertNotIn("optimization: known-branch", report.stderr)
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
-        self.assertIn("then", emitted.stdout)
+        self.assertIn("next.case", emitted.stdout)
 
     def test_local_cse_reuses_safe_sibling_primitive_tree(self):
         source = """
@@ -3429,8 +3413,8 @@ int main(int argc, char **argv) {
         source = """
 (%function helper ((flag bool) (value i64)) i64
   (%+-primitive-i64
-    (if flag (%*-primitive-i64 value value) 0)
-    (if flag (%*-primitive-i64 value value) 0)))
+    (match flag (true (%*-primitive-i64 value value)) (false 0))
+    (match flag (true (%*-primitive-i64 value value)) (false 0))))
 (%function main () i64 (helper true 21))
 """
         self.agrees(source, 882)
@@ -3441,9 +3425,7 @@ int main(int argc, char **argv) {
     def test_self_tail_recursion_elimination(self):
         source = """
 (%function count ((value i64) (total i64)) i64
-  (if (%=-primitive-i64 value 0)
-      total
-      (count (%--primitive-i64 value 1) (%+-primitive-i64 total 1))))
+  (match (%=-primitive-i64 value 0) (true total) (false (count (%--primitive-i64 value 1) (%+-primitive-i64 total 1)))))
 (%function main () i64 (count 1000000 0))
 """
         emitted = self.run_core("emit-llvm", source)
@@ -3462,10 +3444,8 @@ int main(int argc, char **argv) {
 
         addressable = """
 (%function blocked ((value i64)) i64
-  (if (%=-primitive-i64 value 0)
-      0
-      (let ((address (pointer i64) (address-of value)))
-        (blocked (%--primitive-i64 (deref address) 1)))))
+  (match (%=-primitive-i64 value 0) (true 0) (false (let ((address (pointer i64) (address-of value)))
+        (blocked (%--primitive-i64 (deref address) 1))))))
 (%function main () i64 (blocked 2))
 """
         rejected = self.run_core("optimization-report", addressable)
@@ -3478,9 +3458,9 @@ int main(int argc, char **argv) {
     def test_general_tail_calls_same_signature_mutual_recursion(self):
         source = """
 (%function even ((value i64)) i64
-  (if (%=-primitive-i64 value 0) 1 (odd (%--primitive-i64 value 1))))
+  (match (%=-primitive-i64 value 0) (true 1) (false (odd (%--primitive-i64 value 1)))))
 (%function odd ((value i64)) i64
-  (if (%=-primitive-i64 value 0) 0 (even (%--primitive-i64 value 1))))
+  (match (%=-primitive-i64 value 0) (true 0) (false (even (%--primitive-i64 value 1)))))
 (%function main () i64 (even 1000000))
 """
         emitted = self.run_core("emit-llvm", source)
@@ -3500,8 +3480,7 @@ int main(int argc, char **argv) {
         source = """
 (%function main () i64
   (let ((unused (%+-primitive-i64 1 2)))
-    (if (%=-primitive-i64 1 1)
-      (match (cast i64 42) (42 (%+-primitive-i64 40 2)) (_ 0)) 0)))
+    (match (%=-primitive-i64 1 1) (true (match (cast i64 42) (42 (%+-primitive-i64 40 2)) (_ 0))) (false 0))))
 """
         first = self.run_core("optimization-report", source)
         self.assertEqual(first.returncode, 0, first.stderr)
@@ -3510,7 +3489,7 @@ int main(int argc, char **argv) {
         rows = before.splitlines()
         ids = [int(re.match(r"node (\d+) ", row).group(1)) for row in rows]
         self.assertEqual(ids, list(range(1, len(ids) + 1)))
-        for rule in ("dead-binding", "known-branch", "known-match", "constant-fold"):
+        for rule in ("dead-binding", "known-match", "constant-fold"):
             self.assertIn(f"optimization: {rule} node=", first.stderr)
         self.assertRegex(first.stderr, r"input\.vrn:\d+:\d+: optimization:")
         second = self.run_core("optimization-report", source)
@@ -3522,7 +3501,7 @@ int main(int argc, char **argv) {
         self.assertEqual(ordinary.stderr, "")
 
     def test_optimization_report_checks_before_passes(self):
-        result = self.run_core("optimization-report", self.program("(if true 42 missing)"))
+        result = self.run_core("optimization-report", self.program("(match true (true 42) (false missing))"))
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("unknown local name", result.stderr)
         self.assertEqual(result.stdout, "")
@@ -3566,8 +3545,7 @@ int main(int argc, char **argv) {
 (%function forward ((value i64)) i64 (target value))
 (%function main () i64
   (let ((original Callback target) (wrapper Callback forward) (again Callback forward))
-    (if (!= original wrapper)
-      (if (== wrapper again) (wrapper 41) 0) 0)))
+    (match (!= original wrapper) (true (match (== wrapper again) (true (wrapper 41)) (false 0))) (false 0))))
 """, 42)
 
     def test_eta_dynamic_target_and_effects(self):
@@ -3581,7 +3559,7 @@ int main(int argc, char **argv) {
 (%function main () i64
   (let ((a Callback first) (b Callback second))
     (do (forward a 0)
-      (if (== (forward b 40) 42) (if (== calls 2) 42 0) 0))))
+      (match (== (forward b 40) 42) (true (match (== calls 2) (true 42) (false 0))) (false 0)))))
 """, 42)
 
     def test_eta_forwarder_optimization_keeps_export(self):
@@ -3696,8 +3674,7 @@ int main(int argc, char **argv) {
     def test_auto_inline_recursion_and_unused_failing_arguments(self):
         self.agrees("""
 (%function fib ((n i64)) i64
-  (if (%<-primitive-i64 n 2) n
-    (%+-primitive-i64 (fib (%--primitive-i64 n 1)) (fib (%--primitive-i64 n 2)))))
+  (match (%<-primitive-i64 n 2) (true n) (false (%+-primitive-i64 (fib (%--primitive-i64 n 1)) (fib (%--primitive-i64 n 2))))))
 (%function main () i64 (fib 10))
 """, 55)
         source = """
@@ -3842,7 +3819,7 @@ int main(int argc, char **argv) {
 (%inline helper)
 (%function main () i64
   (let ((callback Callback helper) (same Callback helper))
-    (if (== callback same) (callback 41) 0)))
+    (match (== callback same) (true (callback 41)) (false 0))))
 """, 42)
         source = """
 (%function ignore ((first i64) (second i64)) i64 42)
@@ -3863,8 +3840,7 @@ int main(int argc, char **argv) {
     def test_inline_recursion_is_bounded_and_reported(self):
         source = """
 (%function fib ((n i64)) i64
-  (if (%<-primitive-i64 n 2) n
-    (%+-primitive-i64 (fib (%--primitive-i64 n 1)) (fib (%--primitive-i64 n 2)))))
+  (match (%<-primitive-i64 n 2) (true n) (false (%+-primitive-i64 (fib (%--primitive-i64 n 1)) (fib (%--primitive-i64 n 2))))))
 (%inline fib)
 (native-export fib "fib_api")
 (%function main () i64 (fib 4))
@@ -3876,9 +3852,9 @@ int main(int argc, char **argv) {
         self.agrees("""
 (%inline even)
 (%inline odd)
-(%function even ((n i64)) bool (if (%=-primitive-i64 n 0) true (odd (%--primitive-i64 n 1))))
-(%function odd ((n i64)) bool (if (%=-primitive-i64 n 0) false (even (%--primitive-i64 n 1))))
-(%function main () i64 (if (even 10) 42 0))
+(%function even ((n i64)) bool (match (%=-primitive-i64 n 0) (true true) (false (odd (%--primitive-i64 n 1)))))
+(%function odd ((n i64)) bool (match (%=-primitive-i64 n 0) (true false) (false (even (%--primitive-i64 n 1)))))
+(%function main () i64 (match (even 10) (true 42) (false 0)))
 """, 42)
 
     def test_dead_functions_remove_unreachable_chains_and_recursive_groups(self):
@@ -4075,7 +4051,7 @@ int main(int argc, char **argv) {
     def test_llvm_pipeline_specializes_constant_arguments(self):
         source = """
 (%function select ((mode i64) (value i64)) i64
-  (if (%=-primitive-i64 mode 0) value (%+-primitive-i64 value 1)))
+  (match (%=-primitive-i64 mode 0) (true value) (false (%+-primitive-i64 value 1))))
 (%function dynamic ((mode i64) (value i64)) i64 (select mode value))
 (%function main () i64
   (%+-primitive-i64 (select 0 20) (%+-primitive-i64 (select 1 20) (dynamic 0 0))))
@@ -4176,7 +4152,7 @@ int main(int argc, char **argv) {
             self.skipTest("LLVM opt is required for the pinned inline simplification check")
         source = """
 (%function choose ((mode i64) (value i64)) i64
-  (if (%=-primitive-i64 mode 0) value (%+-primitive-i64 value 1)))
+  (match (%=-primitive-i64 mode 0) (true value) (false (%+-primitive-i64 value 1))))
 (%function main () i64 (choose 0 42))
 """
         self.agrees(source, 42)
@@ -4201,9 +4177,7 @@ int main(int argc, char **argv) {
 (%external-function input "cse_input" () i64)
 (%function calculate ((condition bool) (value i64)) i64
   (let ((base (%*-primitive-i64 value value)))
-    (if condition
-        (%+-primitive-i64 base (%*-primitive-i64 value value))
-        base)))
+    (match condition (true (%+-primitive-i64 base (%*-primitive-i64 value value))) (false base))))
 (%function main () i64 (calculate (condition) (input)))
 """
         emitted = self.run_core("emit-llvm", source)
@@ -4256,8 +4230,7 @@ int main(void) {
   (let ((unused (%*-primitive-i64 value value))
         (aggregate (tuple value true))
         (constructor (Some value))
-        (branch (if (%<-primitive-i64 value 0)
-                  (%+-primitive-i64 value 1) (%--primitive-i64 value 1)))
+        (branch (match (%<-primitive-i64 value 0) (true (%+-primitive-i64 value 1)) (false (%--primitive-i64 value 1))))
         (sequence (do (%+-primitive-i64 value 1) (%*-primitive-i64 value 2)))
         (division (%/-primitive-i64 84 2)))
     value))
@@ -4475,8 +4448,8 @@ int main(void) {
                 self.agrees(source, expected)
                 emitted = self.run_core("emit-llvm", source)
                 self.assertEqual(emitted.returncode, 0, emitted.stderr)
-                self.assertIn("match.end", emitted.stdout)
-                self.assertIn("phi i64", emitted.stdout)
+                self.assertIn("next.case", emitted.stdout)
+                self.assertIn("case", emitted.stdout)
         self.agrees("""
 (%type Option (sum (Some i64) (None)))
 (%function make ((value i64)) Option (Some value))
@@ -4517,7 +4490,7 @@ int main(void) {
         self.agrees(source, 42)
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
-        self.assertIn("match.end", emitted.stdout)
+        self.assertIn("next.case", emitted.stdout)
 
     def test_constant_folding_integer_semantics(self):
         cases = {
@@ -4539,10 +4512,10 @@ int main(void) {
             "(%and-primitive-i64 -1 42)": 42,
             "(%or-primitive-i64 40 2)": 42,
             "(%xor-primitive-i64 63 21)": 42,
-            "(if (%>-primitive-u64 18446744073709551615 0) 42 0)": 42,
-            "(if (%<-primitive-i64 -1 0) 42 0)": 42,
-            "(if (%=-primitive-i8 (%+-primitive-i8 127 1) -128) 42 0)": 42,
-            "(if (%not-primitive-bool (%and-primitive-bool true false)) 42 0)": 42,
+            "(match (%>-primitive-u64 18446744073709551615 0) (true 42) (false 0))": 42,
+            "(match (%<-primitive-i64 -1 0) (true 42) (false 0))": 42,
+            "(match (%=-primitive-i8 (%+-primitive-i8 127 1) -128) (true 42) (false 0))": 42,
+            "(match (%not-primitive-bool (%and-primitive-bool true false)) (true 42) (false 0))": 42,
         }
         for expression, expected in cases.items():
             with self.subTest(expression=expression):
@@ -4550,9 +4523,7 @@ int main(void) {
 
     def test_constant_folding_removes_guarded_division(self):
         source = self.program("""
-(if (%=-primitive-i64 (%/-primitive-i64 84 2) 42)
-  (%/-primitive-i64 (%+-primitive-i64 80 4) 2)
-  (%/-primitive-i64 1 0))
+(match (%=-primitive-i64 (%/-primitive-i64 84 2) 42) (true (%/-primitive-i64 (%+-primitive-i64 80 4) 2)) (false (%/-primitive-i64 1 0)))
 """)
         self.agrees(source, 42)
         emitted = self.run_core("emit-llvm", source)
@@ -4561,7 +4532,7 @@ int main(void) {
         self.assertNotRegex(emitted.stdout, r"call i64 @core\.div")
         self.assertNotIn("phi i64", emitted.stdout)
         invalid = self.run_core("emit-llvm", self.program(
-            "(if (%=-primitive-i64 (%/-primitive-i64 84 2) 42) 42 missing)"))
+            "(match (%=-primitive-i64 (%/-primitive-i64 84 2) 42) (true 42) (false missing))"))
         self.assertEqual(invalid.returncode, 2, invalid.stderr)
         self.assertIn("unknown local", invalid.stderr)
 
@@ -4578,12 +4549,12 @@ int main(void) {
     (%+-primitive-i64 (%*-primitive-i64 (mark (& trace)) 0) trace)))
 """, 42)
         self.agrees(self.program("""
-(if (%=-primitive-f64 (%/-primitive-f64 84.0 2.0) 42.0) 42 0)
+(match (%=-primitive-f64 (%/-primitive-f64 84.0 2.0) 42.0) (true 42) (false 0))
 """), 42)
 
     def test_constant_folding_preserves_failures(self):
         cases = [
-            (f"(if (%=-primitive-{ty} (%/-primitive-{ty} {minimum} -1) 0) 42 0)",
+            (f"(match (%=-primitive-{ty} (%/-primitive-{ty} {minimum} -1) 0) (true 42) (false 0))",
              "signed division overflow")
             for ty, minimum in (("i8", -128), ("i16", -32768),
                                 ("i32", -2147483648), ("i64", -9223372036854775808))
@@ -4676,9 +4647,9 @@ int main(void) {
 
     def test_known_boolean_branch_elimination(self):
         for expression in (
-            "(if true 42 (%/-primitive-i64 1 0))",
-            "(if false (%/-primitive-i64 1 0) 42)",
-            "(if true (if false 0 42) 0)",
+            "(match true (true 42) (false (%/-primitive-i64 1 0)))",
+            "(match false (true (%/-primitive-i64 1 0)) (false 42))",
+            "(match true (true (match false (true 0) (false 42))) (false 0))",
         ):
             with self.subTest(expression=expression):
                 source = self.program(expression)
@@ -4693,7 +4664,7 @@ int main(void) {
         source = """
 (%function mark ((p (pointer i64))) bool (do (store (deref p) 42) true))
 (%function main () i64
-  (let ((value i64 0)) (do (if (mark (& value)) (cast i64 0) (cast i64 1)) value)))
+  (let ((value i64 0)) (do (match (mark (& value)) (true (cast i64 0)) (false (cast i64 1))) value)))
 """
         self.agrees(source, 42)
         emitted = self.run_core("emit-llvm", source)
@@ -4703,19 +4674,19 @@ int main(void) {
         self.assertIn("phi i64", emitted.stdout)
 
         # Optimization cannot conceal an error in the unused branch.
-        for expression in ("(if true 42 missing)", "(if false missing 42)"):
+        for expression in ("(match true (true 42) (false missing))", "(match false (true missing) (false 42))"):
             result = self.run_core("emit-llvm", self.program(expression))
             self.assertEqual(result.returncode, 2, result.stderr)
 
     def test_llvm_library_and_linker_boundary(self):
         environment = dict(os.environ, VERONA_CORE_CLANG="/nonexistent/compiler")
-        source = "(%function choose ((x i64)) i64 (if (%<-primitive-i64 x 0) 7 (%+-primitive-i64 x 2)))" + self.program("(choose 40)")
+        source = "(%function choose ((x i64)) i64 (match (%<-primitive-i64 x 0) (true 7) (false (%+-primitive-i64 x 2))))" + self.program("(choose 40)")
         emitted = self.run_core("emit-llvm", source, env=environment)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         self.assertIn("; ModuleID =", emitted.stdout)
         # Direct tail-call lowering emits a return in each branch instead of
         # materializing the conditional result through a merge phi.
-        self.assertIn("tail.then:", emitted.stdout)
+        self.assertIn("case:", emitted.stdout)
         evaluated = self.run_core("eval", source, env=environment)
         self.assertEqual(evaluated.returncode, 0, evaluated.stderr)
         self.assertEqual(evaluated.stdout, "42\n")
@@ -5013,7 +4984,7 @@ int main(void) {{
 (%external-function imported "local_answer" () i32)
 (native-export local "local_answer")
 (%function main () i64
-  (let ((a Callback local) (b Callback imported)) (if (== a b) 42 0)))
+  (let ((a Callback local) (b Callback imported)) (match (== a b) (true 42) (false 0))))
 """
         result = self.run_core("compile", source, "-o", self.root / "exports")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -5163,10 +5134,11 @@ int main(void) {{
         self.assertFalse(Path(args[0]).exists(), "temporary object was not removed")
 
     def test_unit_and_nested_control_flow(self):
-        self.agrees("(%function noop ((x unit)) unit (if true x unit))" + self.program(
-            "(let ((u (if (if true false true) unit (noop unit)))) "
-            "(if (if false true (%=-primitive-i64 2 2)) "
-            "(if true 1234567890123456789 2) (if false 3 4)))"), 1234567890123456789)
+        self.agrees("(%function noop ((x unit)) unit (match true (true x) (false unit)))" + self.program(
+            "(let ((u (match (match true (true false) (false true)) (true unit) (false (noop unit))))) "
+            "(match (match false (true true) (false (%=-primitive-i64 2 2))) "
+            "(true (match true (true 1234567890123456789) (false 2))) "
+            "(false (match false (true 3) (false 4)))))"), 1234567890123456789)
         # A unit argument must still be evaluated, even though it carries no information.
         source = ("(%function use ((x unit)) i64 9)" + self.program(
             "(use (let ((bad (%/-primitive-i64 1 0))) unit))"))

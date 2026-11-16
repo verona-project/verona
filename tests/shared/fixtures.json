@@ -33,7 +33,7 @@
     },
     {
       "name": "lazy-branch",
-      "source": "(%function main () i64 (if false (%/-primitive-i64 1 0) 42))\n",
+      "source": "(%function main () i64 (match false (true (%/-primitive-i64 1 0)) (false 42)))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -53,7 +53,7 @@
     },
     {
       "name": "recursion",
-      "source": "(%function factorial ((n i64)) i64 (if (%=-primitive-i64 n 0) 1 (%*-primitive-i64 n (factorial (%--primitive-i64 n 1)))))\n(%function main () i64 (factorial 5))\n",
+      "source": "(%function factorial ((n i64)) i64 (match (%=-primitive-i64 n 0) (true 1) (false (%*-primitive-i64 n (factorial (%--primitive-i64 n 1))))))\n(%function main () i64 (factorial 5))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -63,7 +63,7 @@
     },
     {
       "name": "typed-internal-values",
-      "source": "(%function identity ((u unit) (b bool)) bool b)\n(%function main () i64 (if (identity unit true) 7 0))\n",
+      "source": "(%function identity ((u unit) (b bool)) bool b)\n(%function main () i64 (match (identity unit true) (true 7) (false 0)))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -190,7 +190,7 @@
     },
     {
       "name": "structural-tuple-branch",
-      "source": "(%function select ((b bool)) (tuple i64 bool) (if b (tuple 42 true) (tuple 17 false)))\n(%function main () (tuple i64 bool) (select true))\n",
+      "source": "(%function select ((b bool)) (tuple i64 bool) (match b (true (tuple 42 true)) (false (tuple 17 false))))\n(%function main () (tuple i64 bool) (select true))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -210,7 +210,7 @@
     },
     {
       "name": "sum-every-case-and-wildcard",
-      "source": "(%type S (sum (None) (One i64) (Two bool unit)))\n(%function score ((s S)) i64 (match s ((None) 1) ((One x) x) ((Two b u) (if b 3 4))))\n(%function other ((s S)) i64 (match s ((One x) x) (_ 10)))\n(%function main () (tuple S S S i64 i64 i64 i64) (tuple (None) (One 2) (Two true unit) (score (None)) (score (One 2)) (score (Two true unit)) (other (Two false unit))))\n",
+      "source": "(%type S (sum (None) (One i64) (Two bool unit)))\n(%function score ((s S)) i64 (match s ((None) 1) ((One x) x) ((Two b u) (match b (true 3) (false 4)))))\n(%function other ((s S)) i64 (match s ((One x) x) (_ 10)))\n(%function main () (tuple S S S i64 i64 i64 i64) (tuple (None) (One 2) (Two true unit) (score (None)) (score (One 2)) (score (Two true unit)) (other (Two false unit))))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -220,7 +220,7 @@
     },
     {
       "name": "expected-and-qualified-cases",
-      "source": "(%type A (sum (Same i64)))\n(%type B (sum (Same bool)))\n(%function choose ((b bool)) A (if b (Same 42) (A:Same 17)))\n(%function main () (tuple A B) (let ((a A (choose true)) (b B (Same false))) (tuple a b)))\n",
+      "source": "(%type A (sum (Same i64)))\n(%type B (sum (Same bool)))\n(%function choose ((b bool)) A (match b (true (Same 42)) (false (A:Same 17))))\n(%function main () (tuple A B) (let ((a A (choose true)) (b B (Same false))) (tuple a b)))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -273,7 +273,7 @@
     },
     {
       "name": "aggregate-recursion-and-sharing",
-      "source": "(%type Point (product (x i64)))\n(%function grow ((n i64) (p Point)) Point (if (%=-primitive-i64 n 0) p (grow (%--primitive-i64 n 1) (Point (%+-primitive-i64 (field p x) 1)))))\n(%function main () (tuple Point Point) (let ((p (Point 2))) (tuple (grow 40 p) p)))\n",
+      "source": "(%type Point (product (x i64)))\n(%function grow ((n i64) (p Point)) Point (match (%=-primitive-i64 n 0) (true p) (false (grow (%--primitive-i64 n 1) (Point (%+-primitive-i64 (field p x) 1))))))\n(%function main () (tuple Point Point) (let ((p (Point 2))) (tuple (grow 40 p) p)))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -406,7 +406,7 @@
     },
     {
       "name": "tuple-component-patterns",
-      "source": "(%function choose ((value (tuple bool i64))) i64 (match value ((tuple false _) 0) ((tuple ok total) (if ok total 1))))(%function main () i64 (choose (tuple true (cast i64 42))))\n",
+      "source": "(%function choose ((value (tuple bool i64))) i64 (match value ((tuple false _) 0) ((tuple ok total) (match ok (true total) (false 1)))))(%function main () i64 (choose (tuple true (cast i64 42))))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -617,7 +617,7 @@
     },
     {
       "name": "pointer-equality-offset-handles",
-      "source": "(%function main () i64 (let ((x i64 1) (p (& x))) (if (== p (pointer-offset p 0)) 42 0)))\n",
+      "source": "(%function main () i64 (let ((x i64 1) (p (& x))) (match (== p (pointer-offset p 0)) (true 42) (false 0))))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -627,7 +627,7 @@
     },
     {
       "name": "pointer-equality-literal-origin",
-      "source": "(%function main () i64 (let ((p \"abc\")) (if (== p (pointer-offset p 0)) (if (!= p (pointer-offset p 1)) 42 0) 0)))\n",
+      "source": "(%function main () i64 (let ((p \"abc\")) (match (== p (pointer-offset p 0)) (true (match (!= p (pointer-offset p 1)) (true 42) (false 0))) (false 0))))\n",
       "entry": "main",
       "arguments": [],
       "expected": {
@@ -637,7 +637,7 @@
     },
     {
       "name": "pointer-equality-callback-identity",
-      "source": "(%type Callback (pointer (function () i64)))\n(%function answer () i64 42)\n(%function main () i64 (let ((a Callback answer) (b Callback answer)) (if (== a b) 42 0)))\n",
+      "source": "(%type Callback (pointer (function () i64)))\n(%function answer () i64 42)\n(%function main () i64 (let ((a Callback answer) (b Callback answer)) (match (== a b) (true 42) (false 0))))\n",
       "entry": "main",
       "arguments": [],
       "expected": {

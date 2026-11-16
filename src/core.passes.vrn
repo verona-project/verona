@@ -95,22 +95,6 @@
         (_ unit))
       result)))
 
-(base:function branch ((p context) (id u64) (condition u64)) u64
-  (let
-    ((selected
-       u64
-       (match (field p enabled)
-         (true
-           (simplify:known-branch
-             (field p program)
-             (field p initializers)
-             condition
-             (field (field p budget) depth)))
-         (false 0))))
-    (do
-      (match selected (0 unit) (_ (remark p id "known-branch" selected)))
-      selected)))
-
 (base:function arm
   ((p context) (id u64) (scrutinee u64) (sum bool) (tuple bool)) u64
   (let
@@ -183,4 +167,4 @@
     (m:text 1 "\n")
     (dump-range c 1 (- (m:nodes-length (deref (field c items))) 1))))
 
-(export limits context defaults prepare common-sibling tail-call fold branch arm dead dump)
+(export limits context defaults prepare common-sibling tail-call fold arm dead dump)

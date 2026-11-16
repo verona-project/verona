@@ -12,7 +12,7 @@
 
 ; Stable indices into an arena-owned syntax/typed tape. Index zero is absent.
 ; Reader kinds: atom=0, list=1, data=25, character=26. Checked kinds: integer=2, bool=3, unit=4,
-; local=5, if=6, let=7, call=8, primitive=9, invalid declaration=10.
+; local=5, retired=6, let=7, call=8, primitive=9, invalid declaration=10.
 ; Checked expressions: aggregate=13, extraction=14, sum construction=15, match=16, data=17.
 ; Descriptors: nominal product=20, sum=21, structural tuple=22, transparent alias=23, tuple component=24.
 ; Nominal opaque type=33, pointer descriptor=34. Reader float=35, checked float=36.

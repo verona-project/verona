@@ -152,27 +152,6 @@
                ((unknown) (unknown))
                ((known b) (binary (field v target) ty a b))))))))))
 
-; Read-only checked-expression rewrites. Call only after successful checking.
-; Never replace tape nodes: binders, sibling links, source spans, and shared
-; specialization identities remain owned by the checked program. Returning an
-; existing branch ID lets lowering keep its normal expression/LLVM slot mapping.
-; These rules allocate nothing, grow no graph, and need no fixed point.
-; Zero means no branch rewrite. Only proven constant boolean computations
-; can be discarded here; calls, loads, and references remain conservative.
-(base:function known-branch
-  ((c m:context) (locals (pointer u64)) (condition u64) (depth u64)) u64
-  (let ((v m:node (m:at c condition)))
-    ; Type 2 is bool. Reject untyped macro booleans, which have ty=0.
-    (match (field v ty)
-      (2
-        (match (constant c locals condition depth)
-          ((unknown) 0)
-          ((known value)
-           (match value
-             (0 (m:next c (m:next c condition)))
-             (_ (m:next c condition))))))
-      (_ 0))))
-
 ; A pattern is rejected only by a proven mismatch. An unknown earlier pattern
 ; prevents selecting a later arm, even if that later arm is a catch-all.
 (base:type pattern-result (sum (matches) (rejects) (undecided)))
@@ -565,6 +544,44 @@
               (base:or (field head may-trap) (field tail may-trap))
               (base:or (field head may-diverge) (field tail may-diverge)))))))))
 
+; A match evaluates its subject and exactly one arm. It is discardable only
+; when the subject and every possible arm are discardable; the remaining effect
+; flags conservatively summarize every arm for callers that need them.
+(base:function match-arm-effects
+  ((c m:context) (locals (pointer u64)) (arm u64) (fuel u64)) effects
+  (match fuel
+    (0 (unknown-effects))
+    (_
+      (match arm
+        (0 (safe-effects))
+        (_
+          (let
+            ((head effects (effect c locals (m:next c (m:child c arm)) (- fuel 1)))
+             (tail effects (match-arm-effects c locals (m:next c arm) (- fuel 1))))
+            (effects
+              (base:and (field head discardable) (field tail discardable))
+              (base:and (field head duplicable) (field tail duplicable))
+              (base:or (field head reads-memory) (field tail reads-memory))
+              (base:or (field head writes-memory) (field tail writes-memory))
+              (base:or (field head may-trap) (field tail may-trap))
+              (base:or (field head may-diverge) (field tail may-diverge)))))))))
+
+(base:function match-effects
+  ((c m:context) (locals (pointer u64)) (subject u64) (arms u64) (fuel u64)) effects
+  (match fuel
+    (0 (unknown-effects))
+    (_
+      (let
+        ((head effects (effect c locals subject (- fuel 1)))
+         (tail effects (match-arm-effects c locals arms (- fuel 1))))
+        (effects
+          (base:and (field head discardable) (field tail discardable))
+          (base:and (field head duplicable) (field tail duplicable))
+          (base:or (field head reads-memory) (field tail reads-memory))
+          (base:or (field head writes-memory) (field tail writes-memory))
+          (base:or (field head may-trap) (field tail may-trap))
+          (base:or (field head may-diverge) (field tail may-diverge)))))))
+
 (base:function effect
   ((c m:context) (locals (pointer u64)) (id u64) (fuel u64)) effects
   (match fuel
@@ -600,11 +617,13 @@
                           (base:and (== op 16) (num:integer-type (field v ty))))
                         (false (unknown-effects))
                         (true (effect-chain c locals args (- fuel 1))))))))))
-          (6 (effect-chain c locals args (- fuel 1)))
           (13 (effect-chain c locals args (- fuel 1)))
           (14 (effect c locals args (- fuel 1)))
           (15 (effect-chain c locals args (- fuel 1)))
+          (16 (match-effects c locals args (m:next c args) (- fuel 1)))
+          (55 (match-effects c locals args (m:next c args) (- fuel 1)))
           (56 (effect-chain c locals args (- fuel 1)))
+          (61 (match-effects c locals args (m:next c args) (- fuel 1)))
           (_ (unknown-effects)))))))
 
 (base:function discardable
@@ -628,7 +647,6 @@
 (export
   constant-result
   constant
-  known-branch
   known-match
   references
   initializers

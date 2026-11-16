@@ -9,8 +9,8 @@ lexical declarations and protocol evidence have been resolved; do not register
 them as concrete primitive aliases. Preserve the distinction between Base
 expansion, semantic generic dispatch, and concrete compiler input.
 
-Existing core `let` is unprefixed. The initial core's built-in `if` remains
-unprefixed; do not invent `%let` or `%if` as aliases for this convention.
+Existing core `let` is unprefixed; do not invent `%let` as an alias. The
+initial core has no `if` or `%if` form: use exhaustive boolean `match`.
 
 The compiler implementation itself uses the richer bootstrapping Verona
 language and imports Base normally, including `base:function` declarations.

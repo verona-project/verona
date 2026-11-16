@@ -131,11 +131,6 @@
       (require
         c
         id
-        (match (m:is c id "if") (true false) (false true))
-        "reserved identifier")
-      (require
-        c
-        id
         (match (m:is c id "let") (true false) (false true))
         "reserved identifier")
       (require
@@ -2752,7 +2747,7 @@
           (expect c value (expression-as c value env all ty) ty)
           (m:typed c id 60 1 0 0))))))
 
-; Resolve and check an if, let, primitive operation, or direct function call.
+; Resolve and check a let, primitive operation, or direct function call.
 ; Annotate the list with its checked kind, result type, and resolved target.
 (base:function application-inner
   ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64)) u64
@@ -2764,20 +2759,6 @@
     (do
       (require c id (atom c head) "expected operation or function name")
       (base:cond
-        ((m:is c head "if")
-         (require
-           c
-           id
-           (arity c args 3)
-           "if requires condition and two branches")
-         (expect c args (expression-as c args env all 2) 2)
-         (let
-           ((yes u64 (m:next c args))
-            (no u64 (m:next c yes))
-            (ty u64 (expression-as c yes env all expected)))
-           (do
-             (expect-origin c no (expression-as c no env all ty) ty yes)
-             (m:typed c id 6 ty 0 0))))
         ((base:or (m:is c head "&") (m:is c head "address-of"))
          (address-expression c id args env all))
         ((base:or (m:is c head "deref") (m:is c head "dereference"))
@@ -2940,12 +2921,6 @@
         (let ((before u64 (deref (field c errors))))
           (do
             (base:cond
-              ((m:is c head "if")
-               (require
-                 c
-                 id
-                 (arity c args 3)
-                 "if requires condition and two branches"))
               ((m:is c head "let")
                (require
                  c
@@ -3006,7 +2981,7 @@
       (_ (do (m:report c id "data literal storage allocation failed") 0)))))
 
 ; Resolve and type-check one expression, recording literal values and binder identities.
-; Return its type ID; both branches of a conditional are checked by application.
+; Return its type ID; match checking validates every arm before lowering.
 (base:function expression-inner
   ((c m:context) (id u64) (env (pointer void)) (all u64)) u64
   (let ((v m:node (m:at c id)))

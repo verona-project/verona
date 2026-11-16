@@ -645,7 +645,6 @@
                       (field v ty)
                       id))
                   (false local))))))
-        (6 (do (schedule c 2 id args 0 0) (evaluate-expression c args)))
         (7 (do (schedule c 3 id (m:child p args) (m:next p args) 0)))
         (8
           (schedule

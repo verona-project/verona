@@ -68,7 +68,7 @@
     (case "(%function f () i64 7)(%function main () i64 (f))" (e:options 0 2) 0 7)
     (case "(%function f () i64 (f))(%function main () i64 (f))" (e:options 100 0) 3 0)
     (case
-      "(%function f ((n i64)) i64 (if (%=-primitive-i64 n 0) 17 (f (%--primitive-i64 n 1))))(%function main () i64 (f 3000))"
+      "(%function f ((n i64)) i64 (match (%=-primitive-i64 n 0) (true 17) (false (f (%--primitive-i64 n 1)))))(%function main () i64 (f 3000))"
       (e:options 0 0)
       0
       17)))
@@ -116,7 +116,7 @@
      (errors u64 0)
      (text
        (pointer u8)
-       "(%function divide ((x i64)) i64 (%/-primitive-i64 42 x))(%function count ((n i64)) i64 (if (%=-primitive-i64 n 0) 0 (%+-primitive-i64 1 (count (%--primitive-i64 n 1)))))(%function main () i64 (count 40))")
+       "(%function divide ((x i64)) i64 (%/-primitive-i64 42 x))(%function count ((n i64)) i64 (match (%=-primitive-i64 n 0) (true 0) (false (%+-primitive-i64 1 (count (%--primitive-i64 n 1))))))(%function main () i64 (count 40))")
      (c
        m:context
        (m:context
@@ -365,7 +365,7 @@
 (testing:test default-generic-execution
   (testing:checks
     (case "(%function main () i64 (/ (+ (cast i64 40) 44) 2))" (e:options 0 0) 0 42)
-    (case "(%function main () i64 (if (< (cast i8 -1) 0) (+ 40 2) 0))" (e:options 0 0) 0 42)
+    (case "(%function main () i64 (match (< (cast i8 -1) 0) (true (+ 40 2)) (false 0)))" (e:options 0 0) 0 42)
     (case
       "(%function main () i64 (%sext-primitive-i8-i64 (/ (cast i8 -128) -1)))"
       (e:options 0 0)
@@ -375,7 +375,7 @@
 (testing:test component-pattern-execution
   (testing:checks
     (case
-      "(%function main () i64 (match (tuple true (cast i64 42)) ((tuple false _) (%/-primitive-i64 1 0)) ((tuple flag answer) (if flag answer 0))))"
+      "(%function main () i64 (match (tuple true (cast i64 42)) ((tuple false _) (%/-primitive-i64 1 0)) ((tuple flag answer) (match flag (true answer) (false 0)))))"
       (e:options 0 0)
       0
       42)
@@ -528,7 +528,7 @@
      (errors u64 0)
      (text
        (pointer u8)
-       "(%function compare ((left (pointer void)) (right (pointer void))) i64 (if (== left right) 42 0))(%function main () i64 0)")
+       "(%function compare ((left (pointer void)) (right (pointer void))) i64 (match (== left right) (true 42) (false 0)))(%function main () i64 0)")
      (c
        m:context
        (m:context
@@ -561,13 +561,13 @@
     (opaque-pointer-equality 1 1 42)
     (opaque-pointer-equality 1 2 0)
     (case
-      "(%function main () i64 (let ((x i64 1) (p (& x)) (q (pointer-offset p 0))) (if (== p q) 42 0)))"
+      "(%function main () i64 (let ((x i64 1) (p (& x)) (q (pointer-offset p 0))) (match (== p q) (true 42) (false 0))))"
       (e:options 0 0)
       0
       42)
     ; Equality neither dereferences nor tests the lifetime of the pointee.
     (case
-      "(%function escaped () (pointer i64) (let ((x i64 7)) (& x)))(%function main () i64 (let ((p (escaped))) (if (== p p) 42 0)))"
+      "(%function escaped () (pointer i64) (let ((x i64 7)) (& x)))(%function main () i64 (let ((p (escaped))) (match (== p p) (true 42) (false 0))))"
       (e:options 0 0)
       0
       42)))
@@ -580,7 +580,7 @@
       0
       42)
     (case
-      "(%variable counter i64 0)(%function main () i64 (if (%=-primitive-i64 counter 0) (do (store counter 1) (%/-primitive-i64 1 0)) 42))"
+      "(%variable counter i64 0)(%function main () i64 (match (%=-primitive-i64 counter 0) (true (do (store counter 1) (%/-primitive-i64 1 0))) (false 42)))"
       (e:options 0 0)
       1
       0)))

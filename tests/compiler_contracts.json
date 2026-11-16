@@ -133,7 +133,6 @@
       "forms": [
         "let",
         "do",
-        "if",
         "match",
         "direct calls",
         "indirect calls",
@@ -180,7 +179,7 @@
       "tests": [],
       "decision": "Retain expression-valued function bodies without early return for now, by user decision on 2026-11-07. The planned cases below define the required contract if this limitation is revisited.",
       "planned_check": {
-        "source": "(%function f ((flag bool)) i64 (if flag (return 42) 7))\n(%function main () i64 (f true))",
+        "source": "(%function f ((flag bool)) i64 (match flag (true (return 42)) (false 7)))\n(%function main () i64 (f true))",
         "expected": "i64:42",
         "cases": [
           "aggregate return",
