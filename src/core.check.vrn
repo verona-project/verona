@@ -42,8 +42,8 @@
 
 (base:function resolve-value-layout ((c m:context) (ty u64)) unit
   (match (type-kind c ty)
-    (20 (resolve-layout c (- ty num:descriptor-base)))
-    (21 (resolve-layout c (- ty num:descriptor-base)))
+    (20 (resolve-layout c (m:descriptor-id ty)))
+    (21 (resolve-layout c (m:descriptor-id ty)))
     (22 (resolve-component-layouts c (type-components c ty)))
     (49 (resolve-value-layout c (array-element c ty)))
     (_ unit)))
@@ -260,13 +260,13 @@
                 ((== pointee 14) true)
                 ((== (type-kind c pointee) 33) true)
                 ((== (type-kind c pointee) 46)
-                 (let ((v m:node (m:at c (- pointee num:descriptor-base))))
-                   (match (c-components c (field v child) rest)
-                     (false false)
-                     (true
-                       (match (field v target)
-                         (14 true)
-                         (result (c-value-type c result rest)))))))
+                 (match
+                   (c-components c (m:descriptor-components c pointee) rest)
+                   (false false)
+                   (true
+                     (match (m:descriptor-target c pointee)
+                       (14 true)
+                       (result (c-value-type c result rest))))))
                 (true (c-value-type c pointee rest)))))
           (20 (c-components c (type-components c ty) rest))
           (21 (c-cases c (type-components c ty) rest))
@@ -290,9 +290,18 @@
          (next u64 (external-parameters c (m:next c id)))
          (name
            u64
-           (m:add
+           (m:add-record
              c
-             (m:node 0 (field v start) 0 0 id ty 0 0 0 (field v lookup-module)))))
+             (node-atom)
+             (field v start)
+             0
+             0
+             id
+             ty
+             0
+             0
+             0
+             (field v lookup-module))))
         (do
           (require
             c
@@ -301,8 +310,8 @@
             "external parameters require C-compatible value types")
           (m:add
             c
-            (m:node
-              1
+            (m:record
+              (node-list)
               (field v start)
               0
               name
@@ -379,15 +388,15 @@
                       symbol
                       (match (cstring:strcmp bytes "main") (0 false) (_ true))
                       "external symbol main is reserved for the entry point")
-                    (m:typed
+                    (m:typed-kind
                       c
                       id
-                      53
+                      (node-external-function)
                       ty
                       (m:add
                         c
-                        (m:node
-                          1
+                        (m:record
+                          (node-list)
                           (field (m:at c params) start)
                           0
                           checked
@@ -483,7 +492,7 @@
               (49 false)
               (_ true))
             "top-level aggregate constants are not supported yet")
-          (m:typed c id 51 ty 0 0)
+          (m:typed-kind c id (node-constant-declaration) ty 0 0)
           unit)))))
 
 (base:function variable-signature ((c m:context) (id u64) (all u64)) unit
@@ -520,7 +529,7 @@
               (49 false)
               (_ true))
             "top-level aggregate variables are not supported yet")
-          (m:typed c id 63 ty 0 0)
+          (m:typed-kind c id (node-mutable-global-declaration) ty 0 0)
           unit)))))
 
 (base:function template-shape ((c m:context) (id u64)) bool
@@ -670,8 +679,8 @@
    (owner u64)) u64
   (m:add
     c
-    (m:node
-      0
+    (m:record
+      (node-atom)
       (field site start)
       length
       0
@@ -690,26 +699,34 @@
      (left u64 (default-name c v "left" 4 right owner))
      (params
        u64
-       (m:add c (m:node 1 (field v start) 0 left 0 0 0 0 0 (+ owner 1))))
+       (m:add-record c (node-list) (field v start) 0 left 0 0 0 0 0 (+ owner 1)))
      (label
        u64
-       (m:add
+       (m:add-record
          c
-         (m:node
-           0
-           (field v start)
-           (field v length)
-           0
-           params
-           0
-           0
-           0
-           (field v generated)
-           (+ owner 1))))
+         (node-atom)
+         (field v start)
+         (field v length)
+         0
+         params
+         0
+         0
+         0
+         (field v generated)
+         (+ owner 1)))
      (head u64 (default-name c v "%generic" 8 label owner)))
-    (m:add
+    (m:add-record
       c
-      (m:node 62 (field v start) (field v length) head 0 0 code 0 0 (+ owner 1)))))
+      (node-default-numeric-generic)
+      (field v start)
+      (field v length)
+      head
+      0
+      0
+      code
+      0
+      0
+      (+ owner 1))))
 
 (base:function default-prefix ((c m:context) (args u64) (stop u64) (ty u64))
   bool
@@ -939,7 +956,7 @@
               (plain-name c name)
               "expected identifier for local binding")
             (require c name (== (m:lookup c name env) 0) "duplicate parameter")
-            (m:typed c name 0 ty 0 3)
+            (m:typed-kind c name (node-atom) ty 0 3)
             (let ((binding m:binding (m:binding name name 0 env)))
               (parameters
                 c
@@ -1005,7 +1022,7 @@
               "function conflicts with sum constructor")
             (require c params (list c params) "expected parameter list")
             (parameters c (m:child c params) (m:empty-env) 0)
-            (m:typed c fn 1 ty 0 0)
+            (m:typed-kind c fn (node-list) ty 0 0)
             unit))))))
 
 (base:function generic-name ((c m:context) (id u64)) unit
@@ -1170,7 +1187,7 @@
           (true false)
           (false true))
         "duplicate generic implementation")
-      (m:typed c id 18 ty generic 0)
+      (m:typed-kind c id (node-concrete-implementation) ty generic 0)
       unit)))
 
 (base:function operation-named ((c m:context) (name u64) (id u64) (method bool))
@@ -1320,7 +1337,7 @@
                   c
                   (protocol-operations c id)
                   (m:child c params))
-                (m:typed c id 38 0 0 0)
+                (m:typed-kind c id (node-protocol-declaration) 0 0 0)
                 unit)))
           (false unit))
         (register-protocols c (m:next c id) all)))))
@@ -1388,7 +1405,7 @@
             (m:next c head)
             params
             args
-            (field (m:at c (- actual num:descriptor-base)) target)))
+            (m:descriptor-target c actual)))
          (true false)))
       (true (== actual (type-reference c template))))))
 
@@ -1500,7 +1517,7 @@
             id
             (protocol-type-matches c (m:next c expected) types args ty)
             "protocol operation result type mismatch")
-          (m:typed c id 19 ty protocol 0)
+          (m:typed-kind c id (node-protocol-method) ty protocol 0)
           (match next (0 id) (_ (protocol-methods c next protocol args))))))))
 
 (base:function protocol-argument-types ((c m:context) (id u64)) unit
@@ -1554,7 +1571,13 @@
                     id
                     (protocol-operations c protocol)
                     methods)
-                  (m:typed c id 39 0 protocol 0)
+                  (m:typed-kind
+                    c
+                    id
+                    (node-concrete-protocol-instance)
+                    0
+                    protocol
+                    0)
                   (match (== before (deref (field c errors)))
                     (false unit)
                     (true
@@ -1582,11 +1605,11 @@
             ((constant-declaration c fn) (constant-signature c fn all))
             ((variable-declaration c fn) (variable-signature c fn all))
             ((m:is c (m:child c fn) "native-export")
-             (do (m:typed c fn 68 0 0 0) unit))
+             (do (m:typed-kind c fn (node-native-export) 0 0 0) unit))
             ((m:is c (m:child c fn) "%inline")
-             (do (m:typed c fn 72 0 0 0) unit))
+             (do (m:typed-kind c fn (node-inline-directive) 0 0 0) unit))
             ((m:is c (m:child c fn) "%noinline")
-             (do (m:typed c fn 73 0 0 0) unit))
+             (do (m:typed-kind c fn (node-noinline-directive) 0 0 0) unit))
             ((generic-declaration c fn) unit)
             ((== (field (m:at c fn) kind) 19) unit)
             ((>= (field (m:at c fn) kind) 20) unit)
@@ -1600,7 +1623,8 @@
                 "only %function declarations are supported; %function requires name, parameters, return type, and one body")))
           (match (== before (deref (field c errors)))
             (true unit)
-            (false (do (m:typed c fn 10 0 0 0) unit)))
+            (false
+              (do (m:typed-kind c fn (node-invalid-declaration) 0 0 0) unit)))
           (signatures c (m:next c fn) all))))))
 
 ; Accumulate decimal digits into an unsigned magnitude without exceeding limit.
@@ -1661,10 +1685,10 @@
         (match negative (false true) (true (num:signed-type ty)))
         "unsigned integer literal cannot be negative")
       (integer-span c id first (- end first) (& magnitude) limit)
-      (m:typed
+      (m:typed-kind
         c
         id
-        2
+        (node-integer)
         ty
         0
         (num:normalize
@@ -1781,8 +1805,8 @@
             (match annotated
               (true (expect-origin c init inferred ty (m:next c name)))
               (false unit))
-            (m:typed c id 1 ty init 0)
-            (m:typed c name 0 ty 0 1)
+            (m:typed-kind c id (node-list) ty init 0)
+            (m:typed-kind c name (node-atom) ty 0 1)
             (let
               ((binding m:binding (m:binding name name 0 env))
                (seen m:binding (m:binding name name 0 local)))
@@ -2100,21 +2124,22 @@
           ((== target 0)
            (match (pointer-equality c generic args)
              (0 (do (m:report c id "no matching generic implementation") 0))
-             (operation (m:typed c id 9 2 operation 0))))
+             (operation (m:typed-kind c id (node-primitive) 2 operation 0))))
           ((== target (cast u64 18446744073709551615))
            (m:report c id "ambiguous generic implementation")
            0)
           ((== target default-implementation)
-           (m:typed
+           (m:typed-kind
              c
              id
-             9
+             (node-primitive)
              (num:default-result
                (field (m:at c generic) target)
                (field (m:at c args) ty))
              (field (m:at c generic) target)
              0))
-          (true (m:typed c id 8 (field (m:at c target) ty) target 0)))))))
+          (true
+            (m:typed-kind c id (node-call) (field (m:at c target) ty) target 0)))))))
 
 (base:function specialized-context ((c m:context) (bindings u64)) m:context
   (m:context
@@ -2180,7 +2205,7 @@
       (validate-protocol-parameters c (m:child c params) types (m:empty-env))
       (validate-protocol-type c (m:next c params) types)
       (validate-constraints c (template-constraints c fn) types all)
-      (m:typed c fn 41 0 0 0)
+      (m:typed-kind c fn (node-template) 0 0 0)
       unit)))
 
 (base:function validate-constraints
@@ -2223,9 +2248,18 @@
     (0 0)
     (_
       (let ((next u64 (make-substitution c (m:next c param))))
-        (m:add
+        (m:add-record
           c
-          (m:node 42 (field (m:at c param) start) 0 param next 0 0 0 0 0))))))
+          (node-type-binding)
+          (field (m:at c param) start)
+          0
+          param
+          next
+          0
+          0
+          0
+          0
+          0)))))
 
 (base:function unify-template ((c m:context) (template u64) (actual u64)) bool
   (let
@@ -2234,7 +2268,7 @@
     (base:cond
       ((> slot 0)
        (match (field (m:at c slot) ty)
-         (0 (do (m:typed c slot 42 actual 0 0) true))
+         (0 (do (m:typed-kind c slot (node-type-binding) actual 0 0) true))
          (ty (== ty actual))))
       ((m:is c head "array")
        (match (array-template-shape c head actual)
@@ -2248,10 +2282,7 @@
        (base:cond
          ((== actual 11) (unify-template c (m:next c head) 7))
          ((== (type-kind c actual) 34)
-          (unify-template
-            c
-            (m:next c head)
-            (field (m:at c (- actual num:descriptor-base)) target)))
+          (unify-template c (m:next c head) (m:descriptor-target c actual)))
          (true false)))
       (true (== (type-reference c template) actual)))))
 
@@ -2375,8 +2406,8 @@
                 (_
                   (m:add
                     c
-                    (m:node
-                      43
+                    (m:record
+                      (node-protocol-evidence)
                       (field (m:at c constraint) start)
                       0
                       instance
@@ -2487,8 +2518,8 @@
        u64
        (m:add
          c
-         (m:node
-           0
+         (m:record
+           (node-atom)
            (field name start)
            (field name length)
            0
@@ -2502,8 +2533,8 @@
        u64
        (m:add
          c
-         (m:node
-           0
+         (m:record
+           (node-atom)
            (field head start)
            (field head length)
            0
@@ -2518,8 +2549,8 @@
        u64
        (m:add
          c
-         (m:node
-           44
+         (m:record
+           (node-active-specialization)
            (field v start)
            (field v length)
            head-id
@@ -2533,7 +2564,13 @@
       (parameters c (m:child c params) (m:empty-env) 0)
       (append-specialization c all fn)
       (function-body c fn (m:child c params) (m:empty-env) all)
-      (m:typed c fn 40 ty template (base:convert bindings))
+      (m:typed-kind
+        c
+        fn
+        (node-specialization)
+        ty
+        template
+        (base:convert bindings))
       fn)))
 
 (base:function specialize-call
@@ -2560,7 +2597,14 @@
               (let ((target u64 (specialize scope fn all)))
                 (match target
                   (0 0)
-                  (_ (m:typed c id 8 (field (m:at c target) ty) target 0)))))))))))
+                  (_
+                    (m:typed-kind
+                      c
+                      id
+                      (node-call)
+                      (field (m:at c target) ty)
+                      target
+                      0)))))))))))
 
 ; Report an unresolved call with its source spelling, including any module qualifier.
 (base:function unknown-function ((c m:context) (name u64)) unit
@@ -2614,10 +2658,10 @@
               ((== (field (m:at c fn) kind) 53)
                (do
                  (arguments c args (m:child c (signature c fn)) env all)
-                 (m:typed
+                 (m:typed-kind
                    c
                    id
-                   54
+                   (node-external-call)
                    (match (field (m:at c fn) ty) (14 1) (ty ty))
                    fn
                    0)))
@@ -2625,7 +2669,7 @@
               (true
                 (do
                   (arguments c args (m:child c (signature c fn)) env all)
-                  (m:typed c id 8 (field (m:at c fn) ty) fn 0))))))))))
+                  (m:typed-kind c id (node-call) (field (m:at c fn) ty) fn 0))))))))))
 
 ; Binder value bits encode addressable=1, writable=2, materialized storage=4.
 (base:function place-flags ((c m:context) (id u64)) u64
@@ -2652,10 +2696,10 @@
             (true unit)
             (false
               (do
-                (m:typed
+                (m:typed-kind
                   c
                   binder
-                  0
+                  (node-atom)
                   (field name ty)
                   0
                   (+ (field name value) (cast i64 4)))
@@ -2677,7 +2721,7 @@
             (> (place-flags c args) 0)
             "expression is not addressable")
           (materialize-place c args)
-          (m:typed c id 57 (pointer-type c ty) 0 0))))))
+          (m:typed-kind c id (node-address) (pointer-type c ty) 0 0))))))
 
 (base:function complete-pointee ((c m:context) (id u64) (ty u64)) u64
   (match (pointer-value-type c ty)
@@ -2700,7 +2744,7 @@
       (let
         ((ty u64 (expression c args env all))
          (pointee u64 (complete-pointee c args ty)))
-        (m:typed c id 58 pointee 0 3)))))
+        (m:typed-kind c id (node-dereference) pointee 0 3)))))
 
 (base:function offset-expression
   ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
@@ -2729,7 +2773,7 @@
             offset
             (num:integer-type index)
             "pointer-offset requires an integer offset")
-          (m:typed c id 59 ty pointee 0))))))
+          (m:typed-kind c id (node-pointer-offset) ty pointee 0))))))
 
 (base:function store-expression
   ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
@@ -2745,7 +2789,7 @@
             "expression is not writable")
           (materialize-place c args)
           (expect c value (expression-as c value env all ty) ty)
-          (m:typed c id 60 1 0 0))))))
+          (m:typed-kind c id (node-store) 1 0 0))))))
 
 ; Resolve and check a let, primitive operation, or direct function call.
 ; Annotate the list with its checked kind, result type, and resolved target.
@@ -2767,7 +2811,13 @@
         ((base:or (m:is c head "store") (m:is c head "assign"))
          (store-expression c id args env all))
         ((m:is c head "do")
-         (m:typed c id 56 (sequence c args env all expected) 0 0))
+         (m:typed-kind
+           c
+           id
+           (node-sequence)
+           (sequence c args env all expected)
+           0
+           0))
         ((m:is c head "let")
          (require c id (> (m:next c args) 0) "let requires bindings and a body")
          (require c args (list c args) "expected binding list")
@@ -2782,7 +2832,7 @@
                 (m:empty-env)
                 all
                 expected)))
-           (m:typed c id 7 ty 0 0)))
+           (m:typed-kind c id (node-let) ty 0 0)))
         ((> op 0)
          (let ((input u64 (field primitive input)))
            (do
@@ -2803,7 +2853,7 @@
                    (m:next c args)
                    (expression-as c (m:next c args) env all input)
                    input)))
-             (m:typed c id 9 (field primitive result) op 0))))
+             (m:typed-kind c id (node-primitive) (field primitive result) op 0))))
         ((m:is c head "cast") (checked-cast c id args env all))
         ((m:is c head "array-of") (array-expression c id args env all expected))
         ((m:is c head "index") (array-index c id args env all))
@@ -2816,7 +2866,7 @@
            (match (== (type-kind c expected) 22)
              (true (type-components c expected))
              (false 0)))
-         (m:typed c id 13 (tuple-type c args) 0 0))
+         (m:typed-kind c id (node-aggregate) (tuple-type c args) 0 0))
         ((m:is c head "field") (access c id args env all false))
         ((m:is c head "tuple-get") (access c id args env all true))
         ((> (type-resolve c head) 0)
@@ -2835,10 +2885,10 @@
              (components-check
                c
                args
-               (type-components c (+ decl num:descriptor-base))
+               (type-components c (m:descriptor-type decl))
                env
                all)
-             (m:typed c id 13 (+ decl num:descriptor-base) 0 0))))
+             (m:typed-kind c id (node-aggregate) (m:descriptor-type decl) 0 0))))
         ((m:is c head "match") (match-expression c id args env all expected))
         (true
           (let ((case u64 (case-resolve c head expected)))
@@ -2852,7 +2902,13 @@
                     (== (m:lookup c head env) 0)
                     "local value is not callable")
                   (components-check c args (m:next c (m:child c case)) env all)
-                  (m:typed c id 15 (field (m:at c case) ty) case 0))))))))))
+                  (m:typed-kind
+                    c
+                    id
+                    (node-sum-construction)
+                    (field (m:at c case) ty)
+                    case
+                    0))))))))))
 
 (base:function checked-cast
   ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
@@ -2866,11 +2922,23 @@
          (35
            (do
              (float:parse c literal ty)
-             (m:typed c id 36 ty 0 (field (m:at c literal) value))))
+             (m:typed-kind
+               c
+               id
+               (node-float)
+               ty
+               0
+               (field (m:at c literal) value))))
          (71
            (do
              (float:parse c literal ty)
-             (m:typed c id 36 ty 0 (field (m:at c literal) value))))
+             (m:typed-kind
+               c
+               id
+               (node-float)
+               ty
+               0
+               (field (m:at c literal) value))))
          (_
            (do
              (m:report
@@ -2883,7 +2951,13 @@
          (true
            (do
              (integer c literal ty)
-             (m:typed c id 2 ty 0 (field (m:at c literal) value))))
+             (m:typed-kind
+               c
+               id
+               (node-integer)
+               ty
+               0
+               (field (m:at c literal) value))))
          (false
            (do
              (m:report c literal "numeric cast requires an integer literal")
@@ -2898,7 +2972,7 @@
                   (true true)
                   (false (== (pointer-pointee c from) 14))))
               (false false))
-            (m:typed c id 45 ty 0 0))
+            (m:typed-kind c id (node-pointer-cast) ty 0 0))
            (true
              (m:report
                c
@@ -2977,7 +3051,13 @@
          (do
            (raw:decode-node c id out (& cursor) (& escaped) 1 length)
            (append-byte out (& cursor) 0)
-           (m:typed c id 17 11 (m:address (cast (pointer void) out)) 0))))
+           (m:typed-kind
+             c
+             id
+             (node-data)
+             11
+             (m:address (cast (pointer void) out))
+             0))))
       (_ (do (m:report c id "data literal storage allocation failed") 0)))))
 
 ; Resolve and type-check one expression, recording literal values and binder identities.
@@ -2986,7 +3066,7 @@
   ((c m:context) (id u64) (env (pointer void)) (all u64)) u64
   (let ((v m:node (m:at c id)))
     (match (field v kind)
-      (3 (m:typed c id 3 2 0 (field v value)))
+      (3 (m:typed-kind c id (node-bool) 2 0 (field v value)))
       (1 (application c id env all 0))
       (35
         (do
@@ -2998,10 +3078,10 @@
           0))
       (25 (data-literal c id v))
       (26
-        (m:typed
+        (m:typed-kind
           c
           id
-          2
+          (node-integer)
           7
           0
           (base:convert
@@ -3013,11 +3093,11 @@
       (_
         (base:cond
           ((match (field v generated) (0 (m:is c id "true")) (_ false))
-           (m:typed c id 3 2 0 1))
+           (m:typed-kind c id (node-bool) 2 0 1))
           ((match (field v generated) (0 (m:is c id "false")) (_ false))
-           (m:typed c id 3 2 0 0))
+           (m:typed-kind c id (node-bool) 2 0 0))
           ((match (field v generated) (0 (m:is c id "unit")) (_ false))
-           (m:typed c id 4 1 0 0))
+           (m:typed-kind c id (node-unit) 1 0 0))
           ((integer-node c id)
            (m:report c id "ambiguous numeric literal; supply a type with cast")
            0)
@@ -3031,16 +3111,35 @@
                        (decl u64 (resolve c all id)))
                       (base:cond
                         ((constant-declaration c decl)
-                         (m:typed c id 52 (field (m:at c decl) ty) decl 0))
+                         (m:typed-kind
+                           c
+                           id
+                           (node-constant-reference)
+                           (field (m:at c decl) ty)
+                           decl
+                           0))
                         ((variable-declaration c decl)
-                         (m:typed c id 64 (field (m:at c decl) ty) decl 0))
+                         (m:typed-kind
+                           c
+                           id
+                           (node-global-reference)
+                           (field (m:at c decl) ty)
+                           decl
+                           0))
                         (true
                           (do
                             (match (== before (deref (field c errors)))
                               (true (m:report c id "unknown local name"))
                               (false unit))
                             0)))))
-                  (_ (m:typed c id 5 (field (m:at c binder) ty) binder 0)))))))))))
+                  (_
+                    (m:typed-kind
+                      c
+                      id
+                      (node-local)
+                      (field (m:at c binder) ty)
+                      binder
+                      0)))))))))))
 
 ; Type zero is an internal error marker and never reaches either execution path.
 (base:function expression
@@ -3361,8 +3460,8 @@
                            (m:storage (data:append (& text) 0))
                            (m:add
                              c
-                             (m:node
-                               17
+                             (m:record
+                               (node-data)
                                (field (m:at c name) start)
                                0
                                0
@@ -3377,7 +3476,13 @@
                 (match (field (m:at c decoded) kind)
                   (17
                     (do
-                      (m:typed c id 68 0 fn (base:convert decoded))
+                      (m:typed-kind
+                        c
+                        id
+                        (node-native-export)
+                        0
+                        fn
+                        (base:convert decoded))
                       (require
                         c
                         id
@@ -3406,18 +3511,10 @@
 ; Structured type IDs are descriptor tape IDs plus descriptor-base; scalars retain 1..3.
 ; Nominal descriptors use kinds 20/21, structural tuples kind 22.
 (base:function type-kind ((c m:context) (ty u64)) u64
-  (match (> ty num:descriptor-base)
-    (false 0)
-    (true (field (m:at c (- ty num:descriptor-base)) kind))))
+  (m:descriptor-kind c ty))
 
 (base:function type-components ((c m:context) (ty u64)) u64
-  (match (> ty num:descriptor-base)
-    (false 0)
-    (true
-      (let ((id u64 (- ty num:descriptor-base)))
-        (match (type-kind c ty)
-          (22 (m:child c id))
-          (_ (m:next c (m:child c (m:next c (m:next c (m:child c id)))))))))))
+  (m:descriptor-components c ty))
 
 (base:function type-in ((c m:context) (owner u64) (name data:view) (i u64)) u64
   (type-range c owner name i (- (m:nodes-length (deref (field c items))) i)))
@@ -3572,7 +3669,7 @@
                   c
                   id
                   kind
-                  (match kind (23 0) (_ (+ id num:descriptor-base)))
+                  (match kind (23 0) (_ (m:descriptor-type id)))
                   0
                   0)
                 unit))))
@@ -3614,7 +3711,7 @@
             "field requires name and type")
           (require c name (plain-name c name) "expected product field name")
           (require c name (== (m:lookup c name seen) 0) "duplicate field")
-          (m:typed c id 1 (type-name c (m:next c name)) 0 0)
+          (m:typed-kind c id (node-list) (type-name c (m:next c name)) 0 0)
           (let ((binding m:binding (m:binding name name 0 seen)))
             (layout-fields c (m:next c id) (cast (pointer void) (& binding)))))))))
 
@@ -3630,19 +3727,19 @@
             (20
               (layout-fields
                 c
-                (type-components c (+ id num:descriptor-base))
+                (type-components c (m:descriptor-type id))
                 (m:empty-env)))
             (_
               (do
                 (require
                   c
                   id
-                  (> (type-components c (+ id num:descriptor-base)) 0)
+                  (> (type-components c (m:descriptor-type id)) 0)
                   "sum requires at least one case")
                 (layout-cases
                   c
-                  (type-components c (+ id num:descriptor-base))
-                  (+ id num:descriptor-base)
+                  (type-components c (m:descriptor-type id))
+                  (m:descriptor-type id)
                   0
                   (m:empty-env)))))
           (m:typed c id (field v kind) (field v ty) 2 0)
@@ -3658,14 +3755,14 @@
       (1 (do (m:report c id "type alias cycle") 0))
       (_
         (do
-          (m:typed c id 23 0 1 0)
+          (m:typed-kind c id (node-transparent-alias) 0 1 0)
           (let
             ((before u64 (deref (field c errors)))
              (ty u64 (type-reference c target)))
-            (m:typed
+            (m:typed-kind
               c
               id
-              23
+              (node-transparent-alias)
               (match (== before (deref (field c errors))) (true ty) (false 0))
               2
               0)))))))
@@ -3676,13 +3773,7 @@
     (_ (field (m:at c id) ty))))
 
 (base:function callback-signature ((c m:context) (ty u64)) u64
-  (match (== (type-kind c ty) 34)
-    (false 0)
-    (true
-      (let ((pointee u64 (pointer-pointee c ty)))
-        (match (== (type-kind c pointee) 46)
-          (true (- pointee num:descriptor-base))
-          (false 0))))))
+  (m:callback-signature c ty))
 
 (base:function callback-type ((c m:context) (id u64)) u64
   (let
@@ -3715,24 +3806,9 @@
                    ty
                    1
                    (- (m:nodes-length (deref (field c items))) 1))))
-              (+
-                num:descriptor-base
-                (match found
-                  (0
-                    (m:add
-                      c
-                      (m:node
-                        46
-                        (field (m:at c id) start)
-                        0
-                        (copy-components c args)
-                        0
-                        0
-                        ty
-                        0
-                        0
-                        0)))
-                  (_ found))))))))))
+              (match found
+                (0 (m:callback-descriptor c id (copy-components c args) ty))
+                (_ (m:descriptor-type found))))))))))
 
 (base:function callback-range
   ((c m:context) (params u64) (result u64) (start u64) (count u64)) u64
@@ -3798,7 +3874,7 @@
       ((> (deref (field c errors)) before) 0)
       ((== fn 0) (m:report c id "unknown function designator") 0)
       ((callback-matches c (callback-signature c ty) fn)
-       (m:typed c id 47 ty fn 0))
+       (m:typed-kind c id (node-function-address) ty fn 0))
       (true (m:report c id "function pointer signature mismatch") 0))))
 
 (base:function callback-arguments
@@ -3831,19 +3907,19 @@
         (do
           (callback-arguments c args (field v child) env all)
           (resolve-value-layout c (field v target))
-          (m:typed
+          (m:typed-kind
             c
             id
-            48
+            (node-indirect-call)
             (match (field v target) (14 1) (result result))
             descriptor
             0))))))
 
 (base:function pointer-value-type ((c m:context) (ty u64)) bool
-  (match ty (11 true) (_ (== (type-kind c ty) 34))))
+  (m:pointer-value-type c ty))
 
 (base:function pointer-pointee ((c m:context) (ty u64)) u64
-  (match ty (11 7) (_ (field (m:at c (- ty num:descriptor-base)) target))))
+  (m:pointer-pointee c ty))
 
 (base:function pointer-range
   ((c m:context) (pointee u64) (start u64) (count u64)) u64
@@ -3874,17 +3950,15 @@
              pointee
              1
              (- (m:nodes-length (deref (field c items))) 1))))
-        (+
-          num:descriptor-base
-          (match found
-            (0 (m:add c (m:node 34 0 0 0 0 0 pointee 0 0 0)))
-            (_ found)))))))
+        (match found
+          (0 (m:pointer-descriptor c pointee))
+          (_ (m:descriptor-type found)))))))
 
 (base:function array-element ((c m:context) (ty u64)) u64
-  (field (m:at c (- ty num:descriptor-base)) target))
+  (m:array-element c ty))
 
 (base:function array-length ((c m:context) (ty u64)) u64
-  (base:convert (field (m:at c (- ty num:descriptor-base)) value)))
+  (m:array-length c ty))
 
 (base:function array-length-literal ((c m:context) (id u64)) u64
   (let ((original m:node (m:at c id)))
@@ -3936,11 +4010,9 @@
          length
          1
          (- (m:nodes-length (deref (field c items))) 1))))
-    (+
-      num:descriptor-base
-      (match found
-        (0 (m:add c (m:node 49 0 0 0 0 0 element (base:convert length) 0 0)))
-        (_ found)))))
+    (match found
+      (0 (m:array-descriptor c element length))
+      (_ (m:descriptor-type found)))))
 
 (base:function array-range
   ((c m:context) (element u64) (length u64) (start u64) (count u64)) u64
@@ -3987,7 +4059,7 @@
            (== length (array-length c expected))
            "array-of element count mismatch")
          (array-elements c args env all (array-element c expected))
-         (m:typed c id 13 expected 0 0)))
+         (m:typed-kind c id (node-aggregate) expected 0 0)))
       ((> expected 0)
        (m:report c id "array-of requires an expected array type")
        0)
@@ -3999,7 +4071,13 @@
             (_
               (do
                 (array-elements c (m:next c args) env all element)
-                (m:typed c id 13 (array-type c element length) 0 0)))))))))
+                (m:typed-kind
+                  c
+                  id
+                  (node-aggregate)
+                  (array-type c element length)
+                  0
+                  0)))))))))
 
 (base:function array-index
   ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
@@ -4022,10 +4100,10 @@
                           (< index (array-length c ty))
                           "array index out of bounds")))
                     (_ unit))
-                  (m:typed
+                  (m:typed-kind
                     c
                     id
-                    50
+                    (node-array-index)
                     (array-element c ty)
                     ty
                     (base:convert (place-flags c args)))))))
@@ -4073,7 +4151,7 @@
       (match (field (m:at c start) kind)
         (22
           (match (component-equal c args (m:child c start))
-            (true (+ start num:descriptor-base))
+            (true (m:descriptor-type start))
             (false 0)))
         (_ 0)))
     (_
@@ -4087,26 +4165,14 @@
     (0 0)
     (_
       (let ((rest u64 (copy-components c (m:next c args))))
-        (m:add
-          c
-          (m:node
-            24
-            (field (m:at c args) start)
-            0
-            0
-            rest
-            (field (m:at c args) ty)
-            0
-            0
-            0
-            0))))))
+        (m:tuple-component c args rest (field (m:at c args) ty))))))
 
 (base:function tuple-type ((c m:context) (args u64)) u64
   (let ((found u64 (tuple-find c args 1)))
     (match found
       (0
         (let ((parts u64 (copy-components c args)))
-          (+ (m:add c (m:node 22 0 0 parts 0 0 0 0 0 0)) num:descriptor-base)))
+          (m:tuple-descriptor c parts)))
       (_ found))))
 
 (base:function tuple-expressions
@@ -4197,10 +4263,10 @@
            (component u64 (component-at c fields index)))
           (do
             (require c name (> component 0) "tuple index out of range")
-            (m:typed
+            (m:typed-kind
               c
               id
-              14
+              (node-extraction)
               (field (m:at c component) ty)
               index
               (base:convert (place-flags c args)))))))))
@@ -4237,7 +4303,7 @@
                        (false 3)))))
                 (match (== before (deref (field c errors)))
                   (true ty)
-                  (false (m:typed c id 2 0 0 0)))))))
+                  (false (m:typed-kind c id (node-integer) 0 0 0)))))))
         (true
           (let
             ((before u64 (deref (field c errors)))
@@ -4261,7 +4327,7 @@
           (identifier c name)
           (require c name (== (m:lookup c name seen) 0) "duplicate sum case")
           (tuple-types c (m:next c name))
-          (m:typed c id 1 ty index 0)
+          (m:typed-kind c id (node-list) ty index 0)
           (let ((binding m:binding (m:binding name name 0 seen)))
             (layout-cases
               c
@@ -4310,7 +4376,7 @@
                  (true
                    (case-in
                      c
-                     (type-components c (+ start num:descriptor-base))
+                     (type-components c (m:descriptor-type start))
                      name))
                  (false 0)))
              (_ 0))))
@@ -4362,8 +4428,8 @@
              u64
              (m:add
                c
-               (m:node
-                 0
+               (m:record
+                 (node-atom)
                  (field v start)
                  (- split (field v start))
                  0
@@ -4379,7 +4445,7 @@
             (true
               (case-in
                 c
-                (type-components c (+ decl num:descriptor-base))
+                (type-components c (m:descriptor-type decl))
                 (data:view
                   (pointer-offset (field (field c source) bytes) (+ split 1))
                   (- end (+ split 1)))))))))))
@@ -4400,7 +4466,7 @@
       (true (expression-as c body env all expected))
       (false
         (do
-          (m:typed c pattern 0 ty 0 0)
+          (m:typed-kind c pattern (node-atom) ty 0 0)
           (let ((binding m:binding (m:binding pattern pattern 0 env)))
             (expression-as
               c
@@ -4417,7 +4483,7 @@
     (3
       (do
         (require c id (== ty 2) "boolean pattern requires a boolean scrutinee")
-        (m:typed c id 3 2 0 (field (m:at c id) value))
+        (m:typed-kind c id (node-bool) 2 0 (field (m:at c id) value))
         unit))
     (_ (literal-pattern-inner c id ty))))
 
@@ -4431,10 +4497,10 @@
            id
            (num:integer-type ty)
            "character pattern requires an integer scrutinee")
-         (m:typed
+         (m:typed-kind
            c
            id
-           2
+           (node-integer)
            ty
            0
            (base:convert
@@ -4459,7 +4525,13 @@
          (_ false))
        (do
          (require c id (== ty 2) "boolean pattern requires a boolean scrutinee")
-         (m:typed c id 3 2 0 (match (m:is c id "true") (true 1) (false 0)))
+         (m:typed-kind
+           c
+           id
+           (node-bool)
+           2
+           0
+           (match (m:is c id "true") (true 1) (false 0)))
          unit))
       (true
         (m:report
@@ -4516,7 +4588,13 @@
               (let ((result u64 (catch-all-body c arm ty env all expected)))
                 (do
                   (expect c body result expected)
-                  (m:typed c arm 1 result 0 (catch-all-id c pattern))
+                  (m:typed-kind
+                    c
+                    arm
+                    (node-list)
+                    result
+                    0
+                    (catch-all-id c pattern))
                   (scalar-arms
                     c
                     site
@@ -4544,7 +4622,7 @@
                         (false true))
                       "duplicate match pattern")
                     (expect c body result expected)
-                    (m:typed c arm 1 result 1 value)
+                    (m:typed-kind c arm (node-list) result 1 value)
                     (scalar-arms
                       c
                       site
@@ -4604,7 +4682,13 @@
                     names
                     (== (m:lookup c names seen) 0)
                     "duplicate payload binding")
-                  (m:typed c names 0 (field (m:at c types) ty) 0 0)
+                  (m:typed-kind
+                    c
+                    names
+                    (node-atom)
+                    (field (m:at c types) ty)
+                    0
+                    0)
                   (let
                     ((binding m:binding (m:binding names names 0 env))
                      (local m:binding (m:binding names names 0 seen)))
@@ -4673,7 +4757,13 @@
               (let ((result u64 (catch-all-body c arm ty env all expected)))
                 (do
                   (expect c body result expected)
-                  (m:typed c arm 1 result 0 (catch-all-id c pattern))
+                  (m:typed-kind
+                    c
+                    arm
+                    (node-list)
+                    result
+                    0
+                    (catch-all-id c pattern))
                   (tuple-arms
                     c
                     site
@@ -4713,7 +4803,7 @@
                          expected)))
                     (do
                       (expect c body result expected)
-                      (m:typed c arm 1 result 1 0)
+                      (m:typed-kind c arm (node-list) result 1 0)
                       (tuple-arms
                         c
                         site
@@ -4740,7 +4830,7 @@
       (do
         (require
           c
-          (- sum num:descriptor-base)
+          (m:descriptor-id sum)
           (match wild
             (true true)
             (false (== covered (chain-length c (type-components c sum)))))
@@ -4769,7 +4859,7 @@
                     (< covered (chain-length c (type-components c sum)))
                     "unreachable wildcard")
                   (expect c body ty expected)
-                  (m:typed c arm 1 ty 0 (catch-all-id c pattern))
+                  (m:typed-kind c arm (node-list) ty 0 (catch-all-id c pattern))
                   (match-arms c (m:next c arm) sum env seen all ty covered true))))
             (false
               (let
@@ -4812,7 +4902,13 @@
                        (m:binding (m:child c case) case 0 seen)))
                     (do
                       (expect c body ty expected)
-                      (m:typed c arm 1 ty (+ (field (m:at c case) target) 1) 0)
+                      (m:typed-kind
+                        c
+                        arm
+                        (node-list)
+                        ty
+                        (+ (field (m:at c case) target) 1)
+                        0)
                       (match-arms
                         c
                         (m:next c arm)
@@ -4854,7 +4950,7 @@
                      expected
                      false
                      false)))
-                (m:typed c id 61 result 0 0)))
+                (m:typed-kind c id (node-tuple-match) result 0 0)))
             (_
               (match (== (type-kind c ty) 21)
                 (false
@@ -4872,7 +4968,7 @@
                          (m:empty-env)
                          0
                          false)))
-                    (m:typed c id 55 result 0 0)))
+                    (m:typed-kind c id (node-literal-match) result 0 0)))
                 (true
                   (let
                     ((result
@@ -4887,7 +4983,7 @@
                          expected
                          0
                          false)))
-                    (m:typed c id 16 result 0 0)))))))))))
+                    (m:typed-kind c id (node-match) result 0 0)))))))))))
 
 (base:function write-type-components ((c m:context) (id u64)) unit
   (match id
@@ -4915,9 +5011,7 @@
             (34
               (do
                 (m:text lconstants:STDERR-FILENO "(pointer ")
-                (write-type
-                  c
-                  (field (m:at c (- ty num:descriptor-base)) target))
+                (write-type c (m:descriptor-target c ty))
                 (m:text lconstants:STDERR-FILENO ")")))
             (49
               (do
@@ -4927,7 +5021,7 @@
                 (m:number 2 (array-length c ty))
                 (m:text lconstants:STDERR-FILENO ")")))
             (46
-              (let ((v m:node (m:at c (- ty num:descriptor-base))))
+              (let ((v m:node (m:at c (m:descriptor-id ty))))
                 (do
                   (m:text lconstants:STDERR-FILENO "(function (")
                   (write-type-components c (field v child))
@@ -4940,7 +5034,7 @@
                 (write-type-components c (type-components c ty))
                 (m:text lconstants:STDERR-FILENO ")")))
             (_
-              (let ((id u64 (- ty num:descriptor-base)))
+              (let ((id u64 (m:descriptor-id ty)))
                 (do
                   (m:number 2 (m:owner c id))
                   (m:text lconstants:STDERR-FILENO ":")

@@ -3,9 +3,6 @@
 (import data)
 (import libc.string :as cstring)
 
-; Scalar identities are disjoint from nominal and structural descriptors.
-(base:constant descriptor-base u64 16)
-
 (base:type operation (product (code u64) (input u64) (result u64) (arity u64)))
 
 (base:function integer-type ((ty u64)) bool
@@ -239,7 +236,6 @@
       (true (operation 0 0 0 0)))))
 
 (export
-  descriptor-base
   operation
   integer-type
   float-type

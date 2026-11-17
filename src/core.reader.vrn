@@ -284,7 +284,7 @@
                      constants:sibling-form-limit)
                    (true (m:error-at c 0 "form count limit (4096) exceeded"))
                    (false unit))
-                 (m:add c (m:node 0 0 0 0 0 0 0 0 0 0))
+                 (m:add-record c (node-atom) 0 0 0 0 0 0 0 0 0)
                  (transfer c tree 0 (syntax:nodes-length (field tree items)))
                  (connect c tree 0 (syntax:nodes-length (field tree items)))
                  (link-range

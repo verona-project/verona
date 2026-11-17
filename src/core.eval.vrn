@@ -497,7 +497,7 @@
 (base:function pointer-compare
   ((c machine) (id u64) (op u64) (left scalar-value) (right scalar-value)) unit
   (do
-    (require c (check:pointer-value-type (field c program) (field left ty)) id)
+    (require c (m:pointer-value-type (field c program) (field left ty)) id)
     (require c (== (field left ty) (field right ty)) id)
     (let
       ((a
@@ -758,7 +758,7 @@
           (do
             (require c (== (field offset ty) 10) id)
             (require c (== (field value ty) a) id)
-            (match (< index (check:array-length p a))
+            (match (< index (m:array-length p a))
               (true (push c (component c value index id)))
               (false (fail c 7 id))))))
       (14
@@ -788,7 +788,7 @@
       (25
         (let ((v scalar-value (pop c)))
           (do
-            (require c (check:pointer-value-type p (field v ty)) id)
+            (require c (m:pointer-value-type p (field v ty)) id)
             (push
               c
               (scalar-value
@@ -903,7 +903,7 @@
           ((index scalar-value (pop c))
            (pointer scalar-value (pop c))
            (offset u64 (base:convert (field index scalar))))
-          (match (< offset (check:array-length p a))
+          (match (< offset (m:array-length p a))
             (false (fail c 7 id))
             (true
               (push
@@ -1257,13 +1257,11 @@
         (base:cond
           ((num:integer-type ty)
            (require c (== (field v scalar) (num:normalize ty bits)) 0))
-          ((<= ty num:descriptor-base) (fail c 6 0))
-          ((>=
-             (- ty num:descriptor-base)
-             (m:nodes-length (deref (field p items))))
+          ((base:not (m:descriptor-present ty)) (fail c 6 0))
+          ((>= (m:descriptor-id ty) (m:nodes-length (deref (field p items))))
            (fail c 6 0))
-          ((== (check:type-kind p ty) 34)
-           (let ((signature u64 (check:callback-signature p ty)))
+          ((== (m:descriptor-kind p ty) 34)
+           (let ((signature u64 (m:callback-signature p ty)))
              (match signature
                (0
                  (match (>= bits pointer-tag)

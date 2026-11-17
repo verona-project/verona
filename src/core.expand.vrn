@@ -114,7 +114,7 @@
       (parameters c (m:child c params))
       (let ((id u64 (attach c root head 0)))
         (do
-          (m:typed c id 27 0 0 0)
+          (m:typed-kind c id (node-collected-macro) 0 0 0)
           (match (base:is-null (field c session))
             (true unit)
             (false
@@ -127,8 +127,8 @@
                    u64
                    (m:add
                      c
-                     (m:node
-                       70
+                     (m:record
+                       (node-macro-registry-link)
                        (field (m:at c id) start)
                        0
                        id
@@ -152,7 +152,18 @@
 
 (base:function list-value ((c m:context) (site u64) (child u64)) u64
   (let ((v m:node (m:at c site)))
-    (m:add c (m:node 1 (field v start) (field v length) child 0 0 0 0 0 0))))
+    (m:add-record
+      c
+      (node-list)
+      (field v start)
+      (field v length)
+      child
+      0
+      0
+      0
+      0
+      0
+      0)))
 
 (base:function check-arguments ((c m:context) (site u64) (param u64) (arg u64))
   unit
@@ -445,8 +456,8 @@
         "symbol-concat cannot construct an empty name")
       (m:add
         c
-        (m:node
-          0
+        (m:record
+          (node-atom)
           (field (m:at c site) start)
           (data:length out)
           0
@@ -464,8 +475,8 @@
   (let ((v m:node (m:at c site)))
     (m:add
       c
-      (m:node
-        3
+      (m:record
+        (node-bool)
         (field v start)
         (field v length)
         0
@@ -989,8 +1000,8 @@
                next)))
           (m:add
             c
-            (m:node
-              66
+            (m:record
+              (node-qualified-key)
               member
               (- (+ (field v start) (field v length)) member)
               0
@@ -1101,8 +1112,8 @@
                             (field (deref session) edges)
                             (m:add
                               c
-                              (m:node
-                                65
+                              (m:record
+                                (node-state-entry)
                                 (field (m:at c site) start)
                                 0
                                 key
@@ -1115,7 +1126,10 @@
                             (field (deref session) expansions)
                             (field (deref session) configuration)
                             (field (deref session) macros))))
-                      (_ (do (m:typed c entry 65 0 stored 0) unit)))
+                      (_
+                        (do
+                          (m:typed-kind c entry (node-state-entry) 0 stored 0)
+                          unit)))
                     (snapshot c module stored false config))))
               (ref
                 (snapshot c module (match old (0 value) (_ old)) false config))
@@ -1125,7 +1139,8 @@
                 (do
                   (match entry
                     (0 unit)
-                    (_ (do (m:typed c entry 65 0 0 0) unit)))
+                    (_
+                      (do (m:typed-kind c entry (node-state-entry) 0 0 0) unit)))
                   (boolean-value c site (> old 0)))))))))))
 
 (base:function index-digits
@@ -2500,8 +2515,8 @@
         "compile-time floating-point overflow")
       (m:add
         c
-        (m:node
-          71
+        (m:record
+          (node-computed-float)
           (field v start)
           (field v length)
           0
@@ -3408,8 +3423,8 @@
            u64
            (m:add
              c
-             (m:node
-               1
+             (m:record
+               (node-list)
                (field site start)
                (field site length)
                (m:child c id)
@@ -3430,7 +3445,17 @@
       (m:set
         c
         root
-        (m:node 1 (field v start) (field v length) (field v child) 0 0 0 0 0 0))
+        (m:record
+          (node-list)
+          (field v start)
+          (field v length)
+          (field v child)
+          0
+          0
+          0
+          0
+          0
+          0))
       (match (deref tail)
         (0 (store (deref first) root))
         (_ (m:link c (deref tail) root)))
@@ -3485,8 +3510,8 @@
                        (m:set
                          c
                          root
-                         (m:node
-                           1
+                         (m:record
+                           (node-list)
                            (field v start)
                            (field v length)
                            (m:child c result)
@@ -3628,8 +3653,8 @@
                      u64
                      (m:add
                        c
-                       (m:node
-                         67
+                       (m:record
+                         (node-expansion-cache)
                          (field site start)
                          0
                          origin

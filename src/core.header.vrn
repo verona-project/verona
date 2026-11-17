@@ -72,7 +72,7 @@
 
 ; Nominal names match the reference's module/declaration hex mangling.
 (base:function nominal ((c context) (ty u64)) unit
-  (let ((p m:context (field c program)) (id u64 (- ty num:descriptor-base)))
+  (let ((p m:context (field c program)) (id u64 (m:descriptor-id ty)))
     (do
       (text c "__verona_")
       (match (base:is-null (field p session))
@@ -95,16 +95,16 @@
        (do (text c "f") (digits c (base:convert (num:width ty)))))
       ((== ty 2) (text c "bool"))
       ((== ty 14) (text c "void"))
-      ((check:pointer-value-type p ty)
-       (do (text c "p_") (mangle c (check:pointer-pointee p ty))))
-      ((== (check:type-kind p ty) 49)
+      ((m:pointer-value-type p ty)
+       (do (text c "p_") (mangle c (m:pointer-pointee p ty))))
+      ((== (m:descriptor-kind p ty) 49)
        (do
          (text c "a")
-         (digits c (check:array-length p ty))
+         (digits c (m:array-length p ty))
          (text c "_")
-         (mangle c (check:array-element p ty))))
-      ((== (check:type-kind p ty) 46)
-       (let ((v m:node (m:at p (- ty num:descriptor-base))))
+         (mangle c (m:array-element p ty))))
+      ((== (m:descriptor-kind p ty) 46)
+       (let ((v m:node (m:at p (m:descriptor-id ty))))
          (do
            (text c "fn_")
            (mangle-parameters c (field v child))
@@ -123,7 +123,7 @@
           (next (do (text c "_") (mangle-parameters c next))))))))
 
 (base:function aggregate-name ((c context) (ty u64)) unit
-  (match (check:type-kind (field c program) ty)
+  (match (m:descriptor-kind (field c program) ty)
     (49 (do (text c "verona_array_") (mangle c ty)))
     (_ (nominal c ty))))
 
@@ -144,7 +144,7 @@
 ; (including functions returning callbacks) retain C's required parentheses.
 (base:function declarator ((c context) (ty u64) (name data:view)) unit
   (let ((p m:context (field c program)))
-    (match (check:pointer-value-type p ty)
+    (match (m:pointer-value-type p ty)
       (false
         (do
           (spelling c ty)
@@ -154,11 +154,11 @@
         (let
           ((out data:data (data:empty (arena:allocator (field p memory))))
            (nested context (context p (& out)))
-           (pointee u64 (check:pointer-pointee p ty)))
+           (pointee u64 (m:pointer-pointee p ty)))
           (do
-            (match (== (check:type-kind p pointee) 46)
+            (match (== (m:descriptor-kind p pointee) 46)
               (true
-                (let ((v m:node (m:at p (- pointee num:descriptor-base))))
+                (let ((v m:node (m:at p (m:descriptor-id pointee))))
                   (do
                     (text nested "(*")
                     (bytes nested name)
@@ -196,28 +196,32 @@
 ; precede their by-value parents; forward declarations cover pointer cycles.
 (base:function visit
   ((c context) (ty u64) (seen (pointer u8)) (ordered (pointer ids-array))) unit
-  (match (> ty num:descriptor-base)
+  (match (m:descriptor-present ty)
     (false unit)
     (true
-      (let ((id u64 (- ty num:descriptor-base)) (p m:context (field c program)))
+      (let ((id u64 (m:descriptor-id ty)) (p m:context (field c program)))
         (match (deref (pointer-offset seen id))
           (1 unit)
           (_
             (do
               (store (deref (pointer-offset seen id)) 1)
-              (match (check:type-kind p ty)
-                (34 (visit c (check:pointer-pointee p ty) seen ordered))
+              (match (m:descriptor-kind p ty)
+                (34 (visit c (m:pointer-pointee p ty) seen ordered))
                 (46
                   (let ((v m:node (m:at p id)))
                     (do
                       (visit-components c (field v child) seen ordered)
                       (visit c (field v target) seen ordered))))
-                (49 (visit c (check:array-element p ty) seen ordered))
+                (49 (visit c (m:array-element p ty) seen ordered))
                 (20
-                  (visit-components c (check:type-components p ty) seen ordered))
-                (21 (visit-cases c (check:type-components p ty) seen ordered))
+                  (visit-components
+                    c
+                    (m:descriptor-components p ty)
+                    seen
+                    ordered))
+                (21 (visit-cases c (m:descriptor-components p ty) seen ordered))
                 (_ unit))
-              (match (check:type-kind p ty)
+              (match (m:descriptor-kind p ty)
                 (20 (m:storage (ids-append ordered ty)))
                 (21 (m:storage (ids-append ordered ty)))
                 (33 (m:storage (ids-append ordered ty)))
@@ -268,9 +272,9 @@
         (collect c (m:next (field c program) id) seen ordered)))))
 
 (base:function zero-size ((p m:context) (ty u64)) bool
-  (match (check:type-kind p ty)
-    (49 (== (check:array-length p ty) 0))
-    (20 (zero-components p (check:type-components p ty)))
+  (match (m:descriptor-kind p ty)
+    (49 (== (m:array-length p ty) 0))
+    (20 (zero-components p (m:descriptor-components p ty)))
     (_ false)))
 
 (base:function zero-components ((p m:context) (id u64)) bool
@@ -328,7 +332,7 @@
     (do
       (text c "struct ")
       (aggregate-name c ty)
-      (match (check:type-kind p ty)
+      (match (m:descriptor-kind p ty)
         (33 (text c ";\n"))
         (49
           (let
@@ -337,23 +341,23 @@
             (do
               (text c " { ")
               (text name "elements[")
-              (digits name (check:array-length p ty))
+              (digits name (m:array-length p ty))
               (text name "]")
-              (declarator c (check:array-element p ty) (data:borrow out))
+              (declarator c (m:array-element p ty) (data:borrow out))
               (text c "; };\n"))))
         (20
           (do
             (text c " {\n")
-            (fields c (check:type-components p ty) 0 true)
+            (fields c (m:descriptor-components p ty) 0 true)
             (text c "};\n")))
         (21
           (do
             (text c " {\n  int32_t tag;\n")
-            (match (has-payload p (check:type-components p ty))
+            (match (has-payload p (m:descriptor-components p ty))
               (true
                 (do
                   (text c "  union {\n")
-                  (cases c (check:type-components p ty))
+                  (cases c (m:descriptor-components p ty))
                   (text c "  } payload;\n")))
               (_ unit))
             (text c "};\n")))

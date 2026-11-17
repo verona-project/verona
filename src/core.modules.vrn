@@ -550,7 +550,7 @@
         (do
           (m:text lconstants:STDERR-FILENO name)
           (m:fatal ": module name contains an empty component"))))
-    (m:add (context l) (m:node 0 0 0 0 0 0 0 0 0 0))
+    (m:add-record (context l) (node-atom) 0 0 0 0 0 0 0 0 0)
     (load l name 0 0)
     (let ((first u64 0) (tail u64 0)) (do (order l 0 (& tail) (& first)) first))))
 

@@ -42,6 +42,101 @@
 ; Nine u64 metadata fields and one i64 literal: 80 bytes, alignment 8 on the supported ABI.
 ; Shared reader/checked-program record. Child and next are tape IDs, with zero
 ; denoting absence. Checking installs concrete types and resolved targets in place.
+(base:type scalar-type
+  (sum
+    (scalar-error)
+    (scalar-unit)
+    (scalar-bool)
+    (scalar-i64)
+    (scalar-i8)
+    (scalar-i16)
+    (scalar-i32)
+    (scalar-u8)
+    (scalar-u16)
+    (scalar-u32)
+    (scalar-u64)
+    (scalar-pointer-u8)
+    (scalar-f32)
+    (scalar-f64)
+    (scalar-void)))
+
+; All tags stored in the shared tape. The spelling deliberately describes the
+; record role rather than its historic numeric encoding: a node may transition
+; from a reader role to a checked role, but it never carries an untyped tag.
+(base:type node-kind
+  (sum
+    (node-atom)
+    (node-list)
+    (node-integer)
+    (node-bool)
+    (node-unit)
+    (node-local)
+    (node-retired)
+    (node-let)
+    (node-call)
+    (node-primitive)
+    (node-invalid-declaration)
+    (node-aggregate)
+    (node-extraction)
+    (node-sum-construction)
+    (node-match)
+    (node-data)
+    (node-concrete-implementation)
+    (node-protocol-method)
+    (node-nominal-product)
+    (node-nominal-sum)
+    (node-structural-tuple)
+    (node-transparent-alias)
+    (node-tuple-component)
+    (node-reader-data)
+    (node-reader-character)
+    (node-collected-macro)
+    (node-quote)
+    (node-quasiquote)
+    (node-unquote)
+    (node-splice)
+    (node-nominal-opaque)
+    (node-pointer-descriptor)
+    (node-reader-float)
+    (node-float)
+    (node-generic-declaration)
+    (node-protocol-declaration)
+    (node-concrete-protocol-instance)
+    (node-specialization)
+    (node-template)
+    (node-type-binding)
+    (node-protocol-evidence)
+    (node-active-specialization)
+    (node-pointer-cast)
+    (node-function-signature)
+    (node-function-address)
+    (node-indirect-call)
+    (node-array-descriptor)
+    (node-array-index)
+    (node-constant-declaration)
+    (node-constant-reference)
+    (node-external-function)
+    (node-external-call)
+    (node-literal-match)
+    (node-sequence)
+    (node-address)
+    (node-dereference)
+    (node-pointer-offset)
+    (node-store)
+    (node-tuple-match)
+    (node-default-numeric-generic)
+    (node-mutable-global-declaration)
+    (node-global-reference)
+    (node-state-entry)
+    (node-qualified-key)
+    (node-expansion-cache)
+    (node-native-export)
+    (node-computed-integer)
+    (node-macro-registry-link)
+    (node-computed-float)
+    (node-inline-directive)
+    (node-noinline-directive)))
+
 (base:type node
   (product
     (kind u64)
@@ -57,6 +152,11 @@
     (lookup-module u64)))
 
 (array:define nodes node)
+
+; Structured type identities are stable tape indices offset above the scalar
+; range. Keep this encoding, and all descriptor field interpretation, in the
+; model: consumers work with type IDs rather than recreating tape arithmetic.
+(base:constant descriptor-base u64 16)
 
 ; Arena-owned node array descriptor: pointer, length, capacity, allocation layout.
 ; Indices survive growth; pointers into the array do not. Index zero is absent.
@@ -249,6 +349,251 @@
   (let ((id u64 (nodes-length (deref (field c items)))))
     (do (storage (nodes-append (field c items) value)) id)))
 
+; The numeric tape encoding is private to this table. New model APIs accept a
+; NODE-KIND, so producers cannot accidentally exchange unrelated tag numbers.
+(base:function kind-code ((kind node-kind)) u64
+  (match kind
+    ((node-atom) 0)
+    ((node-list) 1)
+    ((node-integer) 2)
+    ((node-bool) 3)
+    ((node-unit) 4)
+    ((node-local) 5)
+    ((node-retired) 6)
+    ((node-let) 7)
+    ((node-call) 8)
+    ((node-primitive) 9)
+    ((node-invalid-declaration) 10)
+    ((node-aggregate) 13)
+    ((node-extraction) 14)
+    ((node-sum-construction) 15)
+    ((node-match) 16)
+    ((node-data) 17)
+    ((node-concrete-implementation) 18)
+    ((node-protocol-method) 19)
+    ((node-nominal-product) 20)
+    ((node-nominal-sum) 21)
+    ((node-structural-tuple) 22)
+    ((node-transparent-alias) 23)
+    ((node-tuple-component) 24)
+    ((node-reader-data) 25)
+    ((node-reader-character) 26)
+    ((node-collected-macro) 27)
+    ((node-quote) 28)
+    ((node-quasiquote) 29)
+    ((node-unquote) 30)
+    ((node-splice) 31)
+    ((node-nominal-opaque) 33)
+    ((node-pointer-descriptor) 34)
+    ((node-reader-float) 35)
+    ((node-float) 36)
+    ((node-generic-declaration) 37)
+    ((node-protocol-declaration) 38)
+    ((node-concrete-protocol-instance) 39)
+    ((node-specialization) 40)
+    ((node-template) 41)
+    ((node-type-binding) 42)
+    ((node-protocol-evidence) 43)
+    ((node-active-specialization) 44)
+    ((node-pointer-cast) 45)
+    ((node-function-signature) 46)
+    ((node-function-address) 47)
+    ((node-indirect-call) 48)
+    ((node-array-descriptor) 49)
+    ((node-array-index) 50)
+    ((node-constant-declaration) 51)
+    ((node-constant-reference) 52)
+    ((node-external-function) 53)
+    ((node-external-call) 54)
+    ((node-literal-match) 55)
+    ((node-sequence) 56)
+    ((node-address) 57)
+    ((node-dereference) 58)
+    ((node-pointer-offset) 59)
+    ((node-store) 60)
+    ((node-tuple-match) 61)
+    ((node-default-numeric-generic) 62)
+    ((node-mutable-global-declaration) 63)
+    ((node-global-reference) 64)
+    ((node-state-entry) 65)
+    ((node-qualified-key) 66)
+    ((node-expansion-cache) 67)
+    ((node-native-export) 68)
+    ((node-computed-integer) 69)
+    ((node-macro-registry-link) 70)
+    ((node-computed-float) 71)
+    ((node-inline-directive) 72)
+    ((node-noinline-directive) 73)))
+
+; Enum-typed construction boundary. The returned record keeps the existing
+; ten-word tape ABI while only this function knows its encoded tag value.
+(base:function record
+  ((kind node-kind)
+   (start u64)
+   (length u64)
+   (child u64)
+   (next u64)
+   (ty u64)
+   (target u64)
+   (value i64)
+   (generated u64)
+   (lookup-module u64)) node
+  (node
+    (kind-code kind)
+    start
+    length
+    child
+    next
+    ty
+    target
+    value
+    generated
+    lookup-module))
+
+(base:function add-record
+  ((c context)
+   (kind node-kind)
+   (start u64)
+   (length u64)
+   (child u64)
+   (next u64)
+   (ty u64)
+   (target u64)
+   (value i64)
+   (generated u64)
+   (lookup-module u64)) u64
+  (add
+    c
+    (record
+      kind
+      start
+      length
+      child
+      next
+      ty
+      target
+      value
+      generated
+      lookup-module)))
+
+; A scalar type has no descriptor record. Descriptor IDs are tape indices and
+; remain valid across tape growth; borrowed node pointers must not escape.
+(base:function descriptor-type ((id u64)) u64
+  (+ id descriptor-base))
+
+(base:function descriptor-present ((ty u64)) bool
+  (> ty descriptor-base))
+
+(base:function descriptor-id ((ty u64)) u64
+  (match (descriptor-present ty) (true (- ty descriptor-base)) (false 0)))
+
+(base:function descriptor-kind ((c context) (ty u64)) u64
+  (match (descriptor-id ty) (0 0) (id (field (at c id) kind))))
+
+; Products and sums retain declaration syntax; their components follow the
+; declaration head and name. Structural tuples and function descriptors own
+; their component chains directly.
+(base:function descriptor-components ((c context) (ty u64)) u64
+  (let ((id u64 (descriptor-id ty)))
+    (match id
+      (0 0)
+      (_
+        (match (descriptor-kind c ty)
+          (22 (child c id))
+          (46 (child c id))
+          (20 (next c (child c (next c (next c (child c id))))))
+          (21 (next c (child c (next c (next c (child c id))))))
+          (_ 0))))))
+
+; Target and value are descriptor payloads (pointee/result or element/length).
+(base:function descriptor-target ((c context) (ty u64)) u64
+  (match (descriptor-id ty) (0 0) (id (field (at c id) target))))
+
+(base:function descriptor-value ((c context) (ty u64)) i64
+  (match (descriptor-id ty) (0 0) (id (field (at c id) value))))
+
+(base:function pointer-value-type ((c context) (ty u64)) bool
+  (match ty (11 true) (_ (== (descriptor-kind c ty) 34))))
+
+; The built-in byte pointer has the same public view as a pointer descriptor.
+(base:function pointer-pointee ((c context) (ty u64)) u64
+  (match ty (11 7) (_ (descriptor-target c ty))))
+
+(base:function array-element ((c context) (ty u64)) u64
+  (descriptor-target c ty))
+
+(base:function array-length ((c context) (ty u64)) u64
+  (base:convert (descriptor-value c ty)))
+
+; A callback is a pointer whose pointee is a function descriptor. Return its
+; stable descriptor ID so callers never subtract the descriptor offset.
+(base:function callback-signature ((c context) (ty u64)) u64
+  (match (pointer-value-type c ty)
+    (false 0)
+    (true
+      (let ((pointee u64 (pointer-pointee c ty)))
+        (match (== (descriptor-kind c pointee) 46)
+          (true (descriptor-id pointee))
+          (false 0))))))
+
+; Focused descriptor constructors centralize the tape layout for structural
+; types. The supplied component links and source IDs are stable tape indices.
+(base:function pointer-descriptor ((c context) (pointee u64)) u64
+  (descriptor-type
+    (add-record c (node-pointer-descriptor) 0 0 0 0 0 pointee 0 0 0)))
+
+(base:function array-descriptor ((c context) (element u64) (length u64)) u64
+  (descriptor-type
+    (add-record
+      c
+      (node-array-descriptor)
+      0
+      0
+      0
+      0
+      0
+      element
+      (base:convert length)
+      0
+      0)))
+
+(base:function tuple-component
+  ((c context) (source u64) (next-component u64) (ty u64)) u64
+  (let ((v node (at c source)))
+    (add-record
+      c
+      (node-tuple-component)
+      (field v start)
+      0
+      0
+      next-component
+      ty
+      0
+      0
+      0
+      0)))
+
+(base:function tuple-descriptor ((c context) (components u64)) u64
+  (descriptor-type
+    (add-record c (node-structural-tuple) 0 0 components 0 0 0 0 0 0)))
+
+(base:function callback-descriptor
+  ((c context) (source u64) (parameters u64) (result u64)) u64
+  (let ((v node (at c source)))
+    (descriptor-type
+      (add-record
+        c
+        (node-function-signature)
+        (field v start)
+        0
+        parameters
+        0
+        0
+        result
+        0
+        0
+        0))))
+
 ; Give the checker an independent copy of a source syntax chain.
 (base:function copy-tree ((c context) (id u64)) u64
   (match id
@@ -328,6 +673,11 @@
           (field v generated)
           (field v lookup-module)))
       ty)))
+
+; Checked retagging follows the same enum boundary as construction.
+(base:function typed-kind
+  ((c context) (id u64) (kind node-kind) (ty u64) (target u64) (value i64)) u64
+  (typed c id (kind-code kind) ty target value))
 
 ; Read a source byte as u64; return the zero sentinel at or beyond the source end.
 (base:function byte ((c context) (i u64)) u64
@@ -479,6 +829,8 @@
 (export
   module-info
   module-state
+  scalar-type
+  node-kind
   modules-array
   modules-empty
   modules-append
@@ -496,15 +848,37 @@
   nodes-length
   node
   tape
+  descriptor-base
   context
   empty
   at
   set
   add
+  kind-code
+  record
+  add-record
+  descriptor-type
+  descriptor-present
+  descriptor-id
+  descriptor-kind
+  descriptor-components
+  descriptor-target
+  descriptor-value
+  pointer-value-type
+  pointer-pointee
+  array-element
+  array-length
+  callback-signature
+  pointer-descriptor
+  array-descriptor
+  tuple-component
+  tuple-descriptor
+  callback-descriptor
   next
   child
   link
   typed
+  typed-kind
   byte
   spelling
   spelling-byte

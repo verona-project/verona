@@ -77,12 +77,12 @@
 (base:function value-type ((c m:context) (owner llvm:session) (ty u64))
   t:type-ref
   (base:cond
-    ((<= ty num:descriptor-base) (scalar-type owner ty))
-    ((== (check:type-kind c ty) 34) (ir:pointer-type (field owner context) 0))
-    ((== (check:type-kind c ty) 49)
+    ((base:not (m:descriptor-present ty)) (scalar-type owner ty))
+    ((== (m:descriptor-kind c ty) 34) (ir:pointer-type (field owner context) 0))
+    ((== (m:descriptor-kind c ty) 49)
      (ir:array-type
-       (value-type c owner (check:array-element c ty))
-       (check:array-length c ty)))
+       (value-type c owner (m:array-element c ty))
+       (m:array-length c ty)))
     (true
       (let
         ((buffer
@@ -93,15 +93,16 @@
                (pointer void)
                (values
                  c
-                 (+ 1 (check:chain-length c (check:type-components c ty)))))))
+                 (+ 1 (check:chain-length c (m:descriptor-components c ty)))))))
          (count
            u32
-           (match (check:type-kind c ty)
+           (match (m:descriptor-kind c ty)
              (21
                (do
                  (store (deref buffer) (integer-type owner))
-                 (sum-types c owner (check:type-components c ty) buffer 1)))
-             (_ (component-types c owner (check:type-components c ty) buffer 0)))))
+                 (sum-types c owner (m:descriptor-components c ty) buffer 1)))
+             (_
+               (component-types c owner (m:descriptor-components c ty) buffer 0)))))
         (ir:struct-type (field owner context) buffer count 0)))))
 
 (export values value-type component-types scalar-type integer-type)

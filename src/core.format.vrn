@@ -37,15 +37,15 @@
 (base:function prefix ((c m:context) (ty u64) (case u64)) data:data
   (let ((out data:data (data:empty (arena:allocator (field c memory)))))
     (do
-      (match (check:type-kind c ty)
+      (match (m:descriptor-kind c ty)
         (22 (append (& out) "tuple("))
         (49 (append (& out) "array("))
         (_
-          (let ((id u64 (- ty num:descriptor-base)))
+          (let ((id u64 (m:descriptor-id ty)))
             (do
               (append
                 (& out)
-                (match (check:type-kind c ty) (20 "product:") (_ "sum:")))
+                (match (m:descriptor-kind c ty) (20 "product:") (_ "sum:")))
               (digits (& out) (m:owner c id))
               (append (& out) ":")
               (m:storage

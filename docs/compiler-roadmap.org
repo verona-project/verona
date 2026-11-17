@@ -32,6 +32,22 @@ The archived compiler is historical evidence, not a build dependency. Current
 Verona source, tests, and documented intentional differences define maintained
 behavior.
 
+* Compiler model boundary
+
+=core.model= owns the arena-backed node tape and the representation of a
+structured type ID: scalar IDs have no descriptor, while descriptor IDs map to
+stable tape indices through the model's descriptor boundary. Consumers must use
+the model's descriptor kind, component, target, value, pointer, array, and
+callback accessors instead of decoding node fields or applying the descriptor
+offset themselves.
+
+The same boundary creates pointer, array, tuple-component, tuple, and callback
+descriptors. These constructors append only complete nodes, return stable IDs,
+and never expose pointers into the growable tape. Nominal product and sum
+declarations retain their source shape; their component traversal is likewise
+provided by the model. This keeps allocation lifetime with the compilation
+arena and localizes future tape-format changes.
+
 * Current validation
 
 Enter the pinned development shell:
