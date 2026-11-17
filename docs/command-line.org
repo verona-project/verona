@@ -25,7 +25,7 @@ verona {compile|compile-report} [OPTIONS] FILE
   [--library NAME ...] [--library-path DIRECTORY ...] [--framework NAME ...] \
   [--feature NAME ...] [--target TRIPLE] [--cpu CPU] [--features FEATURES]
 
-verona build [--feature NAME ...] TARGET OUTPUT-DIRECTORY
+verona build [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY
 verona --version | -V
 #+end_example
 
@@ -60,8 +60,9 @@ Both commands accept every option below.
 
 | Option | Argument | Meaning and current parser behavior |
 |--------+----------+-------------------------------------|
-| =-o=, =--output= | =OUTPUT= | Output path.  It may be specified only once. |
+| =-o=, =--output= | nonempty =OUTPUT= | Output path.  It may be specified only once. |
 | =--emit= | =object=, =executable=, =static-library=, or =shared-library= | Select artifact kind.  Later occurrences replace earlier ones. |
+| =--debug= | none | Emit source-level debug information. |
 | =-O0= through =-O3= | none | Select optimization level.  The default is =-O0=; the last specified level wins. |
 | =--module-path= | =DIRECTORY= | Add a module-search directory.  Repeatable; values must be nonempty. |
 | =-l=, =--library= | =NAME= | Add a native library to link.  Repeatable. |
@@ -79,13 +80,14 @@ static libraries, and =lib*.so= or =lib*.dylib= for shared libraries.
 ** Manifest build command
 
 #+begin_example
-verona build [--feature NAME ...] TARGET OUTPUT-DIRECTORY
+verona build [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY
 #+end_example
 
 The command reads =verona.build= from the current directory, selects =TARGET=,
-and writes the artifact below =OUTPUT-DIRECTORY=.  The only command-line option
-is repeatable =--feature NAME=, whose value must be nonempty.  All other build
-settings are read from the manifest.
+and writes the artifact below =OUTPUT-DIRECTORY=.  =--debug= enables debug
+information for this invocation and is not a manifest setting. =--feature NAME=
+is repeatable and its value must be nonempty. All other build settings are read
+from the manifest.
 
 Supported top-level manifest forms are =executable=, =static-library=, and
 =shared-library=.  Each takes a target name and must contain exactly one

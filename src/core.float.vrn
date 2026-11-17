@@ -46,7 +46,7 @@
                 (12 (pack32 (decimal-to-float bytes (& end))))
                 (_ (pack64 (decimal-to-double bytes (& end)))))))
            (match (finite ty (base:convert bits))
-             (true (m:typed c id 36 ty 0 bits))
+             (true (m:typed-kind c id (node-float) ty 0 bits))
              (false
                (do (m:report c id "floating-point literal out of range") 0))))))
       (_
@@ -63,7 +63,7 @@
            i64
            (match ty (12 (pack32 (base:convert (unpack64 value)))) (_ value))))
         (match (finite ty (base:convert bits))
-          (true (m:typed c id 36 ty 0 bits))
+          (true (m:typed-kind c id (node-float) ty 0 bits))
           (false (do (m:report c id "floating-point literal out of range") 0)))))
     (_ (parse-text c id ty))))
 

@@ -32,6 +32,55 @@ class CoreTests(unittest.TestCase):
     def program(self, expression):
         return f"(%function main () i64 {expression})"
 
+    def test_emit_llvm_includes_source_debug_metadata(self):
+        source = """(%function main () i64
+  (let ((value i64 40))
+    (%+-primitive-i64 value 2)))"""
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertNotIn("!llvm.dbg.cu", emitted.stdout)
+        self.assertNotIn("!dbg !", emitted.stdout)
+        dwarfdump = shutil.which("llvm-dwarfdump")
+        if dwarfdump is None:
+            self.skipTest("llvm-dwarfdump is required for native debug-info inspection")
+        binary = self.root / "debug-info"
+        compiled = self.run_core("compile", source, "--debug", "-o", binary, "-O0")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        dsym = binary.with_name(binary.name + ".dSYM") / "Contents" / "Resources" / "DWARF" / binary.name
+        debug_artifact = dsym if dsym.exists() else binary
+        dump = subprocess.run([dwarfdump, "--debug-info", str(debug_artifact)],
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(dump.returncode, 0, dump.stderr)
+        self.assertIn(str(self.source), dump.stdout)
+        self.assertRegex(dump.stdout, r'DW_AT_name\s+\("main"\)')
+        self.assertRegex(dump.stdout, r'DW_AT_linkage_name\s+\("vrn\.input\.main"\)')
+        self.assertRegex(dump.stdout, r'DW_AT_name\s+\("value"\)')
+
+    def test_emit_llvm_uses_module_qualified_function_symbols(self):
+        source = """
+(%constant answer i64 40)
+(%variable counter i64 2)
+(%function main () i64 (%+-primitive-i64 answer counter))
+"""
+        emitted = self.run_core("emit-llvm", source)
+        self.assertEqual(emitted.returncode, 0, emitted.stderr)
+        self.assertIn("define internal i64 @vrn.input.main()", emitted.stdout)
+        self.assertIn("@vrn.input.c_answer", emitted.stdout)
+        self.assertIn("@vrn.input.v_counter", emitted.stdout)
+        self.assertIn("@vrn.runtime.array.failure", emitted.stdout)
+        for kind in ("i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"):
+            self.assertIn("@vrn.runtime.div." + kind, emitted.stdout)
+        objdump = shutil.which("llvm-objdump")
+        if objdump is None:
+            self.skipTest("llvm-objdump is required for native symbol inspection")
+        binary = self.root / "symbol-names"
+        compiled = self.run_core("compile", source, "-o", binary, "-O0")
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        symbols = subprocess.run([objdump, "--syms", str(binary)],
+                                 capture_output=True, text=True, timeout=30)
+        self.assertEqual(symbols.returncode, 0, symbols.stderr)
+        self.assertRegex(symbols.stdout, r"(?m)\b_?vrn\.input\.main$")
+
     def agrees(self, source, expected, *options):
         evaluated = self.run_core("eval", source, *options)
         self.assertEqual(evaluated.returncode, 0, evaluated.stderr)
@@ -191,16 +240,19 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(native.stdout, "i64:42\n")
 
     def test_cli_help_and_flexible_option_placement(self):
-        top = subprocess.run([str(COMPILER), "--help"], capture_output=True, text=True, timeout=10)
-        self.assertEqual(top.returncode, 0, top.stderr)
-        self.assertIn("compile FILE", top.stdout)
-        self.assertEqual(top.stderr, "")
-        for command in ("read", "compile", "build"):
-            help_result = subprocess.run([str(COMPILER), command, "--help"],
-                                         capture_output=True, text=True, timeout=10)
-            self.assertEqual(help_result.returncode, 0, help_result.stderr)
-            self.assertIn("usage: verona " + command, help_result.stdout)
-            self.assertEqual(help_result.stderr, "")
+        for flag in ("--help", "-h", "help"):
+            top = subprocess.run([str(COMPILER), flag], capture_output=True, text=True, timeout=10)
+            self.assertEqual(top.returncode, 0, top.stderr)
+            self.assertIn("compile FILE", top.stdout)
+            self.assertEqual(top.stderr, "")
+        for command in ("read", "check", "eval", "emit-llvm", "optimization-report",
+                        "compile", "compile-report", "build"):
+            for flag in ("--help", "-h", "help"):
+                help_result = subprocess.run([str(COMPILER), command, flag],
+                                             capture_output=True, text=True, timeout=10)
+                self.assertEqual(help_result.returncode, 0, help_result.stderr)
+                self.assertIn("usage: verona " + command, help_result.stdout)
+                self.assertEqual(help_result.stderr, "")
 
         self.source.write_text(self.program("42"))
         before = subprocess.run(
@@ -215,6 +267,23 @@ class CoreTests(unittest.TestCase):
             [str(COMPILER), "check", "--target=native", str(self.source)],
             capture_output=True, text=True, timeout=10)
         self.assertEqual(malformed.returncode, 2, malformed.stderr)
+
+        # Output is a single, nonempty value.  An empty value must not be
+        # mistaken for the default-output sentinel or bypass duplicate checks.
+        for arguments in (("--output", ""), ("-o", "", "-o", "second"),
+                          ("-o", "first", "--output", "second")):
+            invalid = self.run_core("compile", self.program("42"), *arguments)
+            self.assertEqual(invalid.returncode, 2, invalid.stderr)
+            self.assertIn("usage:", invalid.stderr)
+
+        # Compilation-only options and compile-report artifact conflicts are
+        # diagnosed by the parser, before a source is processed.
+        for command, arguments in (("check", ("-O2",)),
+                                   ("check", ("--output", "out")),
+                                   ("compile-report", ("--emit", "object"))):
+            invalid = self.run_core(command, self.program("42"), *arguments)
+            self.assertEqual(invalid.returncode, 2, invalid.stderr)
+            self.assertIn("usage:", invalid.stderr)
 
     def test_cli_cpu_features_and_default_outputs(self):
         source = """
@@ -2486,7 +2555,11 @@ class CoreTests(unittest.TestCase):
         ir = self.run_core("emit-llvm", source)
         self.assertEqual(ir.returncode, 0, ir.stderr)
         # One u8 method and one u8 specialization despite the two calls.
-        self.assertEqual(len(re.findall(r'define internal i8 @"[0-9]+"\(', ir.stdout)), 2)
+        self.assertEqual(len(re.findall(r'define internal i8 @"?vrn\.input\.[^"(]+"?\(', ir.stdout)), 2)
+        self.assertIn("@vrn.input._2b__impl.input.numeric.u8", ir.stdout)
+        self.assertIn("@vrn.input._2b__impl.input.numeric.i64", ir.stdout)
+        self.assertIn("@vrn.input.add__g.u8", ir.stdout)
+        self.assertIn("@vrn.input.add__g.i64", ir.stdout)
         self.agrees(prelude + """
 (%function countdown (for (a) ((numeric a))) ((value a) (depth i64)) a
   (match (%=-primitive-i64 depth 0) (true value) (false (countdown (add value value) (%--primitive-i64 depth 1)))))
@@ -2694,7 +2767,7 @@ class CoreTests(unittest.TestCase):
         self.agrees(repeated, 171)
         emitted = self.run_core("emit-llvm", repeated)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
-        self.assertEqual(len(re.findall(r'^define internal i64 @"?\d+"?\(', emitted.stdout, re.M)), 6)
+        self.assertEqual(len(re.findall(r'^define internal i64 @"?vrn\.(?:input|math|package\.bridge)\.[^"(]+"?\(', emitted.stdout, re.M)), 6)
         invalid = [
             ("(import math.vrn :as m)" + self.program("0"), "module not found"),
             ("(export missing)" + self.program("0"), "unknown function"),
@@ -3191,10 +3264,10 @@ int main(int argc, char **argv) {
                 symbols = subprocess.run([nm, str(artifact)], capture_output=True,
                                          text=True, timeout=10)
                 self.assertEqual(symbols.returncode, 0, symbols.stderr)
-                # Private implementations/adapters use numeric symbols. Their
+                # Private implementations/adapters use the internal Verona namespace. Their
                 # removal proves the used bodies were substituted, with exported
                 # APIs still accepting runtime inputs from a separately built client.
-                pattern = r"(?m)\b[tT] _?\d+(?:\.[\w.]+)?$"
+                pattern = r"(?m)\b[tT] _?vrn\.input\.[\w.]+$"
                 if level == "-O0":
                     self.assertRegex(symbols.stdout, pattern)
                 else:
@@ -3418,7 +3491,7 @@ int main(int argc, char **argv) {
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         # Calls are deliberately excluded from the initial CSE domain.
-        self.assertEqual(len(re.findall(r'call i64 @"12"?', emitted.stdout)), 2)
+        self.assertEqual(len(re.findall(r'call i64 @verona\.input\.square\b', emitted.stdout)), 2)
 
         direct = """
 (%function helper ((value i64)) i64
@@ -3616,7 +3689,7 @@ int main(int argc, char **argv) {
                                          capture_output=True, text=True, timeout=10)
                 self.assertEqual(symbols.returncode, 0, symbols.stderr)
                 self.assertRegex(symbols.stdout, r"(?m)\bT _?forward_api$")
-                private = r"(?m)\b[tT] _?\d+(?:\.[\w.]+)?$"
+                private = r"(?m)\b[tT] _?vrn\.input\.[\w.-]+$"
                 if level == "-O0":
                     self.assertRegex(symbols.stdout, private)
                 else:
@@ -3786,7 +3859,7 @@ int main(int argc, char **argv) {
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         groups = re.findall(r"attributes #(\d+) = \{[^}]*alwaysinline[^}]*\}", emitted.stdout)
         self.assertEqual(len(groups), 1, emitted.stdout)
-        self.assertEqual(len(re.findall(r"(?m)^define .* #" + groups[0] + r" \{", emitted.stdout)), 2)
+        self.assertEqual(len(re.findall(r"(?m)^define .* #" + groups[0] + r"(?: !dbg !\d+)? \{", emitted.stdout)), 2)
         (self.root / "library.vrn").write_text("""
 (import base :as b)
 (export helper)
@@ -4017,7 +4090,7 @@ int main(int argc, char **argv) {
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         functions = re.findall(
-            r'define internal i64 @("[^"\n]+"|[\w.]+)\(\) \{\n(.*?)\n\}',
+            r'define internal i64 @("[^"\n]+"|[\w.]+)\(\)(?: !dbg !\d+)? \{\n(.*?)\n\}',
             emitted.stdout, re.S)
         names = [name.strip('"') for name, body in functions
                  if re.search(r"ret i64 12345\b", body)]
@@ -4266,12 +4339,12 @@ int main(void) {
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         bodies = re.findall(
-            r"define internal i64 @[^\n]+\(i64 (%[\w.]+)\) \{\n(.*?)\n\}",
+            r"define internal i64 @[^\n]+\(i64 (%[\w.]+)\)(?: !dbg !\d+)? \{\n(.*?)\n\}",
             emitted.stdout, re.S)
         self.assertEqual(len(bodies), 1, emitted.stdout)
         parameter, body = bodies[0]
-        instructions = [line.strip() for line in body.splitlines()
-                        if line.strip() and not line.strip().endswith(":")]
+        instructions = [re.sub(r", !dbg !\d+$", "", line.strip()) for line in body.splitlines()
+                        if line.strip() and not line.strip().endswith(":") and not line.lstrip().startswith("#dbg_")]
         self.assertEqual(instructions, [f"ret i64 {parameter}"])
 
     def test_dead_bindings_keep_dependencies_and_specializations(self):
@@ -4612,7 +4685,7 @@ int main(void) {
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         # Exceeding the folding depth leaves an ordinary runtime expression.
-        self.assertRegex(emitted.stdout, r"call i64 @core\.div")
+        self.assertRegex(emitted.stdout, r"call i64 @vrn\.runtime\.div\.i64")
 
     def test_copy_propagation_reuses_parameter_value(self):
         source = """
@@ -4626,12 +4699,12 @@ int main(void) {
         # Ignore generated symbol names. The one-parameter identity function
         # must contain only a return: no loads, stores, or copy instructions.
         bodies = re.findall(
-            r"define internal i64 @[^\n]+\(i64 (%[\w.]+)\) \{\n(.*?)\n\}",
+            r"define internal i64 @[^\n]+\(i64 (%[\w.]+)\)(?: !dbg !\d+)? \{\n(.*?)\n\}",
             emitted.stdout, re.S)
         self.assertEqual(len(bodies), 1, emitted.stdout)
         parameter, body = bodies[0]
-        instructions = [line.strip() for line in body.splitlines()
-                        if line.strip() and not line.strip().endswith(":")]
+        instructions = [re.sub(r", !dbg !\d+$", "", line.strip()) for line in body.splitlines()
+                        if line.strip() and not line.strip().endswith(":") and not line.lstrip().startswith("#dbg_")]
         self.assertEqual(instructions, [f"ret i64 {parameter}"])
         self.agrees(self.program("""
 (let ((value i64 40) (copy value))

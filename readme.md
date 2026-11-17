@@ -74,7 +74,7 @@ tools. For a source release, pass the recorded seed artifact explicitly with
 verona [--help|-h] [--version|-V] COMMAND [OPTIONS]
 verona {read|check|eval|emit-llvm|optimization-report} [OPTIONS] FILE
 verona {compile|compile-report} [OPTIONS] FILE
-verona build [--feature NAME ...] TARGET OUTPUT-DIRECTORY
+verona build [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY
 ```
 
 Source commands accept:
@@ -90,8 +90,9 @@ or `verona COMMAND --help` for the complete, command-specific contract.
 
 Compilation additionally accepts:
 
-- `-o OUTPUT` or `--output OUTPUT` — select the output path;
+- `-o OUTPUT` or `--output OUTPUT` — select one nonempty output path;
 - `--emit object|executable|static-library|shared-library` — select the artifact;
+- `--debug` — emit source-level debug information;
 - `-O0`, `-O1`, `-O2`, or `-O3` — select the optimization level;
 - `--cpu CPU` — select the LLVM target CPU;
 - `--features FEATURES` — select LLVM machine features;
@@ -101,6 +102,11 @@ Compilation additionally accepts:
 
 Without an explicit output path, `compile` derives a name beside the source.
 Static and shared libraries with native exports also receive a C header.
+`--debug` emits source locations, functions, lexical scopes, and local-variable
+records. Native Darwin executables and shared libraries receive an adjacent
+`.dSYM` bundle; object files retain DWARF directly.
+For manifest builds, pass `--debug` to `verona build`; it is an invocation
+option and is not recorded in `verona.build`.
 
 `read` prints the indexed syntax tree, `check` performs analysis without
 execution, `eval` evaluates the checked program, and `emit-llvm` writes LLVM IR.

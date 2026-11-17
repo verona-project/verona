@@ -37,7 +37,11 @@
 (import llvm.passes :as passes)
 
 (base:type machine-options
-  (product (triple (pointer u8)) (cpu (pointer u8)) (features (pointer u8))))
+  (product
+    (triple (pointer u8))
+    (cpu (pointer u8))
+    (features (pointer u8))
+    (debug bool)))
 
 (base:type source-state
   (product (path (pointer u8)) (provided bool) (stopped bool)))
@@ -47,7 +51,8 @@
     (target (pointer u8))
     (output (pointer u8))
     (operands u64)
-    (stopped bool)))
+    (stopped bool)
+    (debug bool)))
 
 ; Compare two borrowed NUL-terminated strings for exact byte equality.
 (base:function equal ((x (pointer u8)) (y (pointer u8))) bool
@@ -135,6 +140,45 @@
              false)))))
     (do (link:strings-destroy (& args)) (arena:destroy (& memory)) result)))
 
+; Darwin executables retain a debug map rather than copying DWARF from their
+; object files. Materialize that map while the private object still exists, so
+; LLDB can load OUTPUT.dSYM after the compiler removes the temporary object.
+(base:function debug-symbols
+  ((enabled bool)
+   (output (pointer u8))
+   (kind (pointer u8))
+   (platform (pointer u8))) bool
+  (match
+    (base:and
+      enabled
+      (base:and
+        (equal platform "darwin")
+        (base:not (equal kind "static-library"))))
+    (false true)
+    (true
+      (let
+        ((configured (pointer u8) (process:getenv "VERONA_DSYMUTIL"))
+         (tool
+           (pointer u8)
+           (match (base:is-null (cast (pointer void) configured))
+             (true "dsymutil")
+             (false configured))))
+        (let
+          ((args
+             (tuple (pointer u8) (pointer u8) (pointer u8))
+             (tuple tool output (cast (pointer u8) (m:empty-env))))
+           (pid i32 (process:fork)))
+          (match pid
+            (-1 false)
+            (0
+              (do
+                (process:execvp
+                  tool
+                  (cast (pointer (pointer u8)) (cast (pointer void) (& args))))
+                (process:exit 127)
+                false))
+            (_ (wait-result pid))))))))
+
 ; Release a transferred LLVM diagnostic/text message if nonnull, including success messages.
 (base:function dispose-message ((message (pointer u8))) unit
   (match (base:is-null message)
@@ -175,6 +219,7 @@
   ((c m:context)
    (owner llvm:session)
    (machine t:machine-ref)
+   (debug bool)
    (output (pointer u8))
    (links link:options)
    (kind (pointer u8))) exit-code
@@ -221,7 +266,20 @@
                                  links
                                  kind
                                  (config:target-platform c))
-                               (true 0)
+                               (true
+                                 (match
+                                   (debug-symbols
+                                     debug
+                                     output
+                                     kind
+                                     (config:target-platform c))
+                                   (true 0)
+                                   (false
+                                     (do
+                                       (m:text
+                                         c:STDERR-FILENO
+                                         "cannot create native debug symbols\n")
+                                       2))))
                                (false
                                  (do
                                    (m:text
@@ -280,6 +338,7 @@
   ((c m:context)
    (all u64)
    (owner llvm:session)
+   (debug bool)
    (output (pointer u8))
    (optimization (pointer u8))
    (links link:options)
@@ -308,7 +367,14 @@
                      (match (equal kind "object")
                        (true (emit-object owner machine output))
                        (false
-                         (object-and-link c owner machine output links kind)))))
+                         (object-and-link
+                           c
+                           owner
+                           machine
+                           debug
+                           output
+                           links
+                           kind)))))
                  (failure failure))))
             (do (target:machine-dispose machine) result)))))))
 
@@ -322,7 +388,8 @@
    (output (pointer u8))
    (optimization (pointer u8))
    (links link:options)
-   (kind (pointer u8))) exit-code
+   (kind (pointer u8))
+   (debug bool)) exit-code
   (let
     ((snapshot
        unit
@@ -340,7 +407,8 @@
            (equal mode "emit-llvm")
            (equal mode "optimization-report")
            (base:not (equal optimization "-O0")))
-         (equal mode "optimization-report")))
+         (equal mode "optimization-report")
+         debug))
      (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
      (status i32 (llvm:verify owner (& message)))
      (result
@@ -366,7 +434,15 @@
                      (let
                        ((code
                           exit-code
-                          (compile c all owner output optimization links kind)))
+                          (compile
+                            c
+                            all
+                            owner
+                            debug
+                            output
+                            optimization
+                            links
+                            kind)))
                        (match
                          (base:and-then
                            (== code 0)
@@ -494,6 +570,7 @@
    (requested (pointer u8))
    (cpu (pointer u8))
    (machine-features (pointer u8))
+   (debug bool)
    (features (pointer void))
    (selected (pointer void))) exit-code
   (match (equal mode "read")
@@ -625,7 +702,8 @@
                  actual-output
                  optimization
                  links
-                 kind)))))
+                 kind
+                 debug)))))
         (do (arena:destroy (& memory)) result)))))
 
 ; Print the compact top-level synopsis used with malformed invocations.
@@ -656,7 +734,7 @@
       (true
         (m:text
           c:STDOUT-FILENO
-          "native options:\n  -o, --output OUTPUT      select the artifact output (once)\n  --emit KIND              object, executable, static-library, or shared-library (last value wins)\n  -O0, -O1, -O2, -O3       select optimization level (last value wins; default -O0)\n  -l, --library NAME       add a native library (repeatable)\n  -L, --library-path DIR   add a native library search path (repeatable)\n  --framework NAME         add a Darwin framework (repeatable)\n  --cpu CPU                select a target CPU (last value wins; default generic)\n  --features FEATURES      select target machine features (last value wins)\n"))
+          "native options:\n  -o, --output OUTPUT      select the artifact output (once)\n  --emit KIND              object, executable, static-library, or shared-library (last value wins)\n  --debug                  emit source-level debug information\n  -O0, -O1, -O2, -O3       select optimization level (last value wins; default -O0)\n  -l, --library NAME       add a native library (repeatable)\n  -L, --library-path DIR   add a native library search path (repeatable)\n  --framework NAME         add a Darwin framework (repeatable)\n  --cpu CPU                select a target CPU (last value wins; default generic)\n  --features FEATURES      select target machine features (last value wins)\n"))
       (false unit))
     (m:text
       c:STDOUT-FILENO
@@ -667,7 +745,7 @@
   (do
     (m:text
       c:STDOUT-FILENO
-      "usage: verona build [--feature NAME ...] TARGET OUTPUT-DIRECTORY\n\nBuild TARGET from ./verona.build and write it below OUTPUT-DIRECTORY. --feature is repeatable; all artifact, target, optimization, and link configuration comes from the manifest. Options may precede or follow operands; '--' ends option processing.\n")
+      "usage: verona build [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY\n\nBuild TARGET from ./verona.build and write it below OUTPUT-DIRECTORY. --debug enables source-level debug information for this invocation; --feature is repeatable. All artifact, target, optimization, and link configuration comes from the manifest. Options may precede or follow operands; '--' ends option processing.\n")
     0))
 
 (base:function option-like ((value (pointer u8))) bool
@@ -683,6 +761,7 @@
       (base:or-else
         (base:or-else (equal option "-O0") (equal option "-O1"))
         (base:or-else (equal option "-O2") (equal option "-O3")))
+      (equal option "--debug")
       (equal option "--"))
     (true 1)
     (false 2)))
@@ -735,21 +814,24 @@
                             (machine-options
                               value
                               (field (deref machine) cpu)
-                              (field (deref machine) features))))
+                              (field (deref machine) features)
+                              (field (deref machine) debug))))
                          ((equal option "--cpu")
                           (store
                             (deref machine)
                             (machine-options
                               (field (deref machine) triple)
                               value
-                              (field (deref machine) features))))
+                              (field (deref machine) features)
+                              (field (deref machine) debug))))
                          ((equal option "--features")
                           (store
                             (deref machine)
                             (machine-options
                               (field (deref machine) triple)
                               (field (deref machine) cpu)
-                              value)))
+                              value
+                              (field (deref machine) debug))))
                          (true (config:add-feature memory features value)))
                        (command-options
                          argv
@@ -764,6 +846,31 @@
                          machine
                          features
                          memory))))))))
+          ((equal option "--debug")
+           (match compile
+             (false false)
+             (true
+               (do
+                 (store
+                   (deref machine)
+                   (machine-options
+                     (field (deref machine) triple)
+                     (field (deref machine) cpu)
+                     (field (deref machine) features)
+                     true))
+                 (command-options
+                   argv
+                   (+ index 1)
+                   end
+                   compile
+                   roots
+                   output
+                   level
+                   links
+                   kind
+                   machine
+                   features
+                   memory)))))
           ((equal option "--emit")
            (match (base:and-then compile (< (+ index 1) end))
              (false false)
@@ -866,7 +973,12 @@
            (match (base:and-then compile (< (+ index 1) end))
              (false false)
              (true
-               (match (equal (deref output) "")
+               (match
+                 (base:and
+                   (equal (deref output) "")
+                   (>
+                     (cstring:strlen (deref (pointer-offset argv (+ index 1))))
+                     0))
                  (false false)
                  (true
                    (do
@@ -1097,7 +1209,7 @@
              (equal mode "optimization-report")
              compile))
          (memory arena:arena (arena:create (system:create) 4096))
-         (machine machine-options (machine-options "native" "generic" ""))
+         (machine machine-options (machine-options "native" "generic" "" false))
          (features (pointer void) (m:empty-env))
          (roots modules:paths-array (modules:paths-new (system:create)))
          (links link:options (link:options-new (system:create)))
@@ -1142,6 +1254,7 @@
                  (field machine triple)
                  (field machine cpu)
                  (field machine features)
+                 (field machine debug)
                  features
                  (m:empty-env))))))
         (do
@@ -1195,6 +1308,20 @@
                  (field (deref state) target)
                  (field (deref state) output)
                  (field (deref state) operands)
+                 true
+                 (field (deref state) debug)))
+             (build-options argv (+ index 1) end memory features state)))
+          ((base:and
+             (base:not (field (deref state) stopped))
+             (equal argument "--debug"))
+           (do
+             (store
+               (deref state)
+               (build-state
+                 (field (deref state) target)
+                 (field (deref state) output)
+                 (field (deref state) operands)
+                 false
                  true))
              (build-options argv (+ index 1) end memory features state)))
           ((base:and
@@ -1224,7 +1351,8 @@
                  argument
                  (field (deref state) output)
                  1
-                 (field (deref state) stopped)))
+                 (field (deref state) stopped)
+                 (field (deref state) debug)))
              (build-options argv (+ index 1) end memory features state)))
           ((== (field (deref state) operands) 1)
            (do
@@ -1234,7 +1362,8 @@
                  (field (deref state) target)
                  argument
                  2
-                 (field (deref state) stopped)))
+                 (field (deref state) stopped)
+                 (field (deref state) debug)))
              (build-options argv (+ index 1) end memory features state)))
           (true false))))))
 
@@ -1243,7 +1372,7 @@
   (let
     ((memory arena:arena (arena:create (system:create) 4096))
      (features (pointer void) (m:empty-env))
-     (state build-state (build-state "" "" 0 false))
+     (state build-state (build-state "" "" 0 false false))
      (valid bool (build-options argv 2 argc (& memory) (& features) (& state)))
      (result
        exit-code
@@ -1307,6 +1436,7 @@
                       (field request triple)
                       "generic"
                       ""
+                      (field state debug)
                       (field request features)
                       (cast (pointer void) (& configuration)))))
                  (do

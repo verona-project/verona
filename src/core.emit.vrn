@@ -19,9 +19,11 @@
 (import core.format :as format)
 (import core.passes :as passes)
 (import core.inline :as inline)
+(import core.symbols :as symbols)
 
 ; Every checked node/binder/function has a unique syntax index. Its LLVM value
-; lives in the matching slot, so lexical shadowing requires no textual names.
+; lives in the matching slot. LLVM function symbols additionally retain the
+; owning module and declared source name so object-level tools are useful.
 ; Lowering state borrowing an LLVM session and arena-owned value-handle table.
 ; Divide is the guarded-division helper. Handles require a live session;
 ; the generation caller disposes that session after use.
@@ -31,7 +33,187 @@
     (slots (pointer t:value-ref))
     (helpers (pointer t:value-ref))
     (abi cabi:context)
-    (passes passes:context)))
+    (passes passes:context)
+    (debug bool)
+    ; The compile unit is the parent of every source function. SCOPE changes
+    ; while lowering a function or lexical binding group.
+    (compile-unit t:metadata-ref)
+    (scope t:metadata-ref)))
+
+; Compute a source position once for each debug descriptor/location. The model
+; already knows how to cross module source ranges, including CRLF.
+(base:function debug-position ((c m:context) (id u64)) m:position
+  (let
+    ((pos m:position (m:position 1 1 false))
+     (offset u64 (field (m:at c id) start))
+     (start u64 (m:source-start c offset)))
+    (do (m:locate c start (- offset start) (& pos)) pos)))
+
+; LLVM accepts an absolute Verona source path as DIFile's filename. Keeping it
+; whole also works for files obtained through module search paths.
+(base:function debug-file ((c m:context) (b backend) (id u64)) t:metadata-ref
+  (let ((path (pointer u8) (m:source-path c (field (m:at c id) start))))
+    (ir:di-file (field (field b owner) debug) path (cstring:strlen path) "" 0)))
+
+; Set the builder's current location before lowering a syntax node. All LLVM
+; instructions subsequently built for that node inherit this DILocation.
+(base:function debug-location ((c m:context) (b backend) (id u64))
+  t:metadata-ref
+  (match (base:is-null (cast (pointer void) (field b scope)))
+    (true
+      (let ((empty t:metadata-ref (cast t:metadata-ref (target:null-pointer))))
+        (do
+          (ir:builder-debug-location-set (field (field b owner) builder) empty)
+          empty)))
+    (false
+      (let
+        ((pos m:position (debug-position c id))
+         (location
+           t:metadata-ref
+           (ir:di-location
+             (field (field b owner) context)
+             (base:convert (field pos line))
+             (base:convert (field pos column))
+             (field b scope)
+             (cast t:metadata-ref (target:null-pointer)))))
+        (do
+          (ir:builder-debug-location-set
+            (field (field b owner) builder)
+            location)
+          location)))))
+
+(base:function debug-value-type ((b backend)) t:metadata-ref
+  (ir:di-basic-type (field (field b owner) debug) "Verona value" 12 64 5 0))
+
+; Enter a distinct lexical scope for a source binding group.
+(base:function debug-lexical ((c m:context) (b backend) (id u64)) backend
+  (match (field b debug)
+    (false b)
+    (true
+      (let ((pos m:position (debug-position c id)))
+        (backend
+          (field b owner)
+          (field b slots)
+          (field b helpers)
+          (field b abi)
+          (field b passes)
+          (field b debug)
+          (field b compile-unit)
+          (ir:di-lexical-block
+            (field (field b owner) debug)
+            (field b scope)
+            (debug-file c b id)
+            (base:convert (field pos line))
+            (base:convert (field pos column))))))))
+
+; Record either an addressable local or an SSA value using LLVM 23 debug
+; records. This deliberately avoids the legacy llvm.dbg.* intrinsic surface.
+(base:function debug-bind
+  ((c m:context) (b backend) (id u64) (value t:value-ref) (address bool)) unit
+  (match (field b debug)
+    (false unit)
+    (true
+      (let
+        ((name data:view (m:spelling c id))
+         (pos m:position (debug-position c id))
+         (file t:metadata-ref (debug-file c b id))
+         (location t:metadata-ref (debug-location c b id))
+         (type t:metadata-ref (debug-value-type b))
+         (ops i64 0))
+        (let
+          ((variable
+             t:metadata-ref
+             (ir:di-auto-variable
+               (field (field b owner) debug)
+               (field b scope)
+               (field name bytes)
+               (field name length)
+               file
+               (base:convert (field pos line))
+               type
+               1
+               0
+               0))
+           (expression
+             t:metadata-ref
+             (ir:di-expression (field (field b owner) debug) (& ops) 0))
+           (block
+             t:block-ref
+             (ir:builder-block (field (field b owner) builder))))
+          (do
+            (match address
+              (true
+                (do
+                  (ir:di-declare-record-at-end
+                    (field (field b owner) debug)
+                    value
+                    variable
+                    expression
+                    location
+                    block)
+                  unit))
+              (false
+                (do
+                  (ir:di-value-record-at-end
+                    (field (field b owner) debug)
+                    value
+                    variable
+                    expression
+                    location
+                    block)
+                  unit)))
+            unit))))))
+
+; Attach a source subprogram to an already declared LLVM function and return a
+; backend whose current scope is that subprogram.
+(base:function debug-function ((c m:context) (b backend) (fn u64)) backend
+  (match (field b debug)
+    (false b)
+    (true
+      (let
+        ((name data:view (m:spelling c (m:next c (m:child c fn))))
+         (linkage data:data (symbols:function-name c fn))
+         (pos m:position (debug-position c fn))
+         (file t:metadata-ref (debug-file c b fn))
+         (type t:metadata-ref (debug-value-type b)))
+        (let
+          ((subroutine
+             t:metadata-ref
+             (ir:di-subroutine-type
+               (field (field b owner) debug)
+               file
+               (& type)
+               1
+               0)))
+          (let
+            ((program
+               t:metadata-ref
+               (ir:di-function
+                 (field (field b owner) debug)
+                 (field b compile-unit)
+                 (field name bytes)
+                 (field name length)
+                 (data:bytes linkage)
+                 (data:length linkage)
+                 file
+                 (base:convert (field pos line))
+                 subroutine
+                 1
+                 1
+                 (base:convert (field pos line))
+                 0
+                 0)))
+            (do
+              (ir:subprogram-set (get b fn) program)
+              (backend
+                (field b owner)
+                (field b slots)
+                (field b helpers)
+                (field b abi)
+                (field b passes)
+                (field b debug)
+                (field b compile-unit)
+                program))))))))
 
 ; Read a previously populated LLVM handle slot using its checked syntax/binder identity.
 (base:function get ((b backend) (id u64)) t:value-ref
@@ -47,7 +229,7 @@
 (base:function bind-binder
   ((c m:context) (b backend) (id u64) (value t:value-ref)) unit
   (match (check:stored-binder c id)
-    (false (do (put b id value) unit))
+    (false (do (put b id value) (debug-bind c b id value false) unit))
     (true
       (let
         ((ty u64 (field (m:at c id) ty))
@@ -63,6 +245,7 @@
             (cabi:convert (field b abi) ty value true)
             address)
           (put b id address)
+          (debug-bind c b id address true)
           unit)))))
 
 (base:function uses-storage ((c m:context) (id u64)) bool
@@ -284,7 +467,7 @@
        t:value-ref
        (ir:function-add
          (field owner module)
-         "array.failure"
+         "vrn.runtime.array.failure"
          (ir:function-type (ir:void-type context) (& pointer-type) 1 0))))
     (do
       (ir:linkage-set fn enum:linkage-internal)
@@ -333,7 +516,7 @@
        t:value-ref
        (ir:function-add
          module
-         "core.div"
+         (division-name ty)
          (ir:function-type
            word-type
            (cast (pointer t:type-ref) (cast (pointer void) (& params)))
@@ -390,6 +573,20 @@
           (false (ir:build-udiv builder x y ""))))
       divide)))
 
+; Runtime helpers have one body per integer representation. Name the concrete
+; representation explicitly instead of relying on LLVM collision suffixes.
+(base:function division-name ((ty u64)) (pointer u8)
+  (match ty
+    (3 "vrn.runtime.div.i64")
+    (4 "vrn.runtime.div.i8")
+    (5 "vrn.runtime.div.i16")
+    (6 "vrn.runtime.div.i32")
+    (7 "vrn.runtime.div.u8")
+    (8 "vrn.runtime.div.u16")
+    (9 "vrn.runtime.div.u32")
+    (10 "vrn.runtime.div.u64")
+    (_ "vrn.runtime.div.invalid")))
+
 ; Fill an LLVM parameter-type buffer with the core integer type; return the total count.
 (base:function parameter-types
   ((c m:context)
@@ -407,7 +604,7 @@
         (parameter-types c owner (m:next c param) out (+ count 1))))))
 
 ; Declare every checked function before lowering bodies and store its LLVM handle.
-; Use numeric names with internal linkage so source names cannot alter native symbols.
+; Symbols retain source identity but remain internal to the compiled module.
 (base:function declarations-inner ((c m:context) (b backend) (fn u64)) unit
   (match fn
     (0 unit)
@@ -423,9 +620,8 @@
            u64
            (parameter-types c owner (m:child c (check:signature c fn)) params 0))
          (size u32 (base:convert count))
-         (name data:data (data:empty (arena:allocator (field c memory)))))
+         (name data:data (symbols:function-name c fn)))
         (do
-          (m:storage (number:format-u64 fn (& name)))
           (m:storage (data:append (& name) 0))
           (let
             ((function t:value-ref
@@ -514,13 +710,19 @@
   ((c m:context) (b backend) (fn u64) (safe bool) (id u64) (body u64)) unit
   (match id
     (0 (tail-sequence c b fn safe body))
+    (_ (tail-bindings-in-scope c (debug-lexical c b id) fn safe id body))))
+
+(base:function tail-bindings-in-scope
+  ((c m:context) (b backend) (fn u64) (safe bool) (id u64) (body u64)) unit
+  (match id
+    (0 (tail-sequence c b fn safe body))
     (_
       (let ((name u64 (m:child c id)) (init u64 (field (m:at c id) target)))
         (do
           (match (passes:dead (field b passes) id)
             (true unit)
             (false (bind-binder c b name (expression c b init))))
-          (tail-bindings c b fn safe (m:next c id) body))))))
+          (tail-bindings-in-scope c b fn safe (m:next c id) body))))))
 
 (base:function tail-direct-call
   ((c m:context) (b backend) (id u64) (v m:node) (args u64)) unit
@@ -728,12 +930,20 @@
   (match id
     (0 (sequence c b body))
     (_
+      (let ((scoped backend (debug-lexical c b id)))
+        (bindings-in-scope c scoped id body)))))
+
+(base:function bindings-in-scope ((c m:context) (b backend) (id u64) (body u64))
+  t:value-ref
+  (match id
+    (0 (sequence c b body))
+    (_
       (let ((name u64 (m:child c id)) (init u64 (field (m:at c id) target)))
         (do
           (match (passes:dead (field b passes) id)
             (true unit)
             (false (bind-binder c b name (expression c b init))))
-          (bindings c b (m:next c id) body))))))
+          (bindings-in-scope c b (m:next c id) body))))))
 
 ; Append source-location digits without resetting the existing string.
 (base:function append-number ((out (pointer data:data)) (v u64)) unit
@@ -1007,10 +1217,12 @@
 ; Lower one checked expression and record its LLVM value under the syntax index.
 ; Resolved binder/function slots provide local references and direct call targets.
 (base:function expression ((c m:context) (b backend) (id u64)) t:value-ref
-  (match (passes:fold (field b passes) id)
-    ((known value)
-     (put b id (word (field b owner) (field (m:at c id) ty) value)))
-    ((unknown) (expression-unfolded c b id))))
+  (do
+    (debug-location c b id)
+    (match (passes:fold (field b passes) id)
+      ((known value)
+       (put b id (word (field b owner) (field (m:at c id) ty) value)))
+      ((unknown) (expression-unfolded c b id)))))
 
 (base:function expression-unfolded ((c m:context) (b backend) (id u64))
   t:value-ref
@@ -1497,13 +1709,16 @@
     (0 unit)
     (_
       (let
-        ((function t:value-ref (get b fn)) (owner llvm:session (field b owner)))
+        ((function t:value-ref (get b fn))
+         (owner llvm:session (field b owner))
+         (scoped backend (debug-function c b fn)))
         (do
           (entry owner function)
-          (parameters c b function (m:child c (check:signature c fn)) 0)
+          (debug-location c scoped fn)
+          (parameters c scoped function (m:child c (check:signature c fn)) 0)
           (tail-expression
             c
-            b
+            scoped
             fn
             (tail-storage-safe c (check:body c fn) 32)
             (check:body c fn))
@@ -1588,8 +1803,13 @@
       (true
         (let ((name data:data (data:empty (arena:allocator (field c memory)))))
           (do
-            (m:storage (data:assign-bytes (& name) (data:view "callback." 9)))
-            (m:storage (number:format-u64 site (& name)))
+            (m:storage
+              (data:assign-bytes
+                (& name)
+                (data:borrow (symbols:function-name c function))))
+            (m:storage (data:append (& name) 46))
+            (m:storage
+              (format:append-view (& name) (data:view "callback" 8) 0 8))
             (m:storage (data:append (& name) 0))
             (put
               b
@@ -1660,9 +1880,8 @@
     ((owner llvm:session (field b owner))
      (ty u64 (field (m:at c id) ty))
      (init u64 (check:constant-initializer c id))
-     (name data:data (data:empty (arena:allocator (field c memory)))))
+     (name data:data (symbols:global-name c id "v_")))
     (do
-      (m:storage (number:format-u64 id (& name)))
       (m:storage (data:append (& name) 0))
       (let
         ((global
@@ -1696,9 +1915,8 @@
           (51
             (let
               ((owner llvm:session (field b owner))
-               (name data:data (data:empty (arena:allocator (field c memory)))))
+               (name data:data (symbols:global-name c id "c_")))
               (do
-                (m:storage (number:format-u64 id (& name)))
                 (m:storage (data:append (& name) 0))
                 (let
                   ((global
@@ -1999,9 +2217,48 @@
    (main u64)
    (report bool)
    (optimized bool)
-   (remarks bool)) llvm:session
+   (remarks bool)
+   (debug bool)) llvm:session
   (let
     ((owner llvm:session (llvm:create "verona.core"))
+     (root-file
+       t:metadata-ref
+       (match debug
+         (true
+           (do
+             (llvm:debug-enable owner)
+             (ir:di-file
+               (field owner debug)
+               (m:source-path c 0)
+               (cstring:strlen (m:source-path c 0))
+               ""
+               0)))
+         (false (cast t:metadata-ref (target:null-pointer)))))
+     (compile-unit
+       t:metadata-ref
+       (match debug
+         (true
+           (ir:di-compile-unit
+             (field owner debug)
+             1
+             root-file
+             "verona"
+             6
+             0
+             ""
+             0
+             0
+             ""
+             0
+             1
+             0
+             0
+             0
+             ""
+             0
+             ""
+             0))
+         (false (cast t:metadata-ref (target:null-pointer)))))
      (b
        backend
        (backend
@@ -2009,7 +2266,10 @@
          (layout:values c (tuple-get (deref (field c items)) 1))
          (runtime c owner)
          (cabi:create c owner)
-         (passes:prepare c optimized remarks (passes:defaults)))))
+         (passes:prepare c optimized remarks (passes:defaults))
+         debug
+         compile-unit
+         (cast t:metadata-ref (target:null-pointer)))))
     (do
       (external-declarations c b all)
       (declarations c b all)
@@ -2040,6 +2300,9 @@
                    0)))
              (builder t:builder-ref (field owner builder)))
             (do
+              (ir:builder-debug-location-set
+                builder
+                (cast t:metadata-ref (target:null-pointer)))
               (entry owner function)
               (let
                 ((result
@@ -2099,6 +2362,7 @@
                       unit))))
               unit))))
       (cabi:destroy (field b abi))
+      (match debug (true (llvm:finalize-debug owner)) (false unit))
       owner)))
 
 (export build)

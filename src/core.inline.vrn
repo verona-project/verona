@@ -1,13 +1,11 @@
 (import base)
 (import core.model :as m)
+(import core.symbols :as symbols)
 (import llvm)
 (import llvm.types :as t)
 (import llvm.core :as ir)
 (import llvm.enums :as enum)
-(import allocator)
-(import arena)
 (import data)
-(import number)
 (import libc.string :as cstring)
 (import libc.constants :as constants)
 
@@ -96,9 +94,8 @@
           (direct-call fn (ir:next-use use)))))))
 
 (base:function remaining ((c m:context) (owner llvm:session) (fn u64)) bool
-  (let ((name data:data (data:empty (arena:allocator (field c memory)))))
+  (let ((name data:data (symbols:function-name c fn)))
     (do
-      (m:storage (number:format-u64 fn (& name)))
       (m:storage (data:append (& name) 0))
       (let
         ((value

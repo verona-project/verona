@@ -1471,7 +1471,7 @@
         (protocol-coverage c site (m:next c op) methods)))))
 
 (base:function protocol-methods
-  ((c m:context) (id u64) (protocol u64) (args u64)) u64
+  ((c m:context) (id u64) (protocol u64) (args u64) (instance u64)) u64
   (let
     ((head u64 (m:child c id))
      (name u64 (m:next c head))
@@ -1517,8 +1517,18 @@
             id
             (protocol-type-matches c (m:next c expected) types args ty)
             "protocol operation result type mismatch")
-          (m:typed-kind c id (node-protocol-method) ty protocol 0)
-          (match next (0 id) (_ (protocol-methods c next protocol args))))))))
+          ; Preserve the concrete instance for lowering: the protocol alone
+          ; cannot distinguish, for example, numeric i64 from numeric u8.
+          (m:typed-kind
+            c
+            id
+            (node-protocol-method)
+            ty
+            protocol
+            (base:convert instance))
+          (match next
+            (0 id)
+            (_ (protocol-methods c next protocol args instance))))))))
 
 (base:function protocol-argument-types ((c m:context) (id u64)) unit
   (match id
@@ -1587,7 +1597,7 @@
                           (let
                             ((last
                                u64
-                               (protocol-methods c methods protocol args)))
+                               (protocol-methods c methods protocol args id)))
                             (do (m:link c id methods) (m:link c last next))))))))))
             (false unit))
           (register-protocol-instances c next all))))))

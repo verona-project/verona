@@ -1,0 +1,193 @@
+(import base)
+(import core.model :as m)
+(import core.check :as check)
+(import core.format :as format)
+(import arena)
+(import data)
+(import libc.string :as cstring)
+
+; LLVM names use only alphanumeric bytes and dots. Escape every other source
+; byte, including underscore, so the spelling remains reversible and does not
+; require LLVM IR quoting for operators such as + or names containing -.
+(base:function identifier-byte ((value u8)) bool
+  (base:or-else
+    (base:and-then (>= value 48) (<= value 57))
+    (base:or-else
+      (base:and-then (>= value 65) (<= value 90))
+      (base:or-else (base:and-then (>= value 97) (<= value 122)) (== value 46)))))
+
+(base:function hex-digit ((value u8)) u8
+  (base:convert (match (< value 10) (true (+ value 48)) (false (+ value 87)))))
+
+(base:function append-identifier-byte ((out (pointer data:data)) (value u8))
+  unit
+  (match (identifier-byte value)
+    (true (m:storage (data:append out value)))
+    (false
+      (do
+        (m:storage (data:append out 95))
+        (m:storage (data:append out (hex-digit (base:convert (/ value 16)))))
+        (m:storage
+          (data:append
+            out
+            (hex-digit (base:convert (- value (* (/ value 16) 16))))))
+        unit))))
+
+(base:function append-identifier
+  ((out (pointer data:data)) (text data:view) (index u64)) unit
+  (match (>= index (field text length))
+    (true unit)
+    (false
+      (do
+        (append-identifier-byte
+          out
+          (deref (pointer-offset (field text bytes) index)))
+        (append-identifier out text (+ index 1))))))
+
+(base:function append-module ((c m:context) (out (pointer data:data)) (id u64))
+  unit
+  (let ((module m:module-info (m:file-info c id)))
+    (append-identifier
+      out
+      (data:view (field module name) (cstring:strlen (field module name)))
+      0)))
+
+(base:function declaration-name ((c m:context) (id u64)) data:view
+  (m:spelling c (m:next c (m:child c id))))
+
+(base:function append-declaration
+  ((c m:context) (out (pointer data:data)) (id u64)) unit
+  (do
+    (append-module c out (m:owner c id))
+    (m:storage (data:append out 46))
+    (append-identifier out (declaration-name c id) 0)))
+
+; Encode checked types structurally, using source module/type identities for
+; nominal descriptors rather than session-local descriptor indices.
+(base:function append-type ((c m:context) (out (pointer data:data)) (ty u64))
+  unit
+  (match ty
+    (1 (format:append out "unit"))
+    (2 (format:append out "bool"))
+    (3 (format:append out "i64"))
+    (4 (format:append out "i8"))
+    (5 (format:append out "i16"))
+    (6 (format:append out "i32"))
+    (7 (format:append out "u8"))
+    (8 (format:append out "u16"))
+    (9 (format:append out "u32"))
+    (10 (format:append out "u64"))
+    (11 (format:append out "ptr.u8"))
+    (12 (format:append out "f32"))
+    (13 (format:append out "f64"))
+    (14 (format:append out "void"))
+    (_
+      (match (m:descriptor-kind c ty)
+        (20 (append-nominal c out ty "product"))
+        (21 (append-nominal c out ty "sum"))
+        (22
+          (do
+            (format:append out "tuple")
+            (append-components c out (m:descriptor-components c ty))))
+        (23 (append-nominal c out ty "alias"))
+        (33 (append-nominal c out ty "opaque"))
+        (34
+          (do
+            (format:append out "ptr.")
+            (append-type c out (m:pointer-pointee c ty))))
+        (46
+          (do
+            (format:append out "fn")
+            (append-components c out (m:descriptor-components c ty))
+            (m:storage (data:append out 46))
+            (append-type c out (m:descriptor-target c ty))))
+        (49
+          (do
+            (format:append out "array.")
+            (append-type c out (m:array-element c ty))
+            (m:storage (data:append out 46))
+            (format:digits out (m:array-length c ty))))
+        (_
+          (do
+            (format:append out "descriptor.")
+            (format:digits out (m:descriptor-id ty))))))))
+
+(base:function append-nominal
+  ((c m:context) (out (pointer data:data)) (ty u64) (kind (pointer u8))) unit
+  (let ((id u64 (m:descriptor-id ty)))
+    (do
+      (format:append out kind)
+      (m:storage (data:append out 46))
+      (append-declaration c out id))))
+
+(base:function append-components
+  ((c m:context) (out (pointer data:data)) (id u64)) unit
+  (match id
+    (0 unit)
+    (_
+      (do
+        (m:storage (data:append out 46))
+        (append-type c out (field (m:at c id) ty))
+        (append-components c out (m:next c id))))))
+
+(base:function append-bindings
+  ((c m:context) (out (pointer data:data)) (id u64)) unit
+  (match id
+    (0 unit)
+    (_
+      (let ((v m:node (m:at c id)))
+        (do
+          (match (field v kind)
+            (42
+              (do
+                (m:storage (data:append out 46))
+                (append-type c out (field v ty))))
+            (_ unit))
+          (append-bindings c out (field v next)))))))
+
+(base:function protocol-arguments ((c m:context) (instance u64)) u64
+  (m:next c (m:child c (m:next c (m:child c instance)))))
+
+; Every checked callable has a stable, source-derived linkage name. Concrete
+; generic and protocol bodies include their semantic instance identity, so LLVM
+; never needs to invent a collision suffix.
+(base:function function-name ((c m:context) (fn u64)) data:data
+  (let
+    ((v m:node (m:at c fn))
+     (out data:data (data:empty (arena:allocator (field c memory)))))
+    (do
+      (format:append (& out) "vrn.")
+      (append-declaration c (& out) fn)
+      (match (field v kind)
+        (40
+          (do
+            (format:append (& out) "__g")
+            (append-bindings c (& out) (base:convert (field v value)))))
+        (19
+          (let ((instance u64 (base:convert (field v value))))
+            (do
+              (format:append (& out) "__impl.")
+              (append-declaration c (& out) (field v target))
+              (append-components c (& out) (protocol-arguments c instance)))))
+        (18
+          (do
+            (format:append (& out) "__impl.")
+            (append-declaration c (& out) (field v target))
+            (append-components c (& out) (m:child c (check:signature c fn)))))
+        (_ unit))
+      out)))
+
+; Globals use their declaration spelling too, with a compact category prefix
+; so they cannot collide with a callable of the same name.
+(base:function global-name ((c m:context) (id u64) (prefix (pointer u8)))
+  data:data
+  (let ((out data:data (data:empty (arena:allocator (field c memory)))))
+    (do
+      (format:append (& out) "vrn.")
+      (append-module c (& out) (m:owner c id))
+      (m:storage (data:append (& out) 46))
+      (format:append (& out) prefix)
+      (append-identifier (& out) (declaration-name c id) 0)
+      out)))
+
+(export function-name global-name)
