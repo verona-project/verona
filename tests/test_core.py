@@ -33,9 +33,13 @@ class CoreTests(unittest.TestCase):
         return f"(%function main () i64 {expression})"
 
     def test_emit_llvm_includes_source_debug_metadata(self):
-        source = """(%function main () i64
+        support = self.root / "support.vrn"
+        support.write_text("""(%export add-two)
+(%function add-two ((value i64)) i64 (%+-primitive-i64 value 2))""")
+        source = """(%import support :as s)
+(%function main () i64
   (let ((value i64 40))
-    (%+-primitive-i64 value 2)))"""
+    (s:add-two value)))"""
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         self.assertNotIn("!llvm.dbg.cu", emitted.stdout)
@@ -52,6 +56,8 @@ class CoreTests(unittest.TestCase):
                               capture_output=True, text=True, timeout=30)
         self.assertEqual(dump.returncode, 0, dump.stderr)
         self.assertIn(str(self.source), dump.stdout)
+        self.assertIn(str(support), dump.stdout)
+        self.assertIn('add-two', dump.stdout)
         self.assertRegex(dump.stdout, r'DW_AT_name\s+\("main"\)')
         self.assertRegex(dump.stdout, r'DW_AT_linkage_name\s+\("vrn\.input\.main"\)')
         self.assertRegex(dump.stdout, r'DW_AT_name\s+\("value"\)')
@@ -3491,7 +3497,7 @@ int main(int argc, char **argv) {
         emitted = self.run_core("emit-llvm", source)
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         # Calls are deliberately excluded from the initial CSE domain.
-        self.assertEqual(len(re.findall(r'call i64 @verona\.input\.square\b', emitted.stdout)), 2)
+        self.assertEqual(len(re.findall(r'call i64 @vrn\.input\.square\b', emitted.stdout)), 2)
 
         direct = """
 (%function helper ((value i64)) i64
