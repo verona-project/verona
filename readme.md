@@ -96,7 +96,9 @@ Compilation additionally accepts:
 - `-O0`, `-O1`, `-O2`, or `-O3` — select the optimization level;
 - `--cpu CPU` — select the LLVM target CPU;
 - `--features FEATURES` — select LLVM machine features;
-- `--library NAME` or `-l NAME` — link a native library;
+- `--library static|dynamic PACKAGE-ROOT` — import a Verona package from its
+  `src` child and link its managed artifact;
+- `--native-library static|dynamic NAME` or `-l NAME` — link a native library;
 - `--library-path DIRECTORY` or `-L DIRECTORY` — add a native library path; and
 - `--framework NAME` — link a framework on Darwin.
 
@@ -228,10 +230,16 @@ build/verona-project libraries
 groups its immediate library directories by name and available version. See
 `build/verona-project --help` for command usage.
 
+Verona package dependencies use separate, absolute roots: `VERONA_SOURCE_DIR`
+contains `NAME[-VERSION]/src`, while `VERONA_LIBRARY_DIR` contains the matching
+artifact directory. In a manifest, declare `(library NAME (version "...")
+(link static|dynamic))`; legacy `(library "NAME")` remains native linking.
+Use `native-library` for new explicit native dependencies.
+
 The output directory may be relative or absolute. Module and native-library
 paths are resolved relative to the manifest. Supported target options include
 `root`, repeatable `module-path`, `target`, `optimize`, `version`, `features`,
-`library`, `library-path`, and `framework`.
+`library`, `native-library`, `library-path`, and `framework`.
 
 Manifests describe individual artifacts rather than a dependency graph, so
 native dependencies must be built before the targets that link them.

@@ -5,6 +5,7 @@
 (import arena)
 (import data)
 (import error)
+(import core.format :as format)
 (import libc.string :as cstring)
 
 ; Arrays own their pointer storage and borrow their NUL-terminated strings.
@@ -13,9 +14,7 @@
 (base:type strings-array (tuple (pointer (pointer u8)) u64 u64 array:layout))
 
 (base:function strings-new ((backing allocator:backend)) strings-array
-  (strings-empty
-    (cast (pointer (pointer u8)) (m:empty-env))
-    (array:layout 8 8 backing)))
+  (strings-empty (cast (pointer (pointer u8)) (m:empty-env)) (array:layout 8 8 backing)))
 
 (base:function strings-at ((items strings-array) (index u64)) (pointer u8)
   (deref (pointer-offset (tuple-get items 0) index)))
@@ -25,17 +24,25 @@
   (product
     (libraries strings-array)
     (paths strings-array)
-    (frameworks strings-array)))
+    (frameworks strings-array)
+    (package-directories strings-array)
+    (package-names strings-array)
+    (package-kinds strings-array)))
 
 (base:type option-kind (sum (library) (search-path) (framework)))
 
 (base:function options-new ((backing allocator:backend)) options
-  (options (strings-new backing) (strings-new backing) (strings-new backing)))
+  (options
+    (strings-new backing)
+    (strings-new backing)
+    (strings-new backing)
+    (strings-new backing)
+    (strings-new backing)
+    (strings-new backing)))
 
 ; A caller must select one of the three owned option collections explicitly.
 ; This makes an invalid numeric routing value unrepresentable.
-(base:function add-option
-  ((owner (pointer options)) (kind option-kind) (value (pointer u8)))
+(base:function add-option ((owner (pointer options)) (kind option-kind) (value (pointer u8)))
   error:status
   (let
     ((v options (deref owner))
@@ -52,20 +59,50 @@
         (options
           (match kind ((library) items) (_ (field v libraries)))
           (match kind ((search-path) items) (_ (field v paths)))
-          (match kind ((framework) items) (_ (field v frameworks)))))
+          (match kind ((framework) items) (_ (field v frameworks)))
+          (field v package-directories)
+          (field v package-names)
+          (field v package-kinds)))
       status)))
+
+; Package entries are parallel, append-only arrays.  This preserves manifest
+; and CLI package declaration order while keeping native linker inputs distinct.
+(base:function add-package
+  ((owner (pointer options)) (directory (pointer u8)) (name (pointer u8)) (kind (pointer u8)))
+  error:status
+  (let
+    ((v options (deref owner))
+     (directories strings-array (field v package-directories))
+     (names strings-array (field v package-names))
+     (kinds strings-array (field v package-kinds))
+     (first error:status (strings-append (& directories) directory))
+     (second error:status (append-value (& names) first name))
+     (third error:status (append-value (& kinds) second kind)))
+    (do
+      (store
+        (deref owner)
+        (options (field v libraries) (field v paths) (field v frameworks) directories names kinds))
+      third)))
 
 (base:function options-destroy ((owner (pointer options))) unit
   (let
     ((v options (deref owner))
      (libraries strings-array (field v libraries))
      (paths strings-array (field v paths))
-     (frameworks strings-array (field v frameworks)))
+     (frameworks strings-array (field v frameworks))
+     (package-directories strings-array (field v package-directories))
+     (package-names strings-array (field v package-names))
+     (package-kinds strings-array (field v package-kinds)))
     (do
       (strings-destroy (& libraries))
       (strings-destroy (& paths))
       (strings-destroy (& frameworks))
-      (store (deref owner) (options libraries paths frameworks))
+      (strings-destroy (& package-directories))
+      (strings-destroy (& package-names))
+      (strings-destroy (& package-kinds))
+      (store
+        (deref owner)
+        (options libraries paths frameworks package-directories package-names package-kinds))
       unit)))
 
 #+darwin (base:function frameworks-supported () bool
@@ -76,8 +113,7 @@
 
 ; Retain the first allocation error and stop appending after it.
 (base:function append-value
-  ((args (pointer strings-array)) (status error:status) (value (pointer u8)))
-  error:status
+  ((args (pointer strings-array)) (status error:status) (value (pointer u8))) error:status
   (match status ((ok) (strings-append args value)) (reason reason)))
 
 (base:function append-pairs
@@ -93,9 +129,7 @@
        (false
          (let
            ((first error:status (strings-append args flag))
-            (second
-              error:status
-              (append-value args first (strings-at items index))))
+            (second error:status (append-value args first (strings-at items index))))
            (append-pairs args second flag items (+ index 1))))))
     (reason reason)))
 
@@ -110,9 +144,7 @@
      (match (== index (strings-length items))
        (true (error:success))
        (false
-         (let
-           ((name (pointer u8) (strings-at items index))
-            (length u64 (cstring:strlen name)))
+         (let ((name (pointer u8) (strings-at items index)) (length u64 (cstring:strlen name)))
            (match (allocator:checked-add-size length 3)
              ((tuple false _) (error:too-large))
              ((tuple valid size)
@@ -122,10 +154,7 @@
                    (do
                      (store (deref (data:bytes text)) 45)
                      (store (deref (pointer-offset (data:bytes text) 1)) 108)
-                     (allocator:copy-bytes
-                       (pointer-offset (data:bytes text) 2)
-                       name
-                       (+ length 1))
+                     (allocator:copy-bytes (pointer-offset (data:bytes text) 2) name (+ length 1))
                      (append-libraries
                        args
                        memory
@@ -133,6 +162,61 @@
                        items
                        (+ index 1))))
                   (reason reason)))))))))
+    (reason reason)))
+
+(base:function append-packages
+  ((args (pointer strings-array))
+   (memory (pointer arena:arena))
+   (status error:status)
+   (directories strings-array)
+   (names strings-array)
+   (kinds strings-array)
+   (platform (pointer u8))
+   (index u64)) error:status
+  (match status
+    ((ok)
+     (match (== index (strings-length directories))
+       (true (error:success))
+       (false
+         (let
+           ((directory (pointer u8) (strings-at directories index))
+            (name (pointer u8) (strings-at names index))
+            (kind (pointer u8) (strings-at kinds index))
+            (artifact data:data (data:empty (arena:allocator memory)))
+            (runtime data:data (data:empty (arena:allocator memory))))
+           (do
+             (format:append (& artifact) directory)
+             (match (== (deref (pointer-offset directory (- (cstring:strlen directory) 1))) 47)
+               (true unit)
+               (false (format:append (& artifact) "/")))
+             (format:append (& artifact) "lib")
+             (format:append (& artifact) name)
+             (format:append
+               (& artifact)
+               (match (cstring:strcmp kind "static")
+                 (0 ".a")
+                 (_ (match (cstring:strcmp platform "darwin") (0 ".dylib") (_ ".so")))))
+             (m:storage (data:append (& artifact) 0))
+             (let ((linked error:status (strings-append args (data:bytes artifact))))
+               (match (cstring:strcmp kind "static")
+                 (0
+                   (append-packages args memory linked directories names kinds platform (+ index 1)))
+                 (_
+                   (do
+                     (format:append (& runtime) "-Wl,-rpath,")
+                     (format:append (& runtime) directory)
+                     (m:storage (data:append (& runtime) 0))
+                     (append-packages
+                       args
+                       memory
+                       (match linked
+                         ((ok) (strings-append args (data:bytes runtime)))
+                         (reason reason))
+                       directories
+                       names
+                       kinds
+                       platform
+                       (+ index 1)))))))))))
     (reason reason)))
 
 ; Build the reference driver's grouped argv: object, paths, libraries, frameworks,
@@ -155,20 +239,22 @@
       (let
         ((start error:status (strings-append args tool))
          (object error:status (append-value args start input))
-         (paths
+         (paths error:status (append-pairs args object "-L" (field config paths) 0))
+         (libraries error:status (append-libraries args memory paths (field config libraries) 0))
+         (packages
            error:status
-           (append-pairs args object "-L" (field config paths) 0))
-         (libraries
-           error:status
-           (append-libraries args memory paths (field config libraries) 0))
+           (append-packages
+             args
+             memory
+             libraries
+             (field config package-directories)
+             (field config package-names)
+             (field config package-kinds)
+             platform
+             0))
          (frameworks
            error:status
-           (append-pairs
-             args
-             libraries
-             "-framework"
-             (field config frameworks)
-             0))
+           (append-pairs args packages "-framework" (field config frameworks) 0))
          (flag error:status (append-value args frameworks "-o"))
          (result error:status (append-value args flag output)))
         (append-value args result (cast (pointer u8) (m:empty-env)))))))
@@ -204,14 +290,7 @@
           (let
             ((status
                error:status
-               (build-arguments-for
-                 args
-                 memory
-                 tool
-                 input
-                 output
-                 config
-                 platform)))
+               (build-arguments-for args memory tool input output config platform)))
             (match status
               ((ok)
                ; Keep TOOL as argv[0], then the platform flag, before the object.
@@ -222,9 +301,7 @@
                       (shift-arguments (deref args) count)
                       (store
                         (deref (pointer-offset (tuple-get (deref args) 0) 1))
-                        (match (cstring:strcmp platform "darwin")
-                          (0 "-dynamiclib")
-                          (_ "-shared")))
+                        (match (cstring:strcmp platform "darwin") (0 "-dynamiclib") (_ "-shared")))
                       (error:success)))
                    (reason reason))))
               (reason reason))))
@@ -235,9 +312,7 @@
     (false unit)
     (true
       (do
-        (store
-          (deref (pointer-offset (tuple-get args 0) index))
-          (strings-at args (- index 1)))
+        (store (deref (pointer-offset (tuple-get args 0) index)) (strings-at args (- index 1)))
         (shift-arguments args (- index 1))))))
 
 (base:function native-platform () (pointer u8)
@@ -260,15 +335,7 @@
    (output (pointer u8))
    (config options)
    (kind (pointer u8))) error:status
-  (artifact-arguments-for
-    args
-    memory
-    tool
-    input
-    output
-    config
-    kind
-    (native-platform)))
+  (artifact-arguments-for args memory tool input output config kind (native-platform)))
 
 (export
   artifact-arguments-for
@@ -278,6 +345,7 @@
   options-new
   options-destroy
   add-option
+  add-package
   frameworks-supported
   strings-array
   strings-new

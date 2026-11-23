@@ -12,6 +12,7 @@
 (import core.configuration :as config)
 (import core.sexpr :as syntax)
 (import core.link :as link)
+(import core.package :as package)
 (import libc.string :as cstring)
 (import libc.stdio :as stdio)
 (import libc.filesystem :as fs)
@@ -46,16 +47,15 @@
     (links link:options)
     (features (pointer void))))
 
+(base:type package-spec
+  (product (version (pointer u8)) (kind (pointer u8)) (has-version bool) (has-kind bool)))
+
 (base:function copy ((c m:context) (value data:view)) (pointer u8)
   (config:copy (field c memory) value))
 
 (base:function text ((c m:context) (id u64)) (pointer u8)
   (do
-    (m:require
-      c
-      id
-      (== (field (m:at c id) kind) 25)
-      "build option requires a data string")
+    (m:require c id (== (field (m:at c id) kind) 25) "build option requires a data string")
     (let
       ((out data:data (data:empty (arena:allocator (field c memory))))
        (v m:node (m:at c id))
@@ -84,13 +84,10 @@
         (base:not (m:is c id "true"))
         (base:not (m:is c id "false"))
         (base:not (m:is c id "unit"))
-        (==
-          (check:name-colon c id)
-          (+ (field (m:at c id) start) (field (m:at c id) length))))
+        (== (check:name-colon c id) (+ (field (m:at c id) start) (field (m:at c id) length))))
       "build name must be an unqualified name")))
 
-(base:function join ((c m:context) (directory (pointer u8)) (path (pointer u8)))
-  (pointer u8)
+(base:function join ((c m:context) (directory (pointer u8)) (path (pointer u8))) (pointer u8)
   (match (deref path)
     (47 path)
     (_
@@ -109,8 +106,7 @@
           (m:storage (data:append (& out) 0))
           (data:bytes out))))))
 
-(base:function cwd-buffer
-  ((c m:context) (out (pointer data:data)) (capacity u64)) (pointer u8)
+(base:function cwd-buffer ((c m:context) (out (pointer data:data)) (capacity u64)) (pointer u8)
   (do
     (m:storage (data:resize out capacity))
     (let ((raw (pointer u8) (getcwd (data:bytes (deref out)) capacity)))
@@ -128,11 +124,9 @@
                   (cwd-buffer c out next))))))))))
 
 (base:function cwd ((c m:context)) (pointer u8)
-  (let ((out data:data (data:empty (arena:allocator (field c memory)))))
-    (cwd-buffer c (& out) 256)))
+  (let ((out data:data (data:empty (arena:allocator (field c memory))))) (cwd-buffer c (& out) 256)))
 
-(base:function empty-target ((c m:context) (name u64) (kind (pointer u8)))
-  target
+(base:function empty-target ((c m:context) (name u64) (kind (pointer u8))) target
   (target
     name
     kind
@@ -181,11 +175,29 @@
           (field v links)))
       unit)))
 
-(base:function add-link
-  ((out (pointer target)) (kind link:option-kind) (text (pointer u8))) unit
+(base:function add-link ((out (pointer target)) (kind link:option-kind) (text (pointer u8))) unit
   (let ((v target (deref out)) (links link:options (field v links)))
     (do
       (m:storage (link:add-option (& links) kind text))
+      (store
+        (deref out)
+        (target
+          (field v name)
+          (field v kind)
+          (field v root)
+          (field v triple)
+          (field v optimization)
+          (field v version)
+          (field v features)
+          (field v paths)
+          links))
+      unit)))
+
+(base:function add-package
+  ((out (pointer target)) (directory (pointer u8)) (name (pointer u8)) (kind (pointer u8))) unit
+  (let ((v target (deref out)) (links link:options (field v links)))
+    (do
+      (m:storage (link:add-package (& links) directory name kind))
       (store
         (deref out)
         (target
@@ -209,6 +221,91 @@
       "build option requires exactly one argument")
     (m:next c (m:child c option))))
 
+(base:function package-options ((c m:context) (id u64) (current package-spec)) package-spec
+  (match id
+    (0 current)
+    (_
+      (let ((head u64 (m:child c id)))
+        (do
+          (m:require
+            c
+            id
+            (base:and (== (field (m:at c id) kind) 1) (> head 0))
+            "package library option must be an S-expression")
+          (name c head)
+          (let
+            ((next
+               package-spec
+               (base:cond
+                 ((m:is c head "version")
+                  (let ((value u64 (one c id)))
+                    (do
+                      (m:require
+                        c
+                        id
+                        (base:not (field current has-version))
+                        "duplicate package version")
+                      (m:require
+                        c
+                        value
+                        (single-line (text c value))
+                        "package version requires a non-empty single-line string")
+                      (package-spec
+                        (text c value)
+                        (field current kind)
+                        true
+                        (field current has-kind)))))
+                 ((m:is c head "link")
+                  (let ((value u64 (one c id)))
+                    (do
+                      (m:require c id (base:not (field current has-kind)) "duplicate package link")
+                      (m:require
+                        c
+                        value
+                        (base:or (m:is c value "static") (m:is c value "dynamic"))
+                        "package link requires static or dynamic")
+                      (package-spec
+                        (field current version)
+                        (match (m:is c value "static") (true "static") (false "dynamic"))
+                        (field current has-version)
+                        true))))
+                 (true (do (m:error c id "unknown package library option") current)))))
+            (package-options c (m:next c id) next)))))))
+
+(base:function package-library ((c m:context) (id u64) (out (pointer target))) unit
+  (let ((name-id u64 (m:next c (m:child c id))))
+    (do
+      (name c name-id)
+      (let
+        ((spec package-spec (package-options c (m:next c name-id) (package-spec "" "" false false))))
+        (do
+          (m:require c id (field spec has-kind) "package library requires a link option")
+          (let
+            ((name (pointer u8) (copy c (m:spelling c name-id)))
+             (selected (pointer u8) (package:named c name (field spec version)))
+             (source (pointer u8) (package:source-root c selected)))
+            (do
+              (add-path out source)
+              ; Static-library targets compile source imports but deliberately
+              ; do not link transitive package artifacts.
+              (match (config:equal (field (deref out) kind) "static-library")
+                (true unit)
+                (false (add-package out (package:artifact-root c selected) name (field spec kind))))
+              unit)))))))
+
+(base:function native-library ((c m:context) (id u64) (out (pointer target))) unit
+  (let ((name-id u64 (m:next c (m:child c id))))
+    (let
+      ((spec package-spec (package-options c (m:next c name-id) (package-spec "" "" false false))))
+      (do
+        (m:require c id (field spec has-kind) "native library requires a link option")
+        (m:require
+          c
+          id
+          (base:not (field spec has-version))
+          "native library does not accept a version")
+        (add-link out (library) (text c name-id))))))
+
 (base:function unique ((c m:context) (option u64) (old u64)) unit
   (m:require c option (== old 0) "duplicate build option"))
 
@@ -221,37 +318,23 @@
 (base:function feature-names ((c m:context) (id u64)) unit
   (match id (0 unit) (_ (do (name c id) (feature-names c (m:next c id))))))
 
-(base:function optimization-digits
-  ((c m:context) (id u64) (index u64) (value u64)) u64
+(base:function optimization-digits ((c m:context) (id u64) (index u64) (value u64)) u64
   (match (== index (field (m:spelling c id) length))
     (true value)
     (false
       (let
-        ((b
-           u64
-           (base:convert
-             (deref (pointer-offset (field (m:spelling c id) bytes) index))))
+        ((b u64 (base:convert (deref (pointer-offset (field (m:spelling c id) bytes) index))))
          (next u64 (+ (* value 10) (- b 48))))
         (do
-          (m:require
-            c
-            id
-            (<= next 3)
-            "optimize must be an integer from 0 through 3")
+          (m:require c id (<= next 3) "optimize must be an integer from 0 through 3")
           (optimization-digits c id (+ index 1) next))))))
 
 (base:function optimization ((c m:context) (id u64)) u64
   (do
-    (m:require
-      c
-      id
-      (check:integer-node c id)
-      "optimize must be an integer from 0 through 3")
+    (m:require c id (check:integer-node c id) "optimize must be an integer from 0 through 3")
     (let
       ((first u8 (deref (field (m:spelling c id) bytes)))
-       (value
-         u64
-         (optimization-digits c id (match first (43 1) (45 1) (_ 0)) 0)))
+       (value u64 (optimization-digits c id (match first (43 1) (45 1) (_ 0)) 0)))
       (do
         (m:require
           c
@@ -260,18 +343,13 @@
           "optimize must be an integer from 0 through 3")
         value))))
 
-(base:function options
-  ((c m:context) (id u64) (directory (pointer u8)) (out (pointer target))) unit
+(base:function options ((c m:context) (id u64) (directory (pointer u8)) (out (pointer target))) unit
   (match id
     (0 unit)
     (_
       (let ((head u64 (m:child c id)))
         (do
-          (m:require
-            c
-            id
-            (== (field (m:at c id) kind) 1)
-            "build option must be an S-expression")
+          (m:require c id (== (field (m:at c id) kind) 1) "build option must be an S-expression")
           (m:require c id (> head 0) "build option must not be empty")
           (name c head)
           (base:cond
@@ -294,9 +372,7 @@
                  (m:require
                    c
                    value
-                   (base:or
-                     (m:is c value "native")
-                     (== (field (m:at c value) kind) 25))
+                   (base:or (m:is c value "native") (== (field (m:at c value) kind) 25))
                    "target requires native or a target-triple string")
                  (set-value out 1 value)
                  unit)))
@@ -321,27 +397,23 @@
             ((m:is c head "features")
              (do
                (unique c id (field (deref out) features))
-               (m:require
-                 c
-                 id
-                 (> (m:next c head) 0)
-                 "features requires at least one feature name")
+               (m:require c id (> (m:next c head) 0) "features requires at least one feature name")
                (feature-names c (m:next c head))
                (set-value out 4 id)
                unit))
-            ((m:is c head "module-path")
-             (add-path out (join c directory (text c (one c id)))))
+            ((m:is c head "module-path") (add-path out (join c directory (text c (one c id)))))
             ((m:is c head "library-path")
              (add-link out (search-path) (join c directory (text c (one c id)))))
             ((m:is c head "library")
-             (add-link out (library) (text c (one c id))))
-            ((m:is c head "framework")
-             (add-link out (framework) (text c (one c id))))
+             (match (== (field (m:at c (m:next c head)) kind) 25)
+               (true (add-link out (library) (text c (one c id))))
+               (false (package-library c id out))))
+            ((m:is c head "native-library") (native-library c id out))
+            ((m:is c head "framework") (add-link out (framework) (text c (one c id))))
             (true (m:error c id "unknown build option")))
           (options c (m:next c id) directory out))))))
 
-(base:function parse-target ((c m:context) (id u64) (directory (pointer u8)))
-  target
+(base:function parse-target ((c m:context) (id u64) (directory (pointer u8))) target
   (let ((head u64 (m:child c id)) (name-id u64 (m:next c head)))
     (do
       (m:require
@@ -360,21 +432,11 @@
              (true (do (m:error c id "unknown top-level build form") ""))))
          (out target (empty-target c name-id kind)))
         (do
-          (m:require
-            c
-            id
-            (> name-id 0)
-            "artifact declaration requires a target name")
+          (m:require c id (> name-id 0) "artifact declaration requires a target name")
           (name c name-id)
           (options c (m:next c name-id) directory (& out))
-          (m:require
-            c
-            id
-            (> (field out root) 0)
-            "build target requires exactly one root option")
-          (match (modules:paths-length (field out paths))
-            (0 (add-path (& out) directory))
-            (_ unit))
+          (m:require c id (> (field out root) 0) "build target requires exactly one root option")
+          (match (modules:paths-length (field out paths)) (0 (add-path (& out) directory)) (_ unit))
           out)))))
 
 (base:function duplicate ((c m:context) (current u64) (id u64)) unit
@@ -385,8 +447,7 @@
         (m:require
           c
           current
-          (base:not
-            (m:same c (m:next c (m:child c current)) (m:next c (m:child c id))))
+          (base:not (m:same c (m:next c (m:child c current)) (m:next c (m:child c id))))
           "duplicate build target")
         (duplicate c current (m:next c id))))))
 
@@ -409,34 +470,22 @@
           (select c (m:next c id) all directory wanted out))))))
 
 (base:function root-path
-  ((c m:context) (paths modules:paths-array) (module (pointer u8)) (index u64))
-  (pointer u8)
+  ((c m:context) (paths modules:paths-array) (module (pointer u8)) (index u64)) (pointer u8)
   (do
-    (m:require
-      c
-      0
-      (< index (modules:paths-length paths))
-      "cannot find root module")
+    (m:require c 0 (< index (modules:paths-length paths)) "cannot find root module")
     (let ((name data:data (data:empty (arena:allocator (field c memory)))))
       (do
-        (modules:append-bytes
-          (& name)
-          (data:view module (cstring:strlen module)))
+        (modules:append-bytes (& name) (data:view module (cstring:strlen module)))
         (modules:append-bytes (& name) (data:view ".vrn" 4))
         (m:storage (data:append (& name) 0))
         (let
           ((path
              (pointer u8)
-             (join
-               c
-               (deref (pointer-offset (tuple-get paths 0) index))
-               (data:bytes name))))
-          (match (modules:access path 0)
-            (0 path)
-            (_ (root-path c paths module (+ index 1)))))))))
+             (join c (deref (pointer-offset (tuple-get paths 0) index)) (data:bytes name))))
+          (match (modules:access path 0) (0 path) (_ (root-path c paths module (+ index 1)))))))))
 
-(base:function feature-copy
-  ((c m:context) (head (pointer void)) (out (pointer (pointer void)))) unit
+(base:function feature-copy ((c m:context) (head (pointer void)) (out (pointer (pointer void))))
+  unit
   (match (base:is-null head)
     (true unit)
     (false
@@ -445,8 +494,7 @@
           (config:add-feature (field c memory) out (field v name))
           (feature-copy c (field v next) out))))))
 
-(base:function package-features
-  ((c m:context) (id u64) (out (pointer (pointer void)))) unit
+(base:function package-features ((c m:context) (id u64) (out (pointer (pointer void)))) unit
   (match id
     (0 unit)
     (_
@@ -463,23 +511,18 @@
     (true ".so")))
 
 ; Mkdir each prefix, accepting existing directories but never existing files.
-(base:function directories
-  ((c m:context) (path (pointer u8)) (index u64) (end u64)) unit
+(base:function directories ((c m:context) (path (pointer u8)) (index u64) (end u64)) unit
   (match (> index end)
     (true unit)
     (false
       (do
-        (match
-          (base:or
-            (== index end)
-            (== (deref (pointer-offset path index)) (cast u8 47)))
+        (match (base:or (== index end) (== (deref (pointer-offset path index)) (cast u8 47)))
           (true
             (let ((prefix (pointer u8) (copy c (data:view path index))))
               (match (fs:mkdir prefix 511)
                 (0 unit)
                 (_
-                  (let
-                    ((dir (pointer types:directory-stream) (fs:opendir prefix)))
+                  (let ((dir (pointer types:directory-stream) (fs:opendir prefix)))
                     (do
                       (match (base:is-null (cast (pointer void) dir))
                         (true (m:fatal "cannot create output directory"))
@@ -500,14 +543,7 @@
      (errors u64 0)
      (c
        m:context
-       (m:context
-         "verona.build"
-         (data:view "" 0)
-         (& items)
-         memory
-         (& errors)
-         (m:empty-env)
-         0))
+       (m:context "verona.build" (data:view "" 0) (& items) memory (& errors) (m:empty-env) 0))
      (directory (pointer u8) (cwd c))
      (manifest (pointer u8) (join c directory "verona.build"))
      (stream (pointer types:file-stream) (stdio:fopen manifest "rb")))
@@ -521,14 +557,7 @@
       (let
         ((c
            m:context
-           (m:context
-             manifest
-             (data:borrow input)
-             (& items)
-             memory
-             (& errors)
-             (m:empty-env)
-             0))
+           (m:context manifest (data:borrow input) (& items) memory (& errors) (m:empty-env) 0))
          (forms u64 (reader:read c))
          (chosen target (empty-target c 0 ""))
          (extra (pointer void) (m:empty-env)))
@@ -536,19 +565,13 @@
           (select c forms forms directory wanted (& chosen))
           (m:require c 0 (> (field chosen name) 0) "unknown build target")
           (feature-copy c cli-features (& extra))
-          (package-features
-            c
-            (m:next c (m:child c (field chosen features)))
-            (& extra))
+          (package-features c (m:next c (m:child c (field chosen features))) (& extra))
           (let
             ((triple
                (pointer u8)
                (match (field chosen triple)
                  (0 "native")
-                 (id
-                   (match (m:is c id "native")
-                     (true "native")
-                     (false (text c id))))))
+                 (id (match (m:is c id "native") (true "native") (false (text c id))))))
              (normalized
                unit
                (match (field chosen triple)
@@ -576,28 +599,17 @@
                (pointer u8)
                (match (field chosen optimization)
                  (0 "-O0")
-                 (id
-                   (match (optimization c id)
-                     (0 "-O0")
-                     (1 "-O1")
-                     (2 "-O2")
-                     (_ "-O3"))))))
+                 (id (match (optimization c id) (0 "-O0") (1 "-O1") (2 "-O2") (_ "-O3"))))))
             (do
               (match (config:equal (field chosen kind) "executable")
                 (true unit)
                 (false (modules:append-bytes (& out) (data:view "lib" 3))))
               (modules:append-bytes (& out) (m:spelling c (field chosen name)))
               (let ((ending (pointer u8) (suffix (field chosen kind) os)))
-                (modules:append-bytes
-                  (& out)
-                  (data:view ending (cstring:strlen ending))))
+                (modules:append-bytes (& out) (data:view ending (cstring:strlen ending))))
               (m:storage (data:append (& out) 0))
               (request
-                (root-path
-                  c
-                  (field chosen paths)
-                  (copy c (m:spelling c (field chosen root)))
-                  0)
+                (root-path c (field chosen paths) (copy c (m:spelling c (field chosen root))) 0)
                 (join c folder (data:bytes out))
                 (field chosen kind)
                 level

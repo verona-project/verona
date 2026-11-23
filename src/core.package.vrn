@@ -1,0 +1,155 @@
+(import base)
+(import arena)
+(import data)
+(import core.model :as m)
+(import core.modules :as modules)
+(import core.format :as format)
+(import libc.filesystem :as fs)
+(import libc.process :as process)
+(import libc.string :as cstring)
+(import libc.types :as types)
+
+; Verona package sources and installed artifacts deliberately use separate
+; roots.  Neither root is a native C-library search path.
+(base:function join ((c m:context) (left (pointer u8)) (right (pointer u8))) (pointer u8)
+  (let
+    ((out data:data (data:empty (arena:allocator (field c memory))))
+     (length u64 (cstring:strlen left)))
+    (do
+      (modules:append-bytes (& out) (data:view left length))
+      (match
+        (base:and-then (> length 0) (== (deref (pointer-offset left (- length 1))) (cast u8 47)))
+        (true unit)
+        (false (m:storage (data:append (& out) 47))))
+      (modules:append-bytes (& out) (data:view right (cstring:strlen right)))
+      (m:storage (data:append (& out) 0))
+      (data:bytes out))))
+
+(base:function directory ((path (pointer u8)) (message (pointer u8))) (pointer u8)
+  (match
+    (base:or-else
+      (base:or-else (base:is-null (cast (pointer void) path)) (== (cstring:strlen path) 0))
+      (base:not (== (deref path) 47)))
+    (true (do (m:fatal message) ""))
+    (false
+      (let ((stream (pointer types:directory-stream) (fs:opendir path)))
+        (match (base:is-null (cast (pointer void) stream))
+          (true (do (m:fatal message) ""))
+          (false (do (fs:closedir stream) path)))))))
+
+(base:function source-directory () (pointer u8)
+  (directory
+    (process:getenv "VERONA_SOURCE_DIR")
+    "VERONA_SOURCE_DIR must name an accessible absolute directory"))
+
+(base:function library-directory () (pointer u8)
+  (directory
+    (process:getenv "VERONA_LIBRARY_DIR")
+    "VERONA_LIBRARY_DIR must name an accessible absolute directory"))
+
+(base:function source-root ((c m:context) (package (pointer u8))) (pointer u8)
+  (directory
+    (join c (join c (source-directory) package) "src")
+    "Verona package source root must name an accessible absolute directory"))
+
+(base:function artifact-root ((c m:context) (package (pointer u8))) (pointer u8)
+  (directory
+    (join c (library-directory) package)
+    "Verona package artifact root must name an accessible absolute directory"))
+
+(base:function package-name ((path (pointer u8)) (index u64) (last u64)) (pointer u8)
+  (match (== (deref (pointer-offset path index)) 0)
+    (true (pointer-offset path last))
+    (false
+      (package-name
+        path
+        (+ index 1)
+        (match (== (deref (pointer-offset path index)) 47) (true (+ index 1)) (_ last))))))
+
+; CLI package roots encode an optional version in their directory name.  A
+; version begins at the first dash followed by an ASCII digit; ordinary dashed
+; package names remain intact.
+(base:function library-name ((name (pointer u8)) (index u64)) (pointer u8)
+  (let ((current u8 (deref (pointer-offset name index))))
+    (match current
+      (0 name)
+      (45
+        (let ((next u8 (deref (pointer-offset name (+ index 1)))))
+          (match (base:and (>= next (cast u8 48)) (<= next (cast u8 57)))
+            (true (do (store (deref (pointer-offset name index)) 0) name))
+            (false (library-name name (+ index 1))))))
+      (_ (library-name name (+ index 1))))))
+
+(base:function named ((c m:context) (name (pointer u8)) (version (pointer u8))) (pointer u8)
+  (match (== (cstring:strlen version) 0)
+    (true name)
+    (false
+      (let ((out data:data (data:empty (arena:allocator (field c memory)))))
+        (do
+          (modules:append-bytes (& out) (data:view name (cstring:strlen name)))
+          (m:storage (data:append (& out) 45))
+          (modules:append-bytes (& out) (data:view version (cstring:strlen version)))
+          (m:storage (data:append (& out) 0))
+          (data:bytes out))))))
+
+; Command-line parsing has an invocation arena but no diagnostic tape.  Keep
+; the same package-root checks available there without creating fake syntax.
+(base:function join-in ((memory (pointer arena:arena)) (left (pointer u8)) (right (pointer u8)))
+  (pointer u8)
+  (let ((out data:data (data:empty (arena:allocator memory))) (length u64 (cstring:strlen left)))
+    (do
+      (m:storage (data:assign-bytes (& out) (data:view left length)))
+      (match
+        (base:and-then (> length 0) (== (deref (pointer-offset left (- length 1))) (cast u8 47)))
+        (true unit)
+        (false (m:storage (data:append (& out) 47))))
+      (format:append (& out) right)
+      (m:storage (data:append (& out) 0))
+      (data:bytes out))))
+
+(base:function directory-in ((path (pointer u8)) (message (pointer u8))) (pointer u8)
+  (match
+    (base:or-else
+      (base:or-else (base:is-null (cast (pointer void) path)) (== (cstring:strlen path) 0))
+      (base:not (== (deref path) 47)))
+    (true (do (m:fatal message) ""))
+    (false
+      (let ((stream (pointer types:directory-stream) (fs:opendir path)))
+        (match (base:is-null (cast (pointer void) stream))
+          (true (do (m:fatal message) ""))
+          (false (do (fs:closedir stream) path)))))))
+
+(base:function cli-source-root-in ((memory (pointer arena:arena)) (root (pointer u8))) (pointer u8)
+  (do
+    (directory-in
+      (process:getenv "VERONA_SOURCE_DIR")
+      "VERONA_SOURCE_DIR must name an accessible absolute directory")
+    (directory-in
+      (join-in memory root "src")
+      "Verona package root must name an accessible absolute directory with src")
+    (join-in memory root "src")))
+
+(base:function cli-artifact-root-in ((memory (pointer arena:arena)) (root (pointer u8)))
+  (pointer u8)
+  (let
+    ((library
+       (pointer u8)
+       (directory-in
+         (process:getenv "VERONA_LIBRARY_DIR")
+         "VERONA_LIBRARY_DIR must name an accessible absolute directory")))
+    (directory-in
+      (join-in memory library (package-name root 0 0))
+      "Verona package artifact root must name an accessible absolute directory")))
+
+(export
+  join
+  directory
+  source-directory
+  library-directory
+  source-root
+  artifact-root
+  package-name
+  library-name
+  named
+  cli-source-root-in
+  cli-artifact-root-in)

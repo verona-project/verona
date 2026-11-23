@@ -1,0 +1,287 @@
+#+TITLE: Verona Build Manifest Manual
+#+DATE: 2026-11-15
+#+STARTUP: overview
+
+This manual specifies the =verona.build= file consumed by =verona build=.  A
+manifest describes one or more independent native artifacts.  It is data read
+by the compiler, not Verona source code: declarations are not expanded or
+evaluated.
+
+* Quick start
+
+Place =verona.build= beside the source tree and select a declared target:
+
+#+begin_src lisp
+(executable hello
+  (root hello)
+  (module-path "src")
+  (module-path "../base/src")
+  (version "0.1.0")
+  (optimize 2))
+#+end_src
+
+With =src/hello.vrn= as the root module, build it from the directory holding
+the manifest:
+
+#+begin_src sh
+verona build hello build
+#+end_src
+
+The command prints the resulting path, here =build/hello=.  The third argument
+is an output *directory*, not the name of the output file.
+
+* Invocation and location
+
+The complete command syntax is:
+
+#+begin_example
+verona build TARGET OUTPUT-DIRECTORY [--feature NAME ...]
+#+end_example
+
+=verona= always reads a file named =verona.build= in its current working
+directory.  It does not search parent directories and there is no command-line
+option to name another manifest.  Run the command from the manifest directory
+or arrange for the current directory accordingly.
+
+=TARGET= is the target name declared in the manifest.  =OUTPUT-DIRECTORY= may
+be relative or absolute.  Missing directory components are created.  The only
+build-command option is repeatable =--feature NAME=; every name must be
+nonempty.  Target, optimization, paths, native links, and artifact kind come
+from the manifest rather than command-line flags.
+
+* File shape
+
+A manifest is a sequence of S-expressions.  Each top-level expression is one
+artifact declaration:
+
+#+begin_src lisp
+(KIND TARGET-NAME OPTION...)
+#+end_src
+
+=KIND= is one of:
+
+| Kind | Artifact name |
+|------+---------------|
+| =executable= | =TARGET-NAME= |
+| =static-library= | =libTARGET-NAME.a= |
+| =shared-library= | =libTARGET-NAME.so= on Linux, =libTARGET-NAME.dylib= on Darwin |
+
+The target name is an unqualified Verona name.  It identifies the target on
+the command line and becomes part of its output filename.  Target names must
+be unique, and every declaration in the file is parsed and validated—even when
+a different target was requested.
+
+The reader accepts the ordinary manifest S-expression syntax, including
+double-quoted data strings and =;= line comments.  The manifest is deliberately
+non-evaluating: arbitrary Verona forms, macros, and side effects are not a
+configuration mechanism and are rejected as unknown top-level forms.
+
+* Required option: root module
+
+Every target must contain exactly one root option:
+
+#+begin_src lisp
+(root dotted.module.name)
+#+end_src
+
+The value is a valid dotted module name, not a filename and not a string.  The
+compiler finds it as =dotted.module.name.vrn= in the module paths, in their
+declared order.  For example, =(root app.main)= with =(module-path "src")=
+selects =src/app.main.vrn=.
+
+* Target options
+
+Options are S-expressions within an artifact declaration.  Except where noted,
+an option has exactly one value.  Options not listed here are errors.
+
+| Option | Value | Repeatable | Meaning |
+|--------+-------+------------+---------|
+| =root= | dotted module name | no; required | Module containing the build root. |
+| =target= | =native= or a string target triple | no | Compilation target; default =native=. |
+| =optimize= | integer 0 through 3 | no | Optimization level; default 0. |
+| =version= | nonempty, single-line string | no | Package/version metadata. |
+| =features= | one or more feature names | no | Enables package reader features. |
+| =module-path= | string path | yes | Adds a module-search directory. |
+| =library-path= | string path | yes | Adds a native-library search directory. |
+| =library= | package name and clauses, or legacy string | yes | Adds a Verona package dependency, or a legacy native library. |
+| =native-library= | string name and clauses | yes | Adds a native library with explicit linkage intent. |
+| =framework= | string name | yes | Adds a Darwin framework to link. |
+
+** Target and optimization
+
+Use =(target native)= for the host default, or provide a quoted LLVM target
+triple:
+
+#+begin_src lisp
+(target "x86_64-unknown-linux-gnu")
+(optimize 2)
+#+end_src
+
+Optimization maps directly to =-O0= through =-O3=; omitting it is equivalent
+to =-O0=.  Build manifests do not currently expose the source-command =--cpu=
+or =--features= machine settings.  A =features= option in a manifest means
+Verona reader features, not target-machine features.
+
+** Version metadata
+
+=version= is retained as validated package metadata.  It must be a nonempty
+single-line data string.  The compiler does not currently put it in the output
+filename or use it to resolve dependencies.  It is useful to library tooling,
+including =verona-project libraries=.
+
+** Reader features
+
+Feature names are Verona names and are supplied to reader conditionals such as
+=#+feature= and =#-feature=.  Multiple names belong in the one =features=
+form:
+
+#+begin_src lisp
+(features logging experimental-api)
+#+end_src
+
+=--feature NAME= adds another enabled reader feature for that build.  Both
+manifest and command-line feature names are normalized to lowercase.  A
+manifest may contain one =features= option only, but it may name any positive
+number of features.
+
+** Paths, package dependencies, and native links
+
+All path values must be double-quoted data strings.  Relative =module-path=
+and =library-path= values are resolved against the manifest directory; absolute
+paths remain absolute.  They may be repeated and preserve their order.
+
+#+begin_src lisp
+(module-path "src")
+(module-path "../base/src")
+(library-path "../native/lib")
+(native-library "z" (link dynamic))
+(native-library "/opt/codec/lib/libcodec.a" (link static))
+(framework "Foundation")
+#+end_src
+
+If no =module-path= is given, the manifest directory is the sole module-search
+directory.  Explicit module paths replace that default, so include the manifest
+directory explicitly when it is still needed.  =library= names are passed to
+the native link stage; =library-path= supplies their search locations.
+=framework= is valid only when the selected target platform is Darwin.
+
+Verona packages use two independent, externally managed roots:
+=VERONA_SOURCE_DIR= contains package source trees, and =VERONA_LIBRARY_DIR=
+contains compiled artifacts and metadata. Both must name accessible,
+absolute directories when an executable or shared-library target resolves a
+package dependency. A =static-library= target resolves only the source tree,
+because it compiles imported package modules without linking their compiled
+artifacts. The compiler checks the directories it uses; it does not create,
+copy, fetch, or remove package contents.
+
+A package is selected by its exact name and optional version. The source root
+is =VERONA_SOURCE_DIR/NAME[-VERSION]/src=, and the artifact directory is
+=VERONA_LIBRARY_DIR/NAME[-VERSION]=. No fallback or version selection occurs.
+For example, =(library base (version "1.2.0") (link static))= selects
+=base-1.2.0= in both roots. The source directory is added to module lookup
+where that target compiles; package declarations retain their order.
+
+The =(link ...)= clause is required and accepts =static= or =dynamic=. For an
+executable or shared-library target, static selects =libNAME.a=; dynamic
+selects =libNAME.so= on Linux or =libNAME.dylib= on Darwin, and adds the
+artifact directory to the output's runtime search path. Package artifacts are
+passed to the linker by their resolved path, not through =library-path= search.
+
+For a =static-library= target, the clause is still required, but no package
+artifact is linked. The package source tree is added so imported modules can
+be compiled into the target. The resulting archive does not include or link
+the dependency's compiled artifact; consumers that need it must declare and
+link that dependency themselves.
+
+Use =(native-library "NAME" (link dynamic))= or
+=(native-library "/path/to/libNAME.a" (link static))= for native linker
+inputs. Native names and artifact paths are handled by the platform linker;
+=native-library= never adds a Verona module path. The one-string
+=(library "LLVM")= form remains a compatibility spelling for an unspecified
+native dependency. Use =native-library= in new manifests. =library-path= and
+=framework= configure native linking only.
+
+* Complete examples
+
+An executable with source under =src/= and an imported Base library:
+
+#+begin_src lisp
+(executable greeting
+  (root greeting)
+  (module-path "src")
+  (module-path "../base/src")
+  (features cli)
+  (target native)
+  (optimize 2))
+#+end_src
+
+An artifact-only library and a consumer in the same manifest:
+
+#+begin_src lisp
+(static-library math-api
+  (root math.api)
+  (module-path "src")
+  (version "1.0.0"))
+
+(executable calculator
+  (root calculator)
+  (module-path "src")
+  (library-path "build")
+  (library "math-api"))
+#+end_src
+
+Build the library before its consumer:
+
+#+begin_src sh
+verona build math-api build
+verona build calculator build
+#+end_src
+
+The second declaration does not create a dependency on the first.  It only
+describes how to link a native library named =math-api=.  The library must
+already exist at a location found through =library-path= (or the platform's
+normal native linker search rules).
+
+* Defaults and output layout
+
+When options are omitted, a target uses the host target (=native=), optimization
+level 0, no manifest reader features, and the manifest directory as its module
+path.  Native link options are empty by default.
+
+The compiler chooses the artifact filename from the target kind and name, then
+writes it under =OUTPUT-DIRECTORY=.  Static and shared library builds also
+produce their generated C header next to the library artifact.  An executable
+has no prefix or platform extension added by the manifest builder.
+
+* Validation rules and limits
+
+Keep these constraints in mind when authoring manifests:
+
+- Use only the three documented top-level artifact forms.  Object files are
+  available through =verona compile --emit object=, not through a manifest.
+- A target needs exactly one =root=.  =target=, =optimize=, =version=, and
+  =features= may each appear at most once; paths and link options may repeat.
+- Target names, feature names, and roots are names, not strings.  Path,
+  library, framework, and version values are strings.
+- A manifest describes artifacts, not a package dependency graph.  It does not
+  download, discover, order, or rebuild dependencies.
+- There is no per-target output-name override, CPU selection, target-machine
+  feature text, environment interpolation, or home-directory expansion.
+
+Manifest parsing and validation complete before the compiler creates the output
+directory.  Diagnostics identify =verona.build= and the source location of an
+invalid form, which makes malformed configuration safe to correct before it
+creates an artifact.
+
+* Authoring checklist
+
+- Run =verona build TARGET OUTPUT-DIRECTORY= from the directory that contains
+  =verona.build=.
+- Give each target a unique unqualified name and exactly one dotted =root=.
+- Use quoted, manifest-relative paths for source and native-library locations.
+- Put every desired reader feature in one =features= form; use =--feature= for
+  one-off build-time additions.
+- Build native libraries before any target that links them.
+- Use =verona compile= when a build needs options the manifest intentionally
+  does not represent, such as an object artifact, target CPU, or target-machine
+  feature text.
