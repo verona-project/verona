@@ -37,6 +37,7 @@
 ; Computed macro binary64 values use kind=71 with exact bits in VALUE until contextual typing.
 ; Computed macro booleans use kind=3 with ty=0 until contextual checking.
 ; Inline directive=72, noinline directive=73; TARGET is a resolved local function/template ID.
+; Null pointer literal=74, pointer index/load=75.
 ; Types: error=0 (analysis only), unit=1, bool=2, integer types=3..10, (pointer u8)=11, f32=12, f64=13, void=14. Descriptors use ID+16.
 ; TARGET holds a binder/function index, opcode, checked binding initializer ID, or data literal address.
 ; Nine u64 metadata fields and one i64 literal: 80 bytes, alignment 8 on the supported ABI.
@@ -135,7 +136,9 @@
     (node-macro-registry-link)
     (node-computed-float)
     (node-inline-directive)
-    (node-noinline-directive)))
+    (node-noinline-directive)
+    (node-null-pointer)
+    (node-pointer-index)))
 
 (base:type node
   (product
@@ -423,7 +426,9 @@
     ((node-macro-registry-link) 70)
     ((node-computed-float) 71)
     ((node-inline-directive) 72)
-    ((node-noinline-directive) 73)))
+    ((node-noinline-directive) 73)
+    ((node-null-pointer) 74)
+    ((node-pointer-index) 75)))
 
 ; Enum-typed construction boundary. The returned record keeps the existing
 ; ten-word tape ABI while only this function knows its encoded tag value.

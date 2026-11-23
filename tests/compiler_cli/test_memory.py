@@ -589,6 +589,232 @@ class MemoryTests(CompilerTestCase):
   (match (!= (& value) (& other)) (true 42) (false 0)))
 """), 42)
 
+    def test_pointer_equality_with_nil(self):
+        for expression in (
+            "(%/=-primitive-pointer (& value) nil)",
+            "(%/=-primitive-pointer nil (& value))",
+            "(== nil nil)",
+        ):
+            with self.subTest(expression=expression):
+                self.agrees(self.program(f"""
+  (let ((value i64 42))
+    (match {expression} (true 42) (false 0)))
+"""), 42)
+
+    def test_nil_pointer_initializers(self):
+        for form, ty, comparison in (
+            ("%constant", "u8", "(%=-primitive-pointer saved nil)"),
+            ("%variable", "i64", "(== nil saved)"),
+        ):
+            with self.subTest(form=form):
+                self.agrees(f"({form} saved (pointer {ty}) nil)" +
+                            self.program(f"(match {comparison} (true 42) (false 0))"), 42)
+
+    def test_pointer_offset_scales_by_element_size(self):
+        for form in ("%pointer-offset-primitive-i64", "%pointer-offset-primitive-T"):
+            with self.subTest(form=form):
+                self.agrees(self.program(f"""
+  (let ((items (array-of (cast i64 20) 42))
+        (first (& (index items 0)))
+        (second (& (index items 1))))
+    (match (%=-primitive-pointer ({form} first 1) second)
+      (true 42)
+      (false 0)))
+"""), 42)
+
+    def test_pointer_offset_scales_by_padded_aggregate_size(self):
+        self.agrees("""
+(%type Cell (product (flag bool) (value i64)))
+(%function main () i64
+  (let ((cells (array-of (Cell true 20) (Cell false 42)))
+        (first (& (index cells 0)))
+        (second (& (index cells 1))))
+    (match (== (%pointer-offset-primitive-T first 1) second)
+      (true 42)
+      (false 0))))
+""", 42)
+
+    def test_pointer_offset_can_round_trip_outside_object(self):
+        self.agrees(self.program("""
+  (let ((value i64 42)
+        (first (& value))
+        (beyond (%pointer-offset-primitive-T first 4)))
+    (match (== (%pointer-offset-primitive-T beyond -4) first)
+      (true 42)
+      (false 0)))
+"""), 42)
+
+    def test_pointer_offset_accepts_nil(self):
+        offset = """
+(%function offset-null ((count i64)) (pointer i64)
+  (%pointer-offset-primitive-T nil count))
+"""
+        for condition in (
+            "(%is-null-primitive-pointer (offset-null 0))",
+            "(%is-null-primitive-pointer (%pointer-offset-primitive-i64 nil 0))",
+            "(%/=-primitive-pointer (offset-null 1) nil)",
+            "(== (%pointer-offset-primitive-T (offset-null 1) -1) nil)",
+        ):
+            with self.subTest(condition=condition):
+                self.agrees(offset + self.program(f"(match {condition} (true 42) (false 0))"), 42)
+
+    def test_pointer_dereference_loads_pointee(self):
+        self.agrees(self.program("(let ((value i64 42)) (%pointer-dereference (& value)))"), 42)
+
+    def test_pointer_dereference_rejects_null_access(self):
+        evaluated = self.run_core("eval", self.program("(%pointer-dereference (cast (pointer i64) nil))"))
+        self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
+        self.assertIn("invalid pointer", evaluated.stderr)
+
+    def test_pointer_index_rejects_access_at_null_derived_address(self):
+        evaluated = self.run_core("eval", self.program(
+            "(%pointer-index (%pointer-offset-primitive-i64 nil 1) 0)"))
+        self.assertEqual(evaluated.returncode, 70, evaluated.stderr)
+        self.assertIn("invalid pointer", evaluated.stderr)
+
+    def test_pointer_index_loads_with_negative_offset(self):
+        self.agrees(self.program("""
+  (let ((items (array-of (cast i64 42) 20))
+        (second (& (index items 1))))
+    (%pointer-index second -1))
+"""), 42)
+
+    def test_pointer_index_scales_by_padded_aggregate_size(self):
+        self.agrees("""
+(%type Cell (product (flag bool) (value i64)))
+(%function main () i64
+  (let ((cells (array-of (Cell true 20) (Cell false 42)))
+        (first (& (index cells 0))))
+    (field (%pointer-index first 1) value)))
+""", 42)
+
+    def test_pointer_ordering_operators(self):
+        for operator, operands in (
+            ("%<-primitive-pointer", "first second"),
+            ("%<=-primitive-pointer", "first first"),
+            ("%>-primitive-pointer", "second first"),
+            ("%>=-primitive-pointer", "second second"),
+            ("<", "first second"),
+            ("<=", "first second"),
+            (">", "second first"),
+            (">=", "second first"),
+        ):
+            with self.subTest(operator=operator):
+                self.agrees(self.program(f"""
+  (let ((items (array-of (cast i64 20) 42))
+        (first (& (index items 0)))
+        (second (& (index items 1))))
+    (match ({operator} {operands}) (true 42) (false 0)))
+"""), 42)
+
+    def test_pointer_ordering_accepts_nil(self):
+        for condition in (
+            "(%=-primitive-bool (< nil (& value)) (> (& value) nil))",
+            "(<= nil saved)",
+            "(>= saved nil)",
+        ):
+            with self.subTest(condition=condition):
+                self.agrees(self.program(f"""
+  (let ((value i64 42) (saved (pointer i64) nil))
+    (match {condition} (true 42) (false 0)))
+"""), 42)
+
+    def test_pointer_difference_is_absolute_across_pointee_types(self):
+        for operands in ("second erased", "erased second"):
+            with self.subTest(operands=operands):
+                self.agrees(self.program(f"""
+  (let ((items (array-of (cast i64 20) 42))
+        (first (& (index items 0)))
+        (second (& (index items 1)))
+        (erased (cast (pointer void) first)))
+    (match (== (%pointer-difference-primitive-pointer {operands}) 8)
+      (true 42)
+      (false 0)))
+"""), 42)
+
+    def test_pointer_difference_measures_from_nil(self):
+        for operands, expected in (
+            ("nil nil", 0),
+            ("(%pointer-offset-primitive-i64 nil 1) nil", 8),
+        ):
+            with self.subTest(operands=operands):
+                self.agrees(self.program(f"""
+  (match (== (%pointer-difference-primitive-pointer {operands}) {expected})
+    (true 42)
+    (false 0))
+"""), 42)
+
+    def test_pointer_nil_as_value(self):
+        source = """
+(%function accept ((value (pointer u8))) (pointer u8) value)
+(%function main () (pointer u8) (accept nil))
+"""
+        evaluated = self.run_core("eval", source)
+        self.assertEqual(evaluated.returncode, 0, evaluated.stderr)
+        self.assertEqual(evaluated.stdout, "pointer\n")
+        for level in ("-O0", "-O2"):
+            with self.subTest(level=level):
+                native = self.run_native_report(source, level)
+                self.assertEqual(native.returncode, 0, native.stderr)
+                self.assertEqual(native.stdout, "pointer\n")
+
+    def assert_pointer_check_rejects(self, declaration, message):
+        result = self.run_core("check", declaration + self.program("0"))
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn(message, result.stderr)
+
+    def test_nil_cannot_initialize_integer(self):
+        self.assert_pointer_check_rejects("(%function f () i64 nil)", "expected i64")
+
+    def test_nil_cannot_be_used_as_type(self):
+        self.assert_pointer_check_rejects("(%function f () nil unit)", "unknown core type")
+
+    def test_integer_cannot_initialize_pointer(self):
+        self.assert_pointer_check_rejects(
+            "(%function f () (pointer i64) 0)", "expected (pointer i64)")
+
+    def test_pointer_offset_requires_i64_count(self):
+        self.assert_pointer_check_rejects(
+            "(%function f ((p (pointer i64)) (n u64)) (pointer i64)"
+            " (%pointer-offset-primitive-T p n))", "expected i64")
+
+    def test_pointer_offset_suffix_must_match_pointee(self):
+        self.assert_pointer_check_rejects(
+            "(%function f ((p (pointer u8))) (pointer u8)"
+            " (%pointer-offset-primitive-i64 p 0))", "match the offset primitive suffix")
+
+    def test_pointer_dereference_requires_complete_pointee(self):
+        self.assert_pointer_check_rejects(
+            "(%function f ((p (pointer void))) i64 (%pointer-dereference p))",
+            "complete object type")
+
+    def test_pointer_index_requires_complete_pointee(self):
+        for pointee in ("Opaque", "void", "(function () i64)"):
+            with self.subTest(pointee=pointee):
+                self.assert_pointer_check_rejects(
+                    f"(%type Opaque)(%function f ((p (pointer {pointee})))"
+                    " i64 (%pointer-index p 0))", "complete object type")
+
+    def test_pointer_equality_requires_matching_pointees(self):
+        self.assert_pointer_check_rejects(
+            "(%function f ((p (pointer i64)) (q (pointer u64))) bool"
+            " (%=-primitive-pointer p q))", "matching pointer types")
+
+    def test_pointer_ordering_requires_matching_pointees(self):
+        self.assert_pointer_check_rejects(
+            "(%function f ((p (pointer i64)) (q (pointer u64))) bool"
+            " (< p q))", "no matching generic implementation")
+
+    def test_pointer_ordering_rejects_integer_operand(self):
+        self.assert_pointer_check_rejects(
+            "(%function f ((p (pointer i64))) bool (%<=-primitive-pointer p (cast i64 0)))",
+            "matching pointer types")
+
+    def test_pointer_difference_rejects_integer_operand(self):
+        self.assert_pointer_check_rejects(
+            "(%function f ((p (pointer i64))) usize"
+            " (%pointer-difference-primitive-pointer p (cast i64 0)))", "pointer operands")
+
     def test_zero_offset_preserves_local_pointer_identity(self):
         self.agrees(self.program("""
 (let ((value i64 7) (p (& value)))
@@ -740,13 +966,19 @@ class MemoryTests(CompilerTestCase):
 (%function main () i64 (let ((value i64 0)) (match (== (& value) (& value)) (true 42) (false 0))))
 """, 42)
 
+    def test_pointer_ordering_prefers_explicit_implementation(self):
+        self.agrees("""
+(%implementation < ((left (pointer i64)) (right (pointer i64))) bool true)
+(%function main () i64
+  (let ((value i64 0) (p (& value))) (match (< p p) (true 42) (false 0))))
+""", 42)
+
     def test_invalid_pointer_equality(self):
         for declaration, body, message in (
             ("", '(let ((x i64 0) (y u64 0)) (== (& x) (& y)))', "no matching generic implementation"),
             ("", '(let ((x i64 0)) (== (& x) (cast (pointer void) (& x))))', "no matching generic implementation"),
             ("", '(let ((x i64 0)) (== (& x) (cast i64 0)))', "no matching generic implementation"),
             ("", '(let ((x i64 0)) (== (& x) 0))', "ambiguous numeric literal"),
-            ("", '(let ((x i64 0)) (< (& x) (& x)))', "no matching generic implementation"),
             ("", '(let ((x i64 0)) (== (& x)))', "wrong generic argument count"),
             ("(%function a () i64 1)(%function b () bool true)",
              '(let ((a (pointer (function () i64)) a) (b (pointer (function () bool)) b)) (== a b))',

@@ -153,6 +153,7 @@
         id
         (match (m:is c id "unit") (true false) (false true))
         "reserved identifier")
+      (require c id (base:not (m:is c id "nil")) "reserved identifier")
       (require
         c
         id
@@ -2072,23 +2073,36 @@
        (_ (cast u64 18446744073709551615))))
     (true (nullary-protocol-method c generic expected (m:next c id) found))))
 
-; Pointer identity is a fallback on equality generics, after ordinary resolution.
-; It never supplies an implicit void-pointer conversion or a numeric literal type.
-(base:function pointer-equality ((c m:context) (generic u64) (args u64)) u64
+; Compare matching pointer types, with the null literal allowed on either side.
+(base:function pointer-operands ((c m:context) (left u64) (right u64) (op u64))
+  bool
+  (let ((a m:node (m:at c left)) (b m:node (m:at c right)))
+    (base:and
+      (pointer-value-type c (field a ty))
+      (pointer-value-type c (field b ty))
+      (base:or
+        (== op 25)
+        (== (field a ty) (field b ty))
+        (== (field a kind) 74)
+        (== (field b kind) 74)))))
+
+; Built-in comparisons are a fallback after ordinary generic resolution.
+(base:function pointer-comparison ((c m:context) (generic u64) (args u64)) u64
   (let ((name u64 (m:next c (m:child c generic))))
-    (match (base:or (m:is c name "==") (m:is c name "!="))
+    (match (arity c args 2)
       (false 0)
       (true
-        (match (arity c args 2)
+        (match (pointer-operands c args (m:next c args) 0)
           (false 0)
           (true
-            (let ((ty u64 (field (m:at c args) ty)))
-              (match
-                (base:and
-                  (pointer-value-type c ty)
-                  (== ty (field (m:at c (m:next c args)) ty)))
-                (true (match (m:is c name "==") (true 18) (false 19)))
-                (false 0)))))))))
+            (base:cond
+              ((m:is c name "==") 18)
+              ((m:is c name "!=") 19)
+              ((m:is c name "<") 21)
+              ((m:is c name "<=") 22)
+              ((m:is c name ">") 23)
+              ((m:is c name ">=") 24)
+              (true 0))))))))
 
 (base:function generic-call
   ((c m:context)
@@ -2132,7 +2146,7 @@
              (false found))))
         (base:cond
           ((== target 0)
-           (match (pointer-equality c generic args)
+           (match (pointer-comparison c generic args)
              (0 (do (m:report c id "no matching generic implementation") 0))
              (operation (m:typed-kind c id (node-primitive) 2 operation 0))))
           ((== target (cast u64 18446744073709551615))
@@ -2785,6 +2799,36 @@
             "pointer-offset requires an integer offset")
           (m:typed-kind c id (node-pointer-offset) ty pointee 0))))))
 
+(base:function expanded-pointer-offset
+  ((c m:context)
+   (id u64)
+   (args u64)
+   (env (pointer void))
+   (all u64)
+   (expected u64)
+   (suffix u64)
+   (load bool)) u64
+  (match (arity c args 2)
+    (false (do (m:report c id "pointer operation requires two arguments") 0))
+    (true
+      (let
+        ((ty u64 (expression-as c args env all expected))
+         (pointee u64 (complete-pointee c args ty))
+         (offset u64 (m:next c args)))
+        (do
+          (match suffix
+            (0 unit)
+            (_
+              (require
+                c
+                args
+                (== suffix pointee)
+                "pointer pointee type must match the offset primitive suffix")))
+          (expect c offset (expression-as c offset env all 3) 3)
+          (match load
+            (true (m:typed-kind c id (node-pointer-index) pointee pointee 0))
+            (false (m:typed-kind c id (node-pointer-offset) ty pointee 1))))))))
+
 (base:function store-expression
   ((c m:context) (id u64) (args u64) (env (pointer void)) (all u64)) u64
   (match (arity c args 2)
@@ -2815,8 +2859,25 @@
       (base:cond
         ((base:or (m:is c head "&") (m:is c head "address-of"))
          (address-expression c id args env all))
-        ((base:or (m:is c head "deref") (m:is c head "dereference"))
+        ((base:or
+           (m:is c head "deref")
+           (m:is c head "dereference")
+           (m:is c head "%pointer-dereference"))
          (dereference-expression c id args env all))
+        ((m:is c head "%pointer-offset-primitive-T")
+         (expanded-pointer-offset c id args env all expected 0 false))
+        ((== op 26)
+         (expanded-pointer-offset
+           c
+           id
+           args
+           env
+           all
+           (pointer-type c (field primitive input))
+           (field primitive input)
+           false))
+        ((m:is c head "%pointer-index")
+         (expanded-pointer-offset c id args env all 0 0 true))
         ((m:is c head "pointer-offset") (offset-expression c id args env all))
         ((base:or (m:is c head "store") (m:is c head "assign"))
          (store-expression c id args env all))
@@ -2863,6 +2924,14 @@
                    (m:next c args)
                    (expression-as c (m:next c args) env all input)
                    input)))
+             (match (base:or (== op 18) (== op 19) (>= op 21))
+               (true
+                 (require
+                   c
+                   id
+                   (pointer-operands c args (m:next c args) op)
+                   "pointer operands must have matching pointer types unless comparing nil or taking a difference"))
+               (false unit))
              (m:typed-kind c id (node-primitive) (field primitive result) op 0))))
         ((m:is c head "cast") (checked-cast c id args env all))
         ((m:is c head "array-of") (array-expression c id args env all expected))
@@ -2975,6 +3044,9 @@
       ((pointer-value-type c ty)
        (let ((from u64 (expression c literal env all)))
          (base:cond
+           ((== (field (m:at c literal) kind) 74)
+            (m:typed-kind c literal (node-null-pointer) ty 0 0)
+            (m:typed-kind c id (node-pointer-cast) ty 0 0))
            ((== from 0) 0)
            ((match (pointer-value-type c from)
               (true
@@ -3106,6 +3178,8 @@
            (m:typed-kind c id (node-bool) 2 0 1))
           ((match (field v generated) (0 (m:is c id "false")) (_ false))
            (m:typed-kind c id (node-bool) 2 0 0))
+          ((null-literal c id)
+           (m:typed-kind c id (node-null-pointer) (pointer-type c 14) 0 0))
           ((match (field v generated) (0 (m:is c id "unit")) (_ false))
            (m:typed-kind c id (node-unit) 1 0 0))
           ((integer-node c id)
@@ -3221,6 +3295,7 @@
           (4 true)
           (17 true)
           (36 true)
+          (74 true)
           (_ false))
         "variable initializer must be a scalar or data literal"))))
 
@@ -3237,6 +3312,7 @@
           (4 true)
           (17 true)
           (36 true)
+          (74 true)
           (_ false))
         "constant initializer must be a scalar or data literal"))))
 
@@ -4281,6 +4357,10 @@
               index
               (base:convert (place-flags c args)))))))))
 
+(base:function null-literal ((c m:context) (id u64)) bool
+  (let ((v m:node (m:at c id)))
+    (base:and (atom c id) (== (field v generated) 0) (m:is c id "nil"))))
+
 ; Expected types guide sum constructor selection without changing nominal identity.
 (base:function expression-as
   ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64)) u64
@@ -4289,6 +4369,8 @@
 (base:function expression-as-inner
   ((c m:context) (id u64) (env (pointer void)) (all u64) (expected u64)) u64
   (base:cond
+    ((base:and (pointer-value-type c expected) (null-literal c id))
+     (m:typed-kind c id (node-null-pointer) expected 0 0))
     ((function-designator c id expected env)
      (function-address c id expected all))
     ((match (num:float-type expected)

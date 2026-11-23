@@ -24,6 +24,18 @@
 ; Every checked node/binder/function has a unique syntax index. Its LLVM value
 ; lives in the matching slot. LLVM function symbols additionally retain the
 ; owning module and declared source name so object-level tools are useful.
+(base:external-function
+  build-ptrtoint
+  "LLVMBuildPtrToInt"
+  (t:builder-ref t:value-ref t:type-ref (pointer u8))
+  t:value-ref)
+
+(base:external-function
+  build-select
+  "LLVMBuildSelect"
+  (t:builder-ref t:value-ref t:value-ref t:value-ref (pointer u8))
+  t:value-ref)
+
 ; Lowering state borrowing an LLVM session and arena-owned value-handle table.
 ; Divide is the guarded-division helper. Handles require a live session;
 ; the generation caller disposes that session after use.
@@ -319,8 +331,13 @@
 (base:function load-place ((c m:context) (b backend) (id u64)) t:value-ref
   (let
     ((ty u64 (field (m:at c id) ty))
-     (address t:value-ref (place-address c b id))
-     (value
+     (address t:value-ref (place-address c b id)))
+    (load-address b ty address)))
+
+(base:function load-address ((b backend) (ty u64) (address t:value-ref))
+  t:value-ref
+  (let
+    ((value
        t:value-ref
        (ir:build-load
          (field (field b owner) builder)
@@ -1035,10 +1052,28 @@
     (10 enum:int-ne)
     (18 enum:int-eq)
     (19 enum:int-ne)
+    (21 enum:int-ult)
+    (22 enum:int-ule)
+    (23 enum:int-ugt)
+    (24 enum:int-uge)
     (6 (match signed (true enum:int-slt) (false enum:int-ult)))
     (7 (match signed (true enum:int-sle) (false enum:int-ule)))
     (8 (match signed (true enum:int-sgt) (false enum:int-ugt)))
     (_ (match signed (true enum:int-sge) (false enum:int-uge)))))
+
+(base:function pointer-distance
+  ((owner llvm:session) (left t:value-ref) (right t:value-ref)) t:value-ref
+  (let
+    ((builder t:builder-ref (field owner builder))
+     (ty t:type-ref (layout:scalar-type owner 10))
+     (a t:value-ref (build-ptrtoint builder left ty ""))
+     (b t:value-ref (build-ptrtoint builder right ty "")))
+    (build-select
+      builder
+      (ir:build-icmp builder enum:int-uge a b "")
+      (ir:build-sub builder a b "")
+      (ir:build-sub builder b a "")
+      "")))
 
 (base:function primitive
   ((c m:context)
@@ -1067,6 +1102,7 @@
                (integer-conversion owner ty wide right)
                (source-location c b id))))
           (integer-conversion owner wide ty result)))
+      (25 (pointer-distance owner left right))
       (11 (ir:build-and builder left right ""))
       (12 (ir:build-or builder left right ""))
       (13 (ir:build-xor builder left right ""))
@@ -1224,6 +1260,26 @@
        (put b id (word (field b owner) (field (m:at c id) ty) value)))
       ((unknown) (expression-unfolded c b id)))))
 
+(base:function pointer-offset-address
+  ((c m:context) (b backend) (args u64) (pointee u64)) t:value-ref
+  (let
+    ((pointer t:value-ref (expression c b args))
+     (offset u64 (m:next c args))
+     (index
+       t:value-ref
+       (integer-conversion
+         (field b owner)
+         (field (m:at c offset) ty)
+         3
+         (expression c b offset))))
+    (ir:build-gep
+      (field (field b owner) builder)
+      (cabi:storage-type (field b abi) pointee)
+      pointer
+      (& index)
+      1
+      "")))
+
 (base:function expression-unfolded ((c m:context) (b backend) (id u64))
   t:value-ref
   (let ((v m:node (m:at c id)) (args u64 (m:next c (field v child))))
@@ -1234,24 +1290,13 @@
         (64 (load-place c b id))
         (57 (place-address c b args))
         (58 (load-place c b id))
-        (59
-          (let
-            ((pointer t:value-ref (expression c b args))
-             (offset u64 (m:next c args))
-             (index
-               t:value-ref
-               (integer-conversion
-                 (field b owner)
-                 (field (m:at c offset) ty)
-                 3
-                 (expression c b offset))))
-            (ir:build-gep
-              (field (field b owner) builder)
-              (cabi:storage-type (field b abi) (field v target))
-              pointer
-              (& index)
-              1
-              "")))
+        (59 (pointer-offset-address c b args (field v target)))
+        (75
+          (load-address
+            b
+            (field v ty)
+            (pointer-offset-address c b args (field v target))))
+        (74 (ir:const-null (layout:value-type c (field b owner) (field v ty))))
         (60
           (let
             ((address t:value-ref (place-address c b args))
@@ -2116,6 +2161,40 @@
           (ir:builder-position builder end)
           (report-text b print ")"))))))
 
+(base:function report-byte-pointer
+  ((b backend) (print t:value-ref) (value t:value-ref)) unit
+  (let
+    ((owner llvm:session (field b owner))
+     (builder t:builder-ref (field owner builder))
+     (context t:context-ref (field owner context))
+     (fn t:value-ref (ir:block-parent (ir:builder-block builder)))
+     (nil-block t:block-ref (ir:block-append context fn "report.nil"))
+     (data-block t:block-ref (ir:block-append context fn "report.data"))
+     (end t:block-ref (ir:block-append context fn "report.pointer.end")))
+    (do
+      (ir:build-cond-br
+        builder
+        (ir:build-icmp
+          builder
+          enum:int-eq
+          value
+          (ir:const-null (ir:pointer-type context 0))
+          "")
+        nil-block
+        data-block)
+      (ir:builder-position builder nil-block)
+      (report-text b print "pointer")
+      (ir:build-br builder end)
+      (ir:builder-position builder data-block)
+      (llvm:call-3
+        builder
+        print
+        (ir:build-global-string builder "data:%llu:%s" "format")
+        (llvm:call-1 builder (deref (field b helpers)) value)
+        value)
+      (ir:build-br builder end)
+      (ir:builder-position builder end))))
+
 (base:function report-value
   ((c m:context) (b backend) (print t:value-ref) (ty u64) (value t:value-ref))
   unit
@@ -2140,15 +2219,7 @@
             (ir:build-global-string builder "i64:%lld" "format")
             value)
           unit))
-      (11
-        (do
-          (llvm:call-3
-            builder
-            print
-            (ir:build-global-string builder "data:%llu:%s" "format")
-            (llvm:call-1 builder (deref (field b helpers)) value)
-            value)
-          unit))
+      (11 (report-byte-pointer b print value))
       (12 (report-float b print ty value))
       (13 (report-float b print ty value))
       (_

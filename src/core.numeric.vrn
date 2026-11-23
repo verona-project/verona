@@ -210,8 +210,16 @@
   (let ((value data:view (m:spelling c id)) (length u64 (field value length)))
     (base:cond
       ((< length 4) (operation 0 0 0 0))
-      ((> length 32) (operation 0 0 0 0))
       ((text-is value "%is-null-primitive-pointer") (operation 20 0 2 1))
+      ((text-is value "%=-primitive-pointer") (operation 18 0 2 2))
+      ((text-is value "%/=-primitive-pointer") (operation 19 0 2 2))
+      ((text-is value "%<-primitive-pointer") (operation 21 0 2 2))
+      ((text-is value "%<=-primitive-pointer") (operation 22 0 2 2))
+      ((text-is value "%>-primitive-pointer") (operation 23 0 2 2))
+      ((text-is value "%>=-primitive-pointer") (operation 24 0 2 2))
+      ((text-is value "%pointer-difference-primitive-pointer")
+       (operation 25 0 10 2))
+      ((> length 32) (operation 0 0 0 0))
       ((let ((first u64 (base:convert (deref (field value bytes)))))
          (== first (cast u64 37)))
        (let
@@ -219,6 +227,12 @@
           (ty u64 (numeric-suffix (slice value (+ split 1) length)))
           (code u64 (binary-code (slice value 0 split))))
          (base:cond
+           ((text-is (slice value 0 split) "%pointer-offset-primitive")
+            (base:cond
+              ((> ty 0) (operation 26 ty 0 2))
+              ((text-is (slice value (+ split 1) length) "bool")
+               (operation 26 2 0 2))
+              (true (operation 0 0 0 0))))
            ((text-is (slice value (+ split 1) length) "bool")
             (boolean-primitive (slice value 0 split)))
            ((== ty 0) (operation 0 0 0 0))

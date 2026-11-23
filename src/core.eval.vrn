@@ -471,34 +471,42 @@
                  (offset
                    u64
                    (base:convert (field (heap-at c (+ index 1)) scalar))))
-                (match
-                  (match (== (field address ty) address-tag)
-                    (true
-                      (match (< region length)
-                        (true (< (+ region 1) length))
-                        (false false)))
-                    (false false))
-                  (false (do (memory-check c false site) (tuple 0 0 0)))
-                  (true
-                    (let
-                      ((header scalar-value (heap-at c region))
-                       (size u64 (base:convert (field header scalar)))
-                       (origin u64 (field (heap-at c (+ region 1)) ty)))
-                      (do
-                        (memory-check c (== (field header ty) region-tag) site)
-                        (memory-check c (<= size (- length (+ region 2))) site)
-                        (memory-check c (<= offset size) site)
-                        ; Equality does not access bytes, check alignment, or
-                        ; require the represented storage to remain live.
-                        (match (>= origin pointer-tag)
-                          (true (tuple 2 (- origin pointer-tag) offset))
-                          (false (tuple 1 region offset)))))))))))))))
+                (base:cond
+                  ((== (field address ty) raw-address-tag) (tuple 0 offset 0))
+                  ((match (== (field address ty) address-tag)
+                     (true
+                       (match (< region length)
+                         (true (< (+ region 1) length))
+                         (false false)))
+                     (false false))
+                   (let
+                     ((header scalar-value (heap-at c region))
+                      (size u64 (base:convert (field header scalar)))
+                      (origin u64 (field (heap-at c (+ region 1)) ty)))
+                     (do
+                       (memory-check c (== (field header ty) region-tag) site)
+                       (memory-check c (<= size (- length (+ region 2))) site)
+                       ; A pointer can be compared even outside live storage.
+                       (match (>= origin pointer-tag)
+                         (true (tuple 2 (- origin pointer-tag) offset))
+                         (false (tuple 1 region offset))))))
+                  (true (do (memory-check c false site) (tuple 0 0 0))))))))))))
+
+; The evaluator uses virtual addresses for its storage and callbacks. Only
+; addresses within the same object have a portable relative distance.
+(base:function virtual-address ((location (tuple u64 u64 u64))) u64
+  (match (tuple-get location 0)
+    (0 (tuple-get location 1))
+    (domain
+      (+
+        (* domain 1152921504606846976)
+        (+ (* (tuple-get location 1) 4294967296) (tuple-get location 2))))))
 
 (base:function pointer-compare
   ((c machine) (id u64) (op u64) (left scalar-value) (right scalar-value)) unit
   (do
     (require c (m:pointer-value-type (field c program) (field left ty)) id)
-    (require c (== (field left ty) (field right ty)) id)
+    (require c (m:pointer-value-type (field c program) (field right ty)) id)
     (let
       ((a
          (tuple u64 u64 u64)
@@ -523,18 +531,38 @@
                  (base:and
                    (== (tuple-get a 1) (tuple-get b 1))
                    (== (tuple-get a 2) (tuple-get b 2)))))))))
-      (push
-        c
-        (scalar-value
-          2
-          (match (match op (18 same) (_ (base:not same))) (true 1) (false 0)))))))
+      (let
+        ((x u64 (virtual-address a))
+         (y u64 (virtual-address b))
+         (less bool (base:and (base:not same) (< x y)))
+         (greater bool (base:and (base:not same) (> x y))))
+        (match op
+          (25
+            (push-integer
+              c
+              10
+              (base:cond (same 0) ((< x y) (- y x)) (true (- x y)))))
+          (_
+            (push
+              c
+              (scalar-value
+                2
+                (match
+                  (match op
+                    (18 same)
+                    (19 (base:not same))
+                    (21 less)
+                    (22 (base:or same less))
+                    (23 greater)
+                    (_ (base:or same greater)))
+                  (true 1)
+                  (false 0))))))))))
 
 (base:function primitive
   ((c machine) (id u64) (op u64) (x scalar-value) (y scalar-value)) unit
-  (match op
-    (18 (pointer-compare c id op x y))
-    (19 (pointer-compare c id op x y))
-    (_ (integer-primitive c id op x y))))
+  (match (base:or (== op 18) (== op 19) (>= op 21))
+    (true (pointer-compare c id op x y))
+    (false (integer-primitive c id op x y))))
 
 (base:function integer-primitive
   ((c machine) (id u64) (op u64) (x scalar-value) (y scalar-value)) unit
@@ -582,9 +610,14 @@
       (match (field v kind)
         (57 (do (schedule c 18 id (field v ty) 0 0) (evaluate-place c args)))
         (58 (do (schedule c 19 id (field v ty) 0 0) (evaluate-place c id)))
+        (75
+          (do
+            (schedule c 23 id (field v target) 2 0)
+            (evaluate-expression c (m:next p args))
+            (evaluate-expression c args)))
         (59
           (do
-            (schedule c 23 id (field v target) 0 0)
+            (schedule c 23 id (field v target) (base:convert (field v value)) 0)
             (evaluate-expression c (m:next p args))
             (evaluate-expression c args)))
         (60
@@ -618,6 +651,7 @@
             (evaluate-expression c (m:next p args))))
         (36 (push c (scalar-value (field v ty) (field v value))))
         (17 (push c (scalar-value 11 (base:convert id))))
+        (74 (push c (scalar-value (field v ty) 0)))
         (2
           (do
             (require c (num:integer-type (field v ty)) id)
@@ -918,18 +952,21 @@
                       (* offset (field (mem:of p b) size))
                       id))))))))
       (23
-        (let ((index scalar-value (pop c)) (pointer scalar-value (pop c)))
-          (push
-            c
-            (scalar-value
-              (field (m:at p id) ty)
-              (base:convert
-                (offset-pointer
-                  c
-                  (base:convert (field pointer scalar))
-                  index
-                  a
-                  id))))))
+        (let
+          ((index scalar-value (pop c))
+           (pointer scalar-value (pop c))
+           (bits u64 (base:convert (field pointer scalar)))
+           (address
+             u64
+             (match b
+               (0 (offset-pointer c bits index a id))
+               (_ (expanded-offset-pointer c bits index a id)))))
+          (match b
+            (2 (push c (load-memory c address a id)))
+            (_
+              (push
+                c
+                (scalar-value (field (m:at p id) ty) (base:convert address)))))))
       (_ (fail c 6 id)))))
 
 ; Balanced execution pumping has at most 65 host frames, regardless of Verona call/expression depth.
@@ -1250,7 +1287,7 @@
       (11
         (base:cond
           ((>= bits pointer-tag) (validate-output c v 0))
-          ((== bits 0) (fail c 6 0))
+          ((== bits 0) unit)
           ((>= bits (m:nodes-length (deref (field p items)))) (fail c 6 0))
           (true (require c (== (field (m:at p bits) kind) 17) 0))))
       (_
@@ -1267,7 +1304,11 @@
                  (match (>= bits pointer-tag)
                    (true (do (resolve-pointer c bits 0) unit))
                    (false unit)))
-               (_ (require c (valid-callback p signature bits) 0)))))
+               (_
+                 (require
+                   c
+                   (base:or (== bits 0) (valid-callback p signature bits))
+                   0)))))
           ((== bits 0) (fail c 6 0))
           ((> bits length) (fail c 6 0))
           ((>= bits parent) (fail c 6 0))
@@ -1458,7 +1499,10 @@
       (do
         (m:text constants:STDOUT-FILENO "i64:")
         (signed-number (field v scalar))))
-    (11 (write-data p items (base:convert (field v scalar))))
+    (11
+      (match (field v scalar)
+        (0 (m:text constants:STDOUT-FILENO "pointer"))
+        (bits (write-data p items (base:convert bits)))))
     (12 (write-float v))
     (13 (write-float v))
     (_
@@ -1527,6 +1571,8 @@
 
 (base:constant address-tag u64 18446744073709551614)
 
+(base:constant raw-address-tag u64 18446744073709551613)
+
 (base:function memory-ok ((c machine)) bool
   (== (field (deref (field c status)) code) 0))
 
@@ -1552,12 +1598,16 @@
           (let ((half u64 (/ count 2)))
             (do (zero-bytes c half) (zero-bytes c (- count half)))))))))
 
-(base:function new-pointer ((c machine) (region u64) (offset u64)) u64
+(base:function pointer-handle ((c machine) (tag u64) (region u64) (offset u64))
+  u64
   (let ((id u64 (values-length (deref (field c aggregates)))))
     (do
-      (heap-add c (scalar-value address-tag (base:convert region)))
+      (heap-add c (scalar-value tag (base:convert region)))
       (heap-add c (scalar-value 0 (base:convert offset)))
       (match (memory-ok c) (false 0) (true (+ pointer-tag id))))))
+
+(base:function new-pointer ((c machine) (region u64) (offset u64)) u64
+  (pointer-handle c address-tag region offset))
 
 (base:function new-region ((c machine) (ty u64) (length u64) (flags u64)) u64
   (let ((id u64 (values-length (deref (field c aggregates)))))
@@ -1750,6 +1800,28 @@
               (match negative
                 (true (- offset amount))
                 (false (+ offset amount))))))))))
+
+; Non-inbounds offset preserves the storage identity and wraps at pointer width.
+; Null-derived addresses have no storage and cannot be used for a load.
+(base:function expanded-offset-pointer
+  ((c machine) (bits u64) (value scalar-value) (element u64) (site u64)) u64
+  (let
+    ((count u64 (base:convert (field value scalar)))
+     (delta u64 (* count (field (mem:of (field c program) element) size)))
+     (location (tuple u64 u64 u64) (pointer-address c bits site))
+     (offset u64 (+ (tuple-get location 2) delta)))
+    (base:cond
+      ((== delta 0) bits)
+      ((base:or (== (tuple-get location 0) 0) (== (tuple-get location 0) 3))
+       (match (+ (virtual-address location) delta)
+         (0 0)
+         (address (pointer-handle c raw-address-tag 0 address))))
+      ((>= bits pointer-tag)
+       (new-pointer
+         c
+         (base:convert (field (heap-at c (- bits pointer-tag)) scalar))
+         offset))
+      (true (new-pointer c (tuple-get (resolve-pointer c bits site) 0) offset)))))
 
 (base:function offset-pointer
   ((c machine) (bits u64) (value scalar-value) (element u64) (site u64)) u64
@@ -2140,12 +2212,12 @@
             (let ((p m:context (field c program)))
               (memory-check
                 c
-                (match (> bits 0)
-                  (true
+                (match bits
+                  (0 true)
+                  (_
                     (match (< bits (m:nodes-length (deref (field p items))))
                       (true (== (field (m:at p bits) kind) 17))
-                      (false false)))
-                  (false false))
+                      (false false))))
                 site)))
           (true
             (let ((location (tuple u64 u64) (resolve-pointer c bits site)))

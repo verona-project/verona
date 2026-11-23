@@ -259,21 +259,26 @@ class NativeTests(CompilerTestCase):
         wrapper.write_text(f"#!{sys.executable}\nimport os,sys\n"
                            f"os.execvp('clang', ['clang', *sys.argv[1:], {str(obj)!r}])\n")
         wrapper.chmod(0o755)
-        source = """
-(%external-function absent "absent" () (pointer u8))
-(%external-function present "present" () (pointer u8))
-(%function main () i64
-  (match (%is-null-primitive-pointer (absent)) (true (match (%is-null-primitive-pointer (present)) (true 0) (false 42))) (false 0)))
-"""
-        for level in ("-O0", "-O2"):
-            binary = self.root / "null pointer executable"
-            result = self.run_core("compile-report", source, "-o", binary, level,
-                                   env=dict(os.environ, VERONA_CORE_CLANG=str(wrapper)))
-            self.assertEqual(result.returncode, 0, result.stderr)
-            native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
-            self.assertEqual(native.returncode, 0, native.stderr)
-            self.assertEqual(native.stdout, "i64:42\n")
+        for declaration, condition in (
+            ('(%external-function absent "absent" () (pointer u8))',
+             "(== (absent) nil)"),
+            ('(%external-function absent "absent" () (pointer u8))',
+             "(%is-null-primitive-pointer (absent))"),
+            ('(%external-function present "present" () (pointer u8))',
+             "(%not-primitive-bool (%is-null-primitive-pointer (present)))"),
+        ):
+            source = declaration + self.program(f"(match {condition} (true 42) (false 0))")
+            for level in ("-O0", "-O2"):
+                with self.subTest(condition=condition, level=level):
+                    binary = self.root / "null pointer executable"
+                    result = self.run_core("compile-report", source, "-o", binary, level,
+                                           env=dict(os.environ, VERONA_CORE_CLANG=str(wrapper)))
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+                    self.assertEqual(native.returncode, 0, native.stderr)
+                    self.assertEqual(native.stdout, "i64:42\n")
 
+    def test_pointer_null_check_lowers_to_null_comparison(self):
         emitted = self.run_core("emit-llvm", """
 (%function absent ((value (pointer u8))) bool (%is-null-primitive-pointer value))
 (%function main () i64 42)
@@ -281,6 +286,7 @@ class NativeTests(CompilerTestCase):
         self.assertEqual(emitted.returncode, 0, emitted.stderr)
         self.assertRegex(emitted.stdout, r"icmp eq ptr %0, null")
 
+    def test_pointer_null_check_requires_one_pointer(self):
         for source, message in (
             ("(%function main () bool (%is-null-primitive-pointer))", "primitive requires one argument"),
             ("(%function main () bool (%is-null-primitive-pointer 0))", "pointer null check requires a pointer"),

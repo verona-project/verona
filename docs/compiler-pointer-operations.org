@@ -1,0 +1,55 @@
+#+title: Verona pointer values and operations
+
+A =(pointer T)= value is =nil= or an address of data of type =T=. The target
+determines its runtime representation and null value. Pointers and integers
+are distinct types, and the checker rejects implicit conversions between
+them. The existing explicit casts through =(pointer void)= can erase or
+restore the pointee type for FFI.
+
+The =nil= literal takes its pointer type from the expected type when available.
+Without an expected pointer type it has type =(pointer void)=. For example,
+=(cast (pointer i64) nil)= supplies an explicit type. A bare =nil= can be compared
+with a pointer of any type.
+
+* Expanded core operations
+
+In the signatures below, =T= and =U= stand for pointee types. A concrete
+offset form such as =%pointer-offset-primitive-i64= specifies a pointee type
+using an integer, floating-point, or =bool= primitive suffix. The literal
+spelling =%pointer-offset-primitive-T= infers the pointee type from its pointer
+operand and also supports aggregates.
+
+| Form | Operand types | Result |
+|------+---------------+--------|
+| =%pointer-offset-primitive-T= | =(pointer T)=, =i64= | =(pointer T)= |
+| =%pointer-dereference= | =(pointer T)= | =T= |
+| =%pointer-index= | =(pointer T)=, =i64= | =T= |
+| =%is-null-primitive-pointer= | =(pointer T)= | =bool= |
+| =%=-primitive-pointer=, =%/=-primitive-pointer= | =(pointer T)=, =(pointer T)= | =bool= |
+| =%<-primitive-pointer=, =%<=-primitive-pointer=, =%>-primitive-pointer=, =%>=-primitive-pointer= | =(pointer T)=, =(pointer T)= | =bool= |
+| =%pointer-difference-primitive-pointer= | =(pointer T)=, =(pointer U)= | =usize= |
+
+An offset advances by =sizeof(T)= bytes per element and accepts negative
+counts. The count type =i64= is provisional pending a target-sized signed
+offset type. Indexing applies an element offset then loads the value.
+Offset, dereference, and indexing require a complete, sized pointee.
+
+Offsetting a typed null pointer is permitted. The caller is responsible for
+producing a valid address before loading or storing. The native operations
+perform no bounds checking. The evaluator diagnoses invalid accesses to its
+managed storage.
+
+The comparison forms require matching pointer types except when either
+operand is the =nil= literal. The operators ~==~, ~!=~, ~<~, ~<=~, ~>~, and
+~>=~ also support comparisons through generic fallback after lexical
+declarations and protocol evidence are resolved. Pointer ordering, including
+the relative order of =nil=, follows target address order. The difference
+operation returns the absolute unsigned byte distance, regardless of pointee
+type. Ordering and distances between independently allocated objects depend
+on their runtime addresses, which can differ between evaluation and native
+execution.
+
+#+begin_src lisp
+(%function next-byte ((bytes (pointer u8))) u8
+  (%pointer-index bytes 1))
+#+end_src
