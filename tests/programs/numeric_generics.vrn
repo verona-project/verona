@@ -1,0 +1,60 @@
+(%import checks)
+
+(%type Operators (array checks:result 11))
+
+(%macro numeric-type (type sum difference product quotient)
+  `(%function ,(symbol-concat "numeric-" type) ((left ,type) (right ,type)) Operators
+     (array-of
+       (checks:case ,(string-concat (symbol-name type) "/add") (== (+ left right) ,sum))
+       (checks:case ,(string-concat (symbol-name type) "/subtract") (== (- left right) ,difference))
+       (checks:case ,(string-concat (symbol-name type) "/multiply") (== (* left right) ,product))
+       (checks:case ,(string-concat (symbol-name type) "/divide") (== (/ left right) ,quotient))
+       (checks:case ,(string-concat (symbol-name type) "/unequal") (!= left right))
+       (checks:case ,(string-concat (symbol-name type) "/less") (< right left))
+       (checks:case ,(string-concat (symbol-name type) "/less-or-equal") (<= right left))
+       (checks:case ,(string-concat (symbol-name type) "/greater") (> left right))
+       (checks:case ,(string-concat (symbol-name type) "/greater-or-equal") (>= left right))
+       (checks:case ,(string-concat (symbol-name type) "/equal-is-less-or-equal") (<= left left))
+       (checks:case ,(string-concat (symbol-name type) "/equal-is-greater-or-equal") (>= left left)))))
+
+(%macro integer-type (type)
+  `(numeric-type ,type 42 38 80 20))
+
+(%macro integer-types (&rest types)
+  (compiler:map 'integer-type types))
+
+(integer-types i8 i16 i32 i64 u8 u16 u32 u64)
+
+(numeric-type f32 42.0 38.0 80.0 20.0)
+
+(numeric-type f64 42.0 38.0 80.0 20.0)
+
+(%function main ()
+  (tuple
+    Operators
+    Operators
+    Operators
+    Operators
+    Operators
+    Operators
+    Operators
+    Operators
+    Operators
+    Operators
+    (array checks:result 3))
+  (tuple
+    (numeric-i8 40 2)
+    (numeric-i16 40 2)
+    (numeric-i32 40 2)
+    (numeric-i64 40 2)
+    (numeric-u8 40 2)
+    (numeric-u16 40 2)
+    (numeric-u32 40 2)
+    (numeric-u64 40 2)
+    (numeric-f32 40.0 2.0)
+    (numeric-f64 40.0 2.0)
+    (let ((nan (/ (cast f64 0.0) 0.0)) (infinity (/ (cast f32 1.0) 0.0)))
+      (array-of
+        (checks:case "f64/nan-is-unequal" (!= nan nan))
+        (checks:boolean "f64/nan-is-not-equal" false (== nan nan))
+        (checks:case "f32/infinity-is-greater" (> infinity (cast f32 42.0)))))))

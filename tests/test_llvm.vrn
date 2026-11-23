@@ -1,0 +1,221 @@
+(import base)
+(import testing)
+(import allocator)
+(import arena)
+(import array)
+(import data)
+(import system_allocator :as system)
+(import libc.string :as cstring)
+(import core.check :as check)
+(import core.constants :as constants)
+(import core.emit :as emit)
+(import core.model :as m)
+(import core.reader :as reader)
+(import llvm)
+(import llvm.core :as ir)
+(import llvm.types :as t)
+(import llvm.target :as target)
+(import llvm.passes :as passes)
+
+(base:type ir-check (pointer (function ((pointer u8) (pointer u8)) testing:result)))
+
+(base:function release ((message (pointer u8))) unit
+  (match (base:is-null message) (true unit) (false (ir:message-dispose message))))
+
+(base:function verify ((owner llvm:session)) testing:result
+  (let
+    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+     (status i32 (llvm:verify owner (& message))))
+    (do (release message) (testing:assert-equal status 0))))
+
+(base:function optimize ((owner llvm:session)) testing:result
+  (let ((message (pointer u8) (cast (pointer u8) (target:null-pointer))))
+    (do
+      (ir:builder-clear (field owner builder))
+      (let
+        ((status
+           i32
+           (passes:run
+             (field owner module)
+             (cast t:machine-ref (target:null-pointer))
+             "default<O2>"
+             (& message)))
+         (result
+           testing:result
+           (testing:checks (testing:assert-equal status 0) (testing:check (base:is-null message)))))
+        (do (release message) result)))))
+
+; Failed runs return an owned diagnostic and leave the module usable.
+(base:function invalid-pipelines ((owner llvm:session) (remaining u64)) testing:result
+  (match remaining
+    (0 (testing:empty))
+    (_
+      (let
+        ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+         (status
+           i32
+           (passes:run
+             (field owner module)
+             (cast t:machine-ref (target:null-pointer))
+             "not-a-verona-llvm-pass"
+             (& message)))
+         (result
+           testing:result
+           (testing:checks
+             (testing:assert-not-equal status 0)
+             (testing:check (base:not (base:is-null message))))))
+        (do (release message) (testing:checks result (invalid-pipelines owner (- remaining 1))))))))
+
+(testing:test pipeline-error-recovery
+  (testing:with-fixture (owner llvm:session (llvm:create "passes") llvm:destroy)
+    (let
+      ((ty t:type-ref (ir:int-type (field owner context) 32))
+       (function t:value-ref
+         (ir:function-add (field owner module) "answer" (ir:function-type ty (& ty) 0 0)))
+       (block t:block-ref (ir:block-append (field owner context) function "entry")))
+      (do
+        (ir:builder-position (field owner builder) block)
+        (ir:build-ret (field owner builder) (ir:const-int ty 42 0))
+        (testing:checks (invalid-pipelines owner 8) (optimize owner) (verify owner))))))
+
+(base:function compare-ir ((owner llvm:session) (assert-ir ir-check)) testing:result
+  (let
+    ((before (pointer u8) (ir:module-string (field owner module)))
+     (status testing:result (optimize owner))
+     (after (pointer u8) (ir:module-string (field owner module)))
+     (result testing:result (testing:checks status (verify owner) (assert-ir before after))))
+    (do (release before) (release after) result)))
+
+; Lower one expanded module directly so the test can inspect the same LLVM
+; session before and after the pass pipeline.
+(base:function check-ir ((text (pointer u8)) (assert-ir ir-check)) testing:result
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (backing allocator:backend (arena:allocator (& memory)))
+     (items m:tape (m:empty backing))
+     (errors u64 0)
+     (length u64 (cstring:strlen text))
+     (files
+       m:modules-array
+       (m:modules-empty
+         (cast (pointer m:module-info) (m:empty-env))
+         (array:layout constants:module-byte-size constants:node-alignment backing)))
+     (edges
+       m:imports-array
+       (m:imports-empty
+         (cast (pointer m:import-info) (m:empty-env))
+         (array:layout constants:import-byte-size constants:node-alignment backing)))
+     (session m:module-session (m:module-session (& files) (& edges) 0 0 (m:empty-env) 0))
+     (c
+       m:context
+       (m:context
+         "llvm-test.vrn"
+         (data:view text length)
+         (& items)
+         (& memory)
+         (& errors)
+         (cast (pointer void) (& session))
+         0))
+     (result
+       testing:result
+       (do
+         (m:storage
+           (m:modules-append
+             (& files)
+             (m:module-info "llvm-test" "llvm-test.vrn" 0 length 0 (ordered) 0 0)))
+         (let ((functions u64 (reader:read c)) (main u64 (check:check c functions)))
+           (match errors
+             (0
+               (testing:with-fixture
+                 (owner
+                   llvm:session
+                   (emit:build c functions main false true false false)
+                   llvm:destroy)
+                 (verify owner)
+                 (compare-ir owner assert-ir)))
+             (_ (testing:fail)))))))
+    (do (arena:destroy (& memory)) result)))
+
+(base:function contains ((text (pointer u8)) (needle (pointer u8))) bool
+  (base:not (base:is-null (cstring:strstr text needle))))
+
+(base:function count-occurrences ((text (pointer u8)) (needle (pointer u8))) u64
+  (let ((found (pointer u8) (cstring:strstr text needle)))
+    (match (base:is-null found)
+      (true 0)
+      (false (+ 1 (count-occurrences (pointer-offset found (cstring:strlen needle)) needle))))))
+
+(base:function temporary-array-ir ((before (pointer u8)) (after (pointer u8))) testing:result
+  (testing:checks
+    (testing:check (contains before "alloca"))
+    (testing:check (base:not (contains after "alloca")))
+    (testing:check (base:not (contains after "array.index.oob")))))
+
+(testing:test sroa-removes-temporary-array-storage
+  (check-ir "(%function main () i64 (index (array-of (cast i64 40) 2) 0))" temporary-array-ir))
+
+(base:function escaping-storage-ir ((before (pointer u8)) (after (pointer u8))) testing:result
+  (testing:checks
+    (testing:check (contains before "alloca"))
+    (testing:check (contains before "@inspect_scalar"))
+    (testing:check (contains after "call void @inspect_scalar"))))
+
+(testing:test sroa-preserves-escaping-storage
+  (check-ir
+    "(%external-function inspect \"inspect_scalar\" ((pointer i64)) void)
+     (%function keep ((value i64)) i64 (do (inspect (address-of value)) value))
+     (%function main () i64 (keep 42))"
+    escaping-storage-ir))
+
+(base:function known-callback-ir ((before (pointer u8)) (after (pointer u8))) testing:result
+  (testing:checks
+    (testing:check (contains before "call i64 %"))
+    (testing:check (base:not (contains after "call i64 %")))))
+
+(testing:test specializes-known-function-pointer-arguments
+  (check-ir
+    "(%type Callback (pointer (function (i64) i64)))
+     (%function increment ((value i64)) i64 (%+-primitive-i64 value 1))
+     (%noinline increment)
+     (%function apply ((callback Callback) (value i64)) i64 (callback value))
+     (%noinline apply)
+     (%function main () i64 (apply increment 41))"
+    known-callback-ir))
+
+(base:function inlined-constant-ir ((before (pointer u8)) (after (pointer u8))) testing:result
+  (testing:checks
+    (testing:check (contains before "choose"))
+    (testing:check (base:not (contains after "choose")))
+    (testing:check (base:not (contains after "phi i64")))
+    (testing:check (contains after "ret i32 42"))))
+
+(testing:test simplifies-constant-arguments-after-inlining
+  (check-ir
+    "(%function choose ((mode i64) (value i64)) i64
+       (match (%=-primitive-i64 mode 0) (true value) (false (%+-primitive-i64 value 1))))
+     (%function main () i64 (choose 0 42))"
+    inlined-constant-ir))
+
+(base:function repeated-multiplication-ir ((before (pointer u8)) (after (pointer u8)))
+  testing:result
+  (testing:checks
+    (testing:assert-equal (count-occurrences before "mul i64") 2)
+    (testing:assert-equal (count-occurrences after "mul i64") 1)))
+
+(testing:test reuses-dominating-computation
+  (check-ir
+    "(%external-function condition \"cse_condition\" () bool)
+     (%external-function input \"cse_input\" () i64)
+     (%function calculate ((condition bool) (value i64)) i64
+       (let ((base (%*-primitive-i64 value value)))
+         (match condition (true (%+-primitive-i64 base (%*-primitive-i64 value value))) (false base))))
+     (%function main () i64 (calculate (condition) (input)))"
+    repeated-multiplication-ir))
+
+(export
+  pipeline-error-recovery
+  sroa-removes-temporary-array-storage
+  sroa-preserves-escaping-storage
+  specializes-known-function-pointer-arguments
+  simplifies-constant-arguments-after-inlining
+  reuses-dominating-computation)

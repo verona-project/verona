@@ -3,9 +3,6 @@
 (import core.eval :as e)
 (import core.reader :as reader)
 (import core.check :as check)
-(import core.expand :as expand)
-(import core.constants :as constants)
-(import array)
 (import core.model :as m)
 (import allocator :as a)
 (import arena)
@@ -15,7 +12,7 @@
 (import libc.string :as cstring)
 
 ; Every case evaluates the same checked program repeatedly, including after failure.
-(base:function case ((text (pointer u8)) (config e:options) (code u64) (expected i64))
+(base:function check-execution ((text (pointer u8)) (config e:options) (code u64) (expected i64))
   testing:result
   (let
     ((memory arena:arena (arena:create (system:create) 4096))
@@ -62,12 +59,12 @@
 
 (testing:test execution-limits
   (testing:checks
-    (case "(%function main () i64 7)" (e:options 2 1) 0 7)
-    (case "(%function main () i64 7)" (e:options 1 1) 3 0)
-    (case "(%function f () i64 7)(%function main () i64 (f))" (e:options 0 1) 4 0)
-    (case "(%function f () i64 7)(%function main () i64 (f))" (e:options 0 2) 0 7)
-    (case "(%function f () i64 (f))(%function main () i64 (f))" (e:options 100 0) 3 0)
-    (case
+    (check-execution "(%function main () i64 7)" (e:options 2 1) 0 7)
+    (check-execution "(%function main () i64 7)" (e:options 1 1) 3 0)
+    (check-execution "(%function f () i64 7)(%function main () i64 (f))" (e:options 0 1) 4 0)
+    (check-execution "(%function f () i64 7)(%function main () i64 (f))" (e:options 0 2) 0 7)
+    (check-execution "(%function f () i64 (f))(%function main () i64 (f))" (e:options 100 0) 3 0)
+    (check-execution
       "(%function f ((n i64)) i64 (match (%=-primitive-i64 n 0) (true 17) (false (f (%--primitive-i64 n 1)))))(%function main () i64 (f 3000))"
       (e:options 0 0)
       0
@@ -238,288 +235,19 @@
     (typed-entry "(%function entry () bool true)(%function main () i64 0)" 2 1)
     (typed-entry "(%function entry () unit unit)(%function main () i64 0)" 1 0)))
 
-(testing:test structured-ownership
-  (let
-    ((memory arena:arena (arena:create (system:create) 4096))
-     (items m:tape (m:empty (arena:allocator (& memory))))
-     (errors u64 0)
-     (text
-       (pointer u8)
-       "(%type P (product (value (tuple i64 bool unit))))(%function identity ((p P)) P p)(%function main () P (P (tuple 42 true unit)))")
-     (c
-       m:context
-       (m:context
-         "aggregate test"
-         (data:view text (cstring:strlen text))
-         (& items)
-         (& memory)
-         (& errors)
-         (m:empty-env)
-         0))
-     (functions u64 (reader:read c))
-     (main u64 (check:check c functions))
-     (args e:values-array (e:values-new (system:create)))
-     (first e:outcome (e:run c main args (e:options 0 0) (system:create)))
-     (value e:scalar-value (field first result))
-     (added unit (m:storage (e:values-append (& args) value)))
-     (copy
-       e:outcome
-       (e:run-with-aggregates
-         c
-         (m:next c functions)
-         args
-         (field first aggregates)
-         (e:options 0 0)
-         (system:create)))
-     (unbacked e:outcome (e:run c (m:next c functions) args (e:options 0 0) (system:create)))
-     (released unit (e:destroy (& first)))
-     (outer u64 (base:convert (field (field copy result) scalar)))
-     (inner u64 (base:convert (field (e:values-at (field copy aggregates) outer) scalar)))
-     (checks
-       testing:result
-       (testing:checks
-         (testing:check (== errors 0))
-         (testing:check (== (field copy code) 0))
-         (testing:check (== (field unbacked code) 6))
-         (testing:check (== (field (e:values-at (field copy aggregates) inner) scalar) 42))
-         (testing:check
-           (== (field (e:values-at (field copy aggregates) (+ inner 1)) scalar) 1)))))
-    (do
-      (e:destroy (& copy))
-      (e:destroy (& unbacked))
-      (e:values-destroy (& args))
-      (let ((allocation testing:result (allocation-cases c main args 0)))
-        (do (arena:destroy (& memory)) (testing:checks checks allocation))))))
-
-(testing:test structured-execution
-  (testing:checks
-    ; Exactly nine dispatches: the constructor call in the scrutinee runs once.
-    (case
-      "(%type S (sum (X)))(%function make () S (X))(%function main () i64 (match (make) ((X) 42)))"
-      (e:options 9 0)
-      0
-      42)
-    (case
-      "(%type S (sum (X)))(%function make () S (X))(%function main () i64 (match (make) ((X) 42)))"
-      (e:options 8 0)
-      3
-      0)
-    (case
-      "(%type P (product (x i64) (y i64)))(%function main () i64 (let ((p (P (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))) 0))"
-      (e:options 0 0)
-      1
-      0)
-    (case
-      "(%type S (sum (X i64 i64)))(%function main () i64 (let ((s (X (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))) 0))"
-      (e:options 0 0)
-      1
-      0)
-    (case
-      "(%function main () i64 (let ((t (tuple (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))) 0))"
-      (e:options 0 0)
-      1
-      0)))
-
-(testing:test macro-generated-program-is-reusable
-  (let
-    ((memory arena:arena (arena:create (system:create) 4096))
-     (items m:tape (m:empty (arena:allocator (& memory))))
-     (errors u64 0)
-     (text
-       (pointer u8)
-       "(%macro answer () (let ((items (list 1 42))) (car (cdr items))))(%function main () i64 (answer))")
-     (c
-       m:context
-       (m:context
-         "expression macro reuse"
-         (data:view text (cstring:strlen text))
-         (& items)
-         (& memory)
-         (& errors)
-         (m:empty-env)
-         0))
-     (forms u64 (reader:read c))
-     (function u64 (m:next c forms))
-     (first u64 0)
-     (tail u64 0)
-     (installed unit (expand:declaration c forms (& first) (& tail)))
-     (main u64 (check:check c function))
-     (args e:values-array (e:values-new (system:create)))
-     (one e:outcome (e:run c main args (e:options 0 0) (system:create)))
-     (two e:outcome (e:run c main args (e:options 0 0) (system:create)))
-     (checks
-       testing:result
-       (testing:checks
-         (testing:check (== errors 0))
-         (testing:check (== (field one code) 0))
-         (testing:check (== (field two code) 0))
-         (testing:check (== (field (field one result) scalar) 42))
-         (testing:check (== (field (field two result) scalar) 42)))))
-    (do
-      (e:destroy (& one))
-      (e:destroy (& two))
-      (e:values-destroy (& args))
-      (arena:destroy (& memory))
-      checks)))
-
 (testing:test default-generic-execution
   (testing:checks
-    (case "(%function main () i64 (/ (+ (cast i64 40) 44) 2))" (e:options 0 0) 0 42)
-    (case "(%function main () i64 (match (< (cast i8 -1) 0) (true (+ 40 2)) (false 0)))" (e:options 0 0) 0 42)
-    (case
+    (check-execution "(%function main () i64 (/ (+ (cast i64 40) 44) 2))" (e:options 0 0) 0 42)
+    (check-execution
+      "(%function main () i64 (match (< (cast i8 -1) 0) (true (+ 40 2)) (false 0)))"
+      (e:options 0 0)
+      0
+      42)
+    (check-execution
       "(%function main () i64 (%sext-primitive-i8-i64 (/ (cast i8 -128) -1)))"
       (e:options 0 0)
       2
       0)))
-
-(testing:test component-pattern-execution
-  (testing:checks
-    (case
-      "(%function main () i64 (match (tuple true (cast i64 42)) ((tuple false _) (%/-primitive-i64 1 0)) ((tuple flag answer) (match flag (true answer) (false 0)))))"
-      (e:options 0 0)
-      0
-      42)
-    (case
-      "(%type S (sum (Some bool i64) (None)))(%function main () i64 (match (Some false 42) ((Some true _) (%/-primitive-i64 1 0)) ((Some _ answer) answer) ((None) 0)))"
-      (e:options 0 0)
-      0
-      42)
-    (case
-      "(%function main () i64 (match (tuple (%/-primitive-i64 1 0)) ((tuple _) 42)))"
-      (e:options 0 0)
-      1
-      0)))
-
-(base:function borrowed-case
-  ((c m:context) (entry u64) (args e:values-array) (borrowed e:values-array) (code u64))
-  testing:result
-  (let
-    ((result
-       e:outcome
-       (e:run-with-aggregates c entry args borrowed (e:options 0 0) (system:create)))
-     (checks testing:result (testing:check (== (field result code) code))))
-    (do (e:destroy (& result)) checks)))
-
-(testing:test structured-invalid-inputs
-  (let
-    ((memory arena:arena (arena:create (system:create) 4096))
-     (items m:tape (m:empty (arena:allocator (& memory))))
-     (errors u64 0)
-     (text
-       (pointer u8)
-       "(%type S (sum (One i64) (No)))(%function identity ((s S)) S s)(%function main () S (One 7))")
-     (c
-       m:context
-       (m:context
-         "aggregate validation"
-         (data:view text (cstring:strlen text))
-         (& items)
-         (& memory)
-         (& errors)
-         (m:empty-env)
-         0))
-     (functions u64 (reader:read c))
-     (main u64 (check:check c functions))
-     (args e:values-array (e:values-new (system:create)))
-     (first e:outcome (e:run c main args (e:options 0 0) (system:create)))
-     (borrowed e:values-array (field first aggregates))
-     (bytes (pointer e:scalar-value) (tuple-get borrowed 0))
-     (ty u64 (field (field first result) ty))
-     (added unit (m:storage (e:values-append (& args) (field first result))))
-     (valid testing:result (borrowed-case c (m:next c functions) args borrowed 0))
-     (tag unit (do (store (deref (pointer-offset bytes 1)) (e:scalar-value 3 99)) unit))
-     (bad-tag testing:result (borrowed-case c (m:next c functions) args borrowed 6))
-     (length
-       unit
-       (do
-         (store (deref (pointer-offset bytes 1)) (e:scalar-value 3 0))
-         (store (deref bytes) (e:scalar-value ty 20))
-         unit))
-     (bad-length testing:result (borrowed-case c (m:next c functions) args borrowed 6))
-     (payload
-       unit
-       (do
-         (store (deref bytes) (e:scalar-value ty 2))
-         (store (deref (pointer-offset bytes 2)) (e:scalar-value 2 1))
-         unit))
-     (bad-payload testing:result (borrowed-case c (m:next c functions) args borrowed 6)))
-    (do
-      (e:destroy (& first))
-      (e:values-destroy (& args))
-      (arena:destroy (& memory))
-      (testing:checks valid bad-tag bad-length bad-payload))))
-
-(base:function collect-state-forms
-  ((c m:context) (root u64) (first (pointer u64)) (tail (pointer u64))) unit
-  (match root
-    (0 unit)
-    (_
-      (let ((next u64 (m:next c root)))
-        (do (expand:declaration c root first tail) (collect-state-forms c next first tail))))))
-
-(base:function state-compilation ((invalid bool)) testing:result
-  (let
-    ((memory arena:arena (arena:create (system:create) 4096))
-     (backing a:backend (arena:allocator (& memory)))
-     (items m:tape (m:empty backing))
-     (files
-       m:modules-array
-       (m:modules-empty
-         (cast (pointer m:module-info) (m:empty-env))
-         (array:layout constants:module-byte-size 8 backing)))
-     (edges
-       m:imports-array
-       (m:imports-empty
-         (cast (pointer m:import-info) (m:empty-env))
-         (array:layout constants:import-byte-size 8 backing)))
-     (session m:module-session (m:module-session (& files) (& edges) 0 0 (m:empty-env) 0))
-     (errors u64 0)
-     (text
-       (pointer u8)
-       "(cond ((compiler:state-has? 'compiled) (compiler:state-set! 'answer 0)) (true (compiler:state-set! 'compiled true) (compiler:state-set! 'answer 42)))(compiler:state-set! 'data '(40))(%macro stored () (car (compiler:state-ref 'data)))(%function first () i64 (stored))(%macro answer () (cond ((equal? (compiler:state-ref 'data) '(40)) (compiler:state-ref 'answer)) (true 0)))(%function main () i64 (answer))")
-     (c
-       m:context
-       (m:context
-         "state compilation isolation"
-         (data:view text (cstring:strlen text))
-         (& items)
-         (& memory)
-         (& errors)
-         (cast (pointer void) (& session))
-         0))
-     (roots u64 (reader:read c))
-     (first u64 0)
-     (tail u64 0)
-     (collected unit (collect-state-forms c roots (& first) (& tail)))
-     ; Force an ordinary analysis failure after executing the state statements.
-     (broken
-       unit
-       (match invalid
-         (false unit)
-         (true (do (m:typed c (m:next c (m:next c (check:signature c tail))) 3 0 0 1) unit))))
-     (main u64 (check:check c first))
-     (args e:values-array (e:values-new (system:create)))
-     (result
-       testing:result
-       (match invalid
-         (true (testing:check (> errors 0)))
-         (false
-           (let
-             ((one e:outcome (e:run c main args (e:options 0 0) (system:create)))
-              (two e:outcome (e:run c main args (e:options 0 0) (system:create)))
-              (result
-                testing:result
-                (testing:checks
-                  (testing:check (== errors 0))
-                  (testing:check (== (field one code) 0))
-                  (testing:check (== (field two code) 0))
-                  (testing:check (== (field (field one result) scalar) 42))
-                  (testing:check (== (field (field two result) scalar) 42)))))
-             (do (e:destroy (& one)) (e:destroy (& two)) result))))))
-    (do (e:values-destroy (& args)) (arena:destroy (& memory)) result)))
-
-(testing:test compile-time-state-isolation
-  (testing:checks (state-compilation false) (state-compilation true) (state-compilation false)))
 
 (base:function opaque-pointer-equality ((left u64) (right u64) (expected i64)) testing:result
   (let
@@ -560,13 +288,13 @@
     (opaque-pointer-equality 0 1 0)
     (opaque-pointer-equality 1 1 42)
     (opaque-pointer-equality 1 2 0)
-    (case
+    (check-execution
       "(%function main () i64 (let ((x i64 1) (p (& x)) (q (pointer-offset p 0))) (match (== p q) (true 42) (false 0))))"
       (e:options 0 0)
       0
       42)
     ; Equality neither dereferences nor tests the lifetime of the pointee.
-    (case
+    (check-execution
       "(%function escaped () (pointer i64) (let ((x i64 7)) (& x)))(%function main () i64 (let ((p (escaped))) (match (== p p) (true 42) (false 0))))"
       (e:options 0 0)
       0
@@ -574,12 +302,12 @@
 
 (testing:test global-storage
   (testing:checks
-    (case
+    (check-execution
       "(%variable counter i64 40)(%function address () (pointer i64) (& counter))(%function main () i64 (do (store (deref (address)) (%+-primitive-i64 counter 2)) counter))"
       (e:options 0 0)
       0
       42)
-    (case
+    (check-execution
       "(%variable counter i64 0)(%function main () i64 (match (%=-primitive-i64 counter 0) (true (do (store counter 1) (%/-primitive-i64 1 0))) (false 42)))"
       (e:options 0 0)
       1
@@ -612,16 +340,12 @@
     (do (e:values-destroy (& args)) (arena:destroy (& memory)) checks)))
 
 (export
+  check-execution
+  allocation-cases
   pointer-identity
-  compile-time-state-isolation
   global-storage
   default-generic-execution
-  macro-generated-program-is-reusable
-  component-pattern-execution
   managed-memory-storage
-  structured-invalid-inputs
-  structured-ownership
-  structured-execution
   execution-limits
   reusable-and-storage
   deep-expressions

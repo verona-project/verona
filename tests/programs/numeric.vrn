@@ -1,0 +1,24 @@
+(%import checks)
+
+(%function signed-identity ((x i64)) i64
+  (let ((y i64 x)) y))
+
+(checks:run
+  (checks:i64 "i64/zero" 0 0)
+  (checks:i64 "i64/minus-one" -1 -1)
+  (checks:i64 "i64/max" 9223372036854775807 9223372036854775807)
+  (checks:i64 "i64/min" -9223372036854775808 -9223372036854775808)
+  (checks:i64 "i64/add-wraps" -9223372036854775808 (%+-primitive-i64 9223372036854775807 1))
+  (checks:i64 "i64/subtract-wraps" 9223372036854775807 (%--primitive-i64 -9223372036854775808 1))
+  (checks:i64 "i64/multiply-wraps" -2 (%*-primitive-i64 9223372036854775807 2))
+  (checks:i64 "i64/divide-negative-by-positive" -2 (%/-primitive-i64 -7 3))
+  (checks:i64 "i64/divide-positive-by-negative" -2 (%/-primitive-i64 7 -3))
+  (checks:i64 "i64/divide-negatives" 2 (%/-primitive-i64 -7 -3))
+  (checks:i64
+    "i64/nested-arithmetic"
+    26
+    (%+-primitive-i64 (%*-primitive-i64 4 5) (%--primitive-i64 9 3)))
+  (checks:i64 "i64/min-through-call" -9223372036854775808 (signed-identity -9223372036854775808))
+  (checks:case
+    "i64/min-through-binding-and-call"
+    (let ((x i64 -9223372036854775808)) (%=-primitive-i64 (signed-identity x) x))))

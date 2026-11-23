@@ -1,0 +1,130 @@
+(import base)
+(import testing)
+(import core.eval :as e)
+(import core.reader :as reader)
+(import core.check :as check)
+(import core.expand :as expand)
+(import core.constants :as constants)
+(import array)
+(import core.model :as m)
+(import allocator :as a)
+(import arena)
+(import data)
+(import system_allocator :as system)
+(import libc.string :as cstring)
+
+(testing:test macro-generated-program-is-reusable
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (items m:tape (m:empty (arena:allocator (& memory))))
+     (errors u64 0)
+     (text
+       (pointer u8)
+       "(%macro answer () (let ((items (list 1 42))) (car (cdr items))))(%function main () i64 (answer))")
+     (c
+       m:context
+       (m:context
+         "expression macro reuse"
+         (data:view text (cstring:strlen text))
+         (& items)
+         (& memory)
+         (& errors)
+         (m:empty-env)
+         0))
+     (forms u64 (reader:read c))
+     (function u64 (m:next c forms))
+     (first u64 0)
+     (tail u64 0)
+     (installed unit (expand:declaration c forms (& first) (& tail)))
+     (main u64 (check:check c function))
+     (args e:values-array (e:values-new (system:create)))
+     (one e:outcome (e:run c main args (e:options 0 0) (system:create)))
+     (two e:outcome (e:run c main args (e:options 0 0) (system:create)))
+     (checks
+       testing:result
+       (testing:checks
+         (testing:check (== errors 0))
+         (testing:check (== (field one code) 0))
+         (testing:check (== (field two code) 0))
+         (testing:check (== (field (field one result) scalar) 42))
+         (testing:check (== (field (field two result) scalar) 42)))))
+    (do
+      (e:destroy (& one))
+      (e:destroy (& two))
+      (e:values-destroy (& args))
+      (arena:destroy (& memory))
+      checks)))
+
+(base:function collect-state-forms
+  ((c m:context) (root u64) (first (pointer u64)) (tail (pointer u64))) unit
+  (match root
+    (0 unit)
+    (_
+      (let ((next u64 (m:next c root)))
+        (do (expand:declaration c root first tail) (collect-state-forms c next first tail))))))
+
+(base:function state-compilation ((invalid bool)) testing:result
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (backing a:backend (arena:allocator (& memory)))
+     (items m:tape (m:empty backing))
+     (files
+       m:modules-array
+       (m:modules-empty
+         (cast (pointer m:module-info) (m:empty-env))
+         (array:layout constants:module-byte-size 8 backing)))
+     (edges
+       m:imports-array
+       (m:imports-empty
+         (cast (pointer m:import-info) (m:empty-env))
+         (array:layout constants:import-byte-size 8 backing)))
+     (session m:module-session (m:module-session (& files) (& edges) 0 0 (m:empty-env) 0))
+     (errors u64 0)
+     (text
+       (pointer u8)
+       "(cond ((compiler:state-has? 'compiled) (compiler:state-set! 'answer 0)) (true (compiler:state-set! 'compiled true) (compiler:state-set! 'answer 42)))(compiler:state-set! 'data '(40))(%macro stored () (car (compiler:state-ref 'data)))(%function first () i64 (stored))(%macro answer () (cond ((equal? (compiler:state-ref 'data) '(40)) (compiler:state-ref 'answer)) (true 0)))(%function main () i64 (answer))")
+     (c
+       m:context
+       (m:context
+         "state compilation isolation"
+         (data:view text (cstring:strlen text))
+         (& items)
+         (& memory)
+         (& errors)
+         (cast (pointer void) (& session))
+         0))
+     (roots u64 (reader:read c))
+     (first u64 0)
+     (tail u64 0)
+     (collected unit (collect-state-forms c roots (& first) (& tail)))
+     ; Force an ordinary analysis failure after executing the state statements.
+     (broken
+       unit
+       (match invalid
+         (false unit)
+         (true (do (m:typed c (m:next c (m:next c (check:signature c tail))) 3 0 0 1) unit))))
+     (main u64 (check:check c first))
+     (args e:values-array (e:values-new (system:create)))
+     (result
+       testing:result
+       (match invalid
+         (true (testing:check (> errors 0)))
+         (false
+           (let
+             ((one e:outcome (e:run c main args (e:options 0 0) (system:create)))
+              (two e:outcome (e:run c main args (e:options 0 0) (system:create)))
+              (result
+                testing:result
+                (testing:checks
+                  (testing:check (== errors 0))
+                  (testing:check (== (field one code) 0))
+                  (testing:check (== (field two code) 0))
+                  (testing:check (== (field (field one result) scalar) 42))
+                  (testing:check (== (field (field two result) scalar) 42)))))
+             (do (e:destroy (& one)) (e:destroy (& two)) result))))))
+    (do (e:values-destroy (& args)) (arena:destroy (& memory)) result)))
+
+(testing:test compile-time-state-isolation
+  (testing:checks (state-compilation false) (state-compilation true) (state-compilation false)))
+
+(export macro-generated-program-is-reusable compile-time-state-isolation)

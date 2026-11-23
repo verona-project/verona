@@ -1,0 +1,72 @@
+(%import checks)
+
+(checks:run
+  (checks:i64 "factorial" 120 (let ((input i64 5)) (factorial input)))
+  (checks:i64 "forward-call" 26 (%+-primitive-i64 (add 3 5) (add 7 11)))
+  (checks:i64 "mutual-recursion" 29 (match (even 10) (true (identity 29)) (false 0)))
+  (checks:i64 "unit-argument" 8 (let ((u unit (noop unit))) 8))
+  (checks:i64 "binding-shadows-function" 9 (let ((identity i64 9)) identity))
+  (checks:case "match-true-skips-false" (guarded true))
+  (checks:case
+    "match-false-first-skips-true"
+    (match false (false true) (true (%=-primitive-i64 (%/-primitive-i64 1 0) 0))))
+  (checks:i64 "match-false-last-skips-true" 7 (match false (true (%/-primitive-i64 1 0)) (false 7)))
+  (checks:i64
+    "nested-match"
+    4
+    (match (match true (true false) (false true)) (true 1) (false (match false (true 3) (false 4)))))
+  (checks:i64
+    "sequential-let-bindings"
+    63
+    (let ((x i64 7) (y i64 (%+-primitive-i64 x 2))) (%*-primitive-i64 x y)))
+  (checks:i64
+    "shadowing-let-initializer"
+    19
+    (let ((x i64 9)) (%+-primitive-i64 (let ((x i64 (%+-primitive-i64 x 1))) x) x)))
+  (checks:i64 "empty-let" 13 (let () 13))
+  (checks:i64 "unit-binding" 17 (let ((u unit unit) (b bool true)) (match b (true 17) (false 2))))
+  (checks:i64 "do-returns-last" 42 (do (cast i64 1) (%+-primitive-i64 1 2) 42))
+  (checks:i64
+    "do-discards-heterogeneous-values"
+    42
+    (do (tuple (cast i64 1) true) (array-of (cast i64 2)) "discard" (cast f64 1.5) 42))
+  (checks:i64 "nested-empty-do" 42 (do (do) (do (cast i64 1) (do)) 42))
+  (checks:i64
+    "let-multiple-body-expressions"
+    42
+    (let ((value i64 40) (other i64 (%+-primitive-i64 value 1)))
+      (let ((value i64 99)) value value)
+      (tuple value other)
+      (%+-primitive-i64 value 2)))
+  (checks:i64 "empty-let-with-multiple-expressions" 42 (let () (cast i64 1) (do) 42))
+  (checks:i64 "empty-do-produces-unit" 42 (let ((empty unit (do))) 42))
+  (checks:i64
+    "nested-match-with-unit"
+    1234567890123456789
+    (let ((u (match (match true (true false) (false true)) (true unit) (false (noop unit)))))
+      (match (match false (true true) (false (%=-primitive-i64 2 2)))
+        (true (match true (true 1234567890123456789) (false 2)))
+        (false (match false (true 3) (false 4)))))))
+
+(%function factorial ((n i64)) i64
+  (match (%=-primitive-i64 n 0)
+    (true 1)
+    (false (%*-primitive-i64 n (factorial (%--primitive-i64 n 1))))))
+
+(%function add ((a i64) (b i64)) i64
+  (%+-primitive-i64 a b))
+
+(%function even ((n i64)) bool
+  (match (%=-primitive-i64 n 0) (true true) (false (odd (%--primitive-i64 n 1)))))
+
+(%function odd ((n i64)) bool
+  (match (%=-primitive-i64 n 0) (true false) (false (even (%--primitive-i64 n 1)))))
+
+(%function identity ((x i64)) i64
+  x)
+
+(%function noop ((x unit)) unit
+  (match true (true x) (false unit)))
+
+(%function guarded ((flag bool)) bool
+  (match flag (true true) (false (%=-primitive-i64 (%/-primitive-i64 1 0) 0))))

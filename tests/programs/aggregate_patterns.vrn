@@ -1,0 +1,44 @@
+(%import checks)
+
+(%type Option (sum (Some i64) (None)))
+
+(%type Result (sum (Pair bool u8 i64) (Empty)))
+
+(%function choose-option ((value Option)) i64
+  (match value ((Some 0) 10) ((Some x) x) ((None) 0)))
+
+(%function choose-result ((value Result)) i64
+  (match value ((Pair true #\a _) 1) ((Pair false 97 result) result) ((Pair _ _ _) 0) ((Empty) 0)))
+
+(%function tuple-flag ((value (tuple bool i64))) i64
+  (match value ((tuple false _) 0) ((tuple ok total) (match ok (true total) (false 1)))))
+
+(%function tuple-character ((value (tuple u8 bool i64))) i64
+  (match value ((tuple #\a true _) 1) ((tuple 97 false result) result) ((tuple _ _ _) 0)))
+
+(%function whole-tuple ((value (tuple i64 bool))) i64
+  (match value ((tuple 0 true) 1) (whole (tuple-get whole 0))))
+
+(%function make-tuple ((counter (pointer i64))) (tuple i64)
+  (do (store (deref counter) (%+-primitive-i64 (deref counter) 1)) (tuple (cast i64 42))))
+
+(checks:run
+  (checks:i64 "sum/literal-arm" 10 (choose-option (Some 0)))
+  (checks:i64 "sum/payload-arm" 42 (choose-option (Some 42)))
+  (checks:i64 "sum/empty-arm" 0 (choose-option (None)))
+  (checks:i64 "sum/literal-and-binding" 42 (choose-result (Pair false #\a 42)))
+  (checks:i64 "tuple/bind-flag-and-value" 42 (tuple-flag (tuple true (cast i64 42))))
+  (checks:i64 "tuple/character-literal" 42 (tuple-character (tuple #\a false (cast i64 42))))
+  (checks:i64 "tuple/whole-value" 42 (whole-tuple (tuple (cast i64 42) false)))
+  (checks:case "tuple/empty" (match (tuple) ((tuple) true)))
+  ; The whole-value fallback may follow a complete tuple pattern.
+  (checks:case
+    "tuple/fallback-after-exhaustive-pattern"
+    (match (tuple true) ((tuple _) true) (_ false)))
+  (checks:i64
+    "tuple/scrutinee-evaluated-once"
+    42
+    (let ((counter i64 0))
+      (match (make-tuple (& counter))
+        ((tuple 0) 0)
+        ((tuple answer) (%*-primitive-i64 answer counter))))))

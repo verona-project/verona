@@ -815,8 +815,8 @@ escape analysis, and LLVM decides when promotion is legal and profitable.
 
 A regression passes a temporary tuple through a function and projects both
 components at `-O0` and `-O2`, checking the same result as the evaluator. A
-structural check runs the pinned `opt` default O2 pipeline over Verona's emitted
-IR: the constant-index temporary array begins with an alloca and bounds-check
+Verona unit test runs LLVM's default O2 pipeline on the lowered module. The
+constant-index temporary array begins with an alloca and bounds-check
 blocks, then has neither after optimization. An escaping address passed to an
 unknown external call remains present after the same pipeline. These assertions
 verify an eligible promotion and a required escape boundary without asserting

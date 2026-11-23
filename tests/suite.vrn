@@ -3,7 +3,10 @@
 (import test_support :as support)
 (import test_reader :as reader)
 (import test_eval :as eval)
+(import test_eval_aggregates :as aggregates)
+(import test_expand :as expand)
 (import test_link :as link)
+(import test_llvm :as llvm-tests)
 (import data)
 (import system_allocator :as system)
 (import libc.filesystem :as fs)
@@ -16,7 +19,9 @@
   (let ((result testing:result (testing:execute test)))
     (do
       (m:text constants:STDOUT-FILENO name)
-      (m:text constants:STDOUT-FILENO (match (field result failed) (0 ": passed\n") (_ ": FAILED\n")))
+      (m:text
+        constants:STDOUT-FILENO
+        (match (field result failed) (0 ": passed\n") (_ ": FAILED\n")))
       result)))
 
 (base:function main () exit-code
@@ -40,24 +45,42 @@
                       (run-case
                         "link argv storage and allocation cleanup"
                         link:argument-storage-and-allocation-cleanup)
+                      (run-case "LLVM pass error recovery" llvm-tests:pipeline-error-recovery)
+                      (run-case
+                        "LLVM SROA removes temporary array storage"
+                        llvm-tests:sroa-removes-temporary-array-storage)
+                      (run-case
+                        "LLVM SROA preserves escaping storage"
+                        llvm-tests:sroa-preserves-escaping-storage)
+                      (run-case
+                        "LLVM specializes known function pointer arguments"
+                        llvm-tests:specializes-known-function-pointer-arguments)
+                      (run-case
+                        "LLVM simplifies constant arguments after inlining"
+                        llvm-tests:simplifies-constant-arguments-after-inlining)
+                      (run-case
+                        "LLVM reuses a dominating computation"
+                        llvm-tests:reuses-dominating-computation)
                       (run-case "default numeric generic execution" eval:default-generic-execution)
                       (run-case
                         "macro-generated checked program reuse"
-                        eval:macro-generated-program-is-reusable)
+                        expand:macro-generated-program-is-reusable)
                       (run-case
                         "tuple and sum component pattern execution"
-                        eval:component-pattern-execution)
+                        aggregates:component-pattern-execution)
                       (run-case "managed memory allocation cleanup" eval:managed-memory-storage)
                       (run-case "global storage and evaluation isolation" eval:global-storage)
                       (run-case "pointer identity" eval:pointer-identity)
-                      (run-case "compile-time state isolation" eval:compile-time-state-isolation)
-                      (run-case "aggregate argument validation" eval:structured-invalid-inputs)
+                      (run-case "compile-time state isolation" expand:compile-time-state-isolation)
+                      (run-case
+                        "aggregate argument validation"
+                        aggregates:structured-invalid-inputs)
                       (run-case
                         "aggregate ownership and allocation cleanup"
-                        eval:structured-ownership)
+                        aggregates:structured-ownership)
                       (run-case
                         "structured execution order and scrutinee count"
-                        eval:structured-execution)
+                        aggregates:structured-execution)
                       (run-case
                         "evaluator execution limits and deep recursion"
                         eval:execution-limits)

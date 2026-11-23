@@ -1,0 +1,71 @@
+(%import checks)
+
+(%macro define-template (group suffix)
+  `(%function ,(symbol-concat "template-" group "-" suffix) ((input i64)) i64
+     (%+-primitive-i64
+       1
+       (%+-primitive-i64
+         1
+         (%+-primitive-i64
+           1
+           (%+-primitive-i64
+             1
+             (%+-primitive-i64
+               1
+               (%+-primitive-i64
+                 1
+                 (%+-primitive-i64
+                   1
+                   (%+-primitive-i64
+                     1
+                     (%+-primitive-i64
+                       1
+                       (%+-primitive-i64 1 (%+-primitive-i64 1 (%+-primitive-i64 1 input))))))))))))))
+
+(%macro check-template (group suffix input expected)
+  `(checks:i64-equal ,expected (,(symbol-concat "template-" group "-" suffix) ,input)))
+
+(%macro define-group (group)
+  (let
+    ((suffixes '(a b c d e f g h i j k l m n o p))
+     (inputs '(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15))
+     (expected '(12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27))
+     (four (list group group group group))
+     (groups (append four four four four)))
+    (cons
+      `(%function ,(symbol-concat "check-" group) () bool
+         ,(cons 'checks:all (compiler:map 'check-template groups suffixes inputs expected)))
+      (compiler:map 'define-template groups suffixes))))
+
+; Expand and execute 144 distinct copies of the same declaration template.
+(define-group a)
+
+(define-group b)
+
+(define-group c)
+
+(define-group d)
+
+(define-group e)
+
+(define-group f)
+
+(define-group g)
+
+(define-group h)
+
+(define-group i)
+
+(checks:run
+  (checks:case
+    "repeated-template-expansion"
+    (checks:all
+      (check-a)
+      (check-b)
+      (check-c)
+      (check-d)
+      (check-e)
+      (check-f)
+      (check-g)
+      (check-h)
+      (check-i))))

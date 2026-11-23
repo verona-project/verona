@@ -1,0 +1,23 @@
+; The evaluator and native report mode both return each case's name and result.
+(%type result (tuple (pointer u8) bool))
+
+(%macro run (&rest cases)
+  `(%function main () (array checks:result ,(length cases))
+     (array-of ,@cases)))
+
+(%macro case (name condition)
+  `(tuple ,name ,condition))
+
+(%macro i64 (name expected actual)
+  `(checks:case ,name (checks:i64-equal ,expected ,actual)))
+
+(%macro boolean (name expected actual)
+  `(checks:case ,name (match ,actual (,expected true) (_ false))))
+
+(%macro all (&rest conditions)
+  (compiler:reduce '%and-primitive-bool true conditions))
+
+(%macro i64-equal (expected actual)
+  `(%=-primitive-i64 ,actual ,expected))
+
+(%export result run case i64 boolean all i64-equal)

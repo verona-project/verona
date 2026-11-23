@@ -1,0 +1,20 @@
+(%import checks)
+
+(%macro match-boundary (name type literal)
+  `(checks:case ,name (match (cast ,type ,literal) (,literal true) (_ false))))
+
+(%macro boundary-and-character-cases (&rest characters)
+  (cons
+    'checks:run
+    (append
+      (compiler:map
+        'match-boundary
+        '("i8/min" "i16/min" "i32/min" "i64/min" "u8/max" "u16/max" "u32/max" "u64/max")
+        '(i8 i16 i32 i64 u8 u16 u32 u64)
+        '(-128 -32768 -2147483648 -9223372036854775808 255 65535 4294967295 18446744073709551615))
+      characters)))
+
+(boundary-and-character-cases
+  (checks:case "character-pattern-matches-integer" (match (cast i32 65) (#\A true) (_ false)))
+  (checks:case "integer-pattern-matches-character" (match #\a (97 true) (_ false)))
+  (checks:case "character-name-case-insensitive" (match #\Newline (#\newline true) (_ false))))

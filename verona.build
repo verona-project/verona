@@ -51,4 +51,6 @@
   (module-path "projects/foundation/src")
   (module-path "projects/libc/src")
   (module-path "projects/testing/src")
+  (module-path "projects/llvm/src")
+  (library "LLVM")
   (optimize 2))

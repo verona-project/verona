@@ -1,0 +1,175 @@
+(import base)
+(import testing)
+(import core.eval :as e)
+(import core.reader :as reader)
+(import core.check :as check)
+(import core.model :as m)
+(import arena)
+(import data)
+(import system_allocator :as system)
+(import libc.string :as cstring)
+(import test_eval :as eval)
+
+(testing:test structured-ownership
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (items m:tape (m:empty (arena:allocator (& memory))))
+     (errors u64 0)
+     (text
+       (pointer u8)
+       "(%type P (product (value (tuple i64 bool unit))))(%function identity ((p P)) P p)(%function main () P (P (tuple 42 true unit)))")
+     (c
+       m:context
+       (m:context
+         "aggregate test"
+         (data:view text (cstring:strlen text))
+         (& items)
+         (& memory)
+         (& errors)
+         (m:empty-env)
+         0))
+     (functions u64 (reader:read c))
+     (main u64 (check:check c functions))
+     (args e:values-array (e:values-new (system:create)))
+     (first e:outcome (e:run c main args (e:options 0 0) (system:create)))
+     (value e:scalar-value (field first result))
+     (added unit (m:storage (e:values-append (& args) value)))
+     (copy
+       e:outcome
+       (e:run-with-aggregates
+         c
+         (m:next c functions)
+         args
+         (field first aggregates)
+         (e:options 0 0)
+         (system:create)))
+     (unbacked e:outcome (e:run c (m:next c functions) args (e:options 0 0) (system:create)))
+     (released unit (e:destroy (& first)))
+     (outer u64 (base:convert (field (field copy result) scalar)))
+     (inner u64 (base:convert (field (e:values-at (field copy aggregates) outer) scalar)))
+     (checks
+       testing:result
+       (testing:checks
+         (testing:check (== errors 0))
+         (testing:check (== (field copy code) 0))
+         (testing:check (== (field unbacked code) 6))
+         (testing:check (== (field (e:values-at (field copy aggregates) inner) scalar) 42))
+         (testing:check (== (field (e:values-at (field copy aggregates) (+ inner 1)) scalar) 1)))))
+    (do
+      (e:destroy (& copy))
+      (e:destroy (& unbacked))
+      (e:values-destroy (& args))
+      (let ((allocation testing:result (eval:allocation-cases c main args 0)))
+        (do (arena:destroy (& memory)) (testing:checks checks allocation))))))
+
+(testing:test structured-execution
+  (testing:checks
+    ; Exactly nine dispatches: the constructor call in the scrutinee runs once.
+    (eval:check-execution
+      "(%type S (sum (X)))(%function make () S (X))(%function main () i64 (match (make) ((X) 42)))"
+      (e:options 9 0)
+      0
+      42)
+    (eval:check-execution
+      "(%type S (sum (X)))(%function make () S (X))(%function main () i64 (match (make) ((X) 42)))"
+      (e:options 8 0)
+      3
+      0)
+    (eval:check-execution
+      "(%type P (product (x i64) (y i64)))(%function main () i64 (let ((p (P (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))) 0))"
+      (e:options 0 0)
+      1
+      0)
+    (eval:check-execution
+      "(%type S (sum (X i64 i64)))(%function main () i64 (let ((s (X (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))) 0))"
+      (e:options 0 0)
+      1
+      0)
+    (eval:check-execution
+      "(%function main () i64 (let ((t (tuple (%/-primitive-i64 1 0) (%/-primitive-i64 -9223372036854775808 -1)))) 0))"
+      (e:options 0 0)
+      1
+      0)))
+
+(testing:test component-pattern-execution
+  (testing:checks
+    (eval:check-execution
+      "(%function main () i64 (match (tuple true (cast i64 42)) ((tuple false _) (%/-primitive-i64 1 0)) ((tuple flag answer) (match flag (true answer) (false 0)))))"
+      (e:options 0 0)
+      0
+      42)
+    (eval:check-execution
+      "(%type S (sum (Some bool i64) (None)))(%function main () i64 (match (Some false 42) ((Some true _) (%/-primitive-i64 1 0)) ((Some _ answer) answer) ((None) 0)))"
+      (e:options 0 0)
+      0
+      42)
+    (eval:check-execution
+      "(%function main () i64 (match (tuple (%/-primitive-i64 1 0)) ((tuple _) 42)))"
+      (e:options 0 0)
+      1
+      0)))
+
+(base:function borrowed-case
+  ((c m:context) (entry u64) (args e:values-array) (borrowed e:values-array) (code u64))
+  testing:result
+  (let
+    ((result
+       e:outcome
+       (e:run-with-aggregates c entry args borrowed (e:options 0 0) (system:create)))
+     (checks testing:result (testing:check (== (field result code) code))))
+    (do (e:destroy (& result)) checks)))
+
+(testing:test structured-invalid-inputs
+  (let
+    ((memory arena:arena (arena:create (system:create) 4096))
+     (items m:tape (m:empty (arena:allocator (& memory))))
+     (errors u64 0)
+     (text
+       (pointer u8)
+       "(%type S (sum (One i64) (No)))(%function identity ((s S)) S s)(%function main () S (One 7))")
+     (c
+       m:context
+       (m:context
+         "aggregate validation"
+         (data:view text (cstring:strlen text))
+         (& items)
+         (& memory)
+         (& errors)
+         (m:empty-env)
+         0))
+     (functions u64 (reader:read c))
+     (main u64 (check:check c functions))
+     (args e:values-array (e:values-new (system:create)))
+     (first e:outcome (e:run c main args (e:options 0 0) (system:create)))
+     (borrowed e:values-array (field first aggregates))
+     (bytes (pointer e:scalar-value) (tuple-get borrowed 0))
+     (ty u64 (field (field first result) ty))
+     (added unit (m:storage (e:values-append (& args) (field first result))))
+     (valid testing:result (borrowed-case c (m:next c functions) args borrowed 0))
+     (tag unit (do (store (deref (pointer-offset bytes 1)) (e:scalar-value 3 99)) unit))
+     (bad-tag testing:result (borrowed-case c (m:next c functions) args borrowed 6))
+     (length
+       unit
+       (do
+         (store (deref (pointer-offset bytes 1)) (e:scalar-value 3 0))
+         (store (deref bytes) (e:scalar-value ty 20))
+         unit))
+     (bad-length testing:result (borrowed-case c (m:next c functions) args borrowed 6))
+     (payload
+       unit
+       (do
+         (store (deref bytes) (e:scalar-value ty 2))
+         (store (deref (pointer-offset bytes 2)) (e:scalar-value 2 1))
+         unit))
+     (bad-payload testing:result (borrowed-case c (m:next c functions) args borrowed 6)))
+    (do
+      (e:destroy (& first))
+      (e:values-destroy (& args))
+      (arena:destroy (& memory))
+      (testing:checks valid bad-tag bad-length bad-payload))))
+
+(export
+  structured-ownership
+  structured-execution
+  component-pattern-execution
+  structured-invalid-inputs)

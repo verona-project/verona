@@ -1,0 +1,21 @@
+(%import checks)
+
+(%macro compare (name operator left right expected)
+  `(checks:boolean ,name ,expected (,(symbol-concat "%" operator "-primitive-i64") ,left ,right)))
+
+(checks:run
+  (compare "equal/less" = -2 1 false)
+  (compare "equal/greater" = 1 -2 false)
+  (compare "equal/equal" = 2 2 true)
+  (compare "less/less" < -2 1 true)
+  (compare "less/greater" < 1 -2 false)
+  (compare "less/equal" < 2 2 false)
+  (compare "less-or-equal/less" <= -2 1 true)
+  (compare "less-or-equal/greater" <= 1 -2 false)
+  (compare "less-or-equal/equal" <= 2 2 true)
+  (compare "greater/less" > -2 1 false)
+  (compare "greater/greater" > 1 -2 true)
+  (compare "greater/equal" > 2 2 false)
+  (compare "greater-or-equal/less" >= -2 1 false)
+  (compare "greater-or-equal/greater" >= 1 -2 true)
+  (compare "greater-or-equal/equal" >= 2 2 true))
