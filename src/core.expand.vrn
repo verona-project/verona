@@ -3564,7 +3564,12 @@
     (1
       (let ((macro u64 (lookup c (m:child c id))))
         (match macro
-          (0 unit)
+          (0
+            ; Macro evaluation treats nil as an empty list. Recover its
+            ; spelling when a forwarded token reaches a runtime expression.
+            (match (base:and-then (== (m:child c id) 0) (m:is c id "nil"))
+              (true (do (m:typed-kind c id (node-atom) 0 0 0) unit))
+              (false unit)))
           (_
             (do
               (m:require c id (> fuel 0) "macro expansion limit exceeded")

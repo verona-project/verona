@@ -9,6 +9,14 @@ from .support import CompilerTestCase, FIXTURE_DIR, REPO_ROOT
 
 
 class MacroTests(CompilerTestCase):
+    def test_base_function_preserves_runtime_nil(self):
+        self.agrees("""
+(import base)
+(base:function absent () (pointer u8) nil)
+(%function main () i64
+  (match (%is-null-primitive-pointer (absent)) (true 42) (false 0)))
+""", 42, "--module-path", REPO_ROOT / "projects/base/src")
+
     def test_compile_time_helper_parity(self):
         inventory = json.loads((FIXTURE_DIR / "compile_time_parity.json").read_text())
         self.assertEqual(inventory["version"], 1)
