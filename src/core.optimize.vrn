@@ -331,7 +331,7 @@
 ; Disabled optimization returns null and performs no scan/allocation.
 (base:function references ((c m:context) (enabled bool)) (pointer u8)
   (match enabled
-    (false (cast (pointer u8) (m:empty-env)))
+    (false nil)
     (true
       (let ((count u64 (m:nodes-length (deref (field c items)))))
         (match (arena:allocate (field c memory) count 1)
@@ -342,10 +342,7 @@
                (memory:memset (cast (pointer void) used) 0 count)
                (mark-references c used 1 (- count 1))
                used)))
-          (_
-            (do
-              (m:fatal "optimizer reference storage allocation failed")
-              (cast (pointer u8) (m:empty-env)))))))))
+          (_ (do (m:fatal "optimizer reference storage allocation failed") nil)))))))
 
 ; Map resolved immutable let binder IDs to their checked initializer IDs.
 ; Parameters, pattern binders, globals and stored/address-taken locals have no
@@ -384,7 +381,7 @@
 
 (base:function initializers ((c m:context) (enabled bool)) (pointer u64)
   (match enabled
-    (false (cast (pointer u64) (m:empty-env)))
+    (false nil)
     (true
       ; Each tape identity gets one u64 initializer ID: eight bytes, aligned
       ; to eight bytes on the supported 64-bit compiler hosts. Zero is unknown.
@@ -402,9 +399,7 @@
                (initializer-range c locals 1 (- count 1))
                locals)))
           (_
-            (do
-              (m:fatal "optimizer initializer storage allocation failed")
-              (cast (pointer u64) (m:empty-env)))))))))
+            (do (m:fatal "optimizer initializer storage allocation failed") nil)))))))
 
 ; A deliberately small local CSE domain.  Leaves are stable scalar values and
 ; internal nodes are integer/boolean primitives which cannot read memory, call,

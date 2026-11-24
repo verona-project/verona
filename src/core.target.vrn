@@ -50,7 +50,7 @@
          memory
          (data:view features-requested (cstring:strlen features-requested))))
      (owner llvm:session (llvm:create "verona.target"))
-     (message (pointer u8) (cast (pointer u8) (target:null-pointer))))
+     (message (pointer u8) nil))
     (do
       (match native (true (ir:message-dispose borrowed)) (_ unit))
       (info:lower triple (cstring:strlen triple))

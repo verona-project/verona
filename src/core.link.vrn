@@ -14,7 +14,7 @@
 (base:type strings-array (tuple (pointer (pointer u8)) u64 u64 array:layout))
 
 (base:function strings-new ((backing allocator:backend)) strings-array
-  (strings-empty (cast (pointer (pointer u8)) (m:empty-env)) (array:layout 8 8 backing)))
+  (strings-empty nil (array:layout 8 8 backing)))
 
 (base:function strings-at ((items strings-array) (index u64)) (pointer u8)
   (deref (pointer-offset (tuple-get items 0) index)))
@@ -257,7 +257,7 @@
            (append-pairs args packages "-framework" (field config frameworks) 0))
          (flag error:status (append-value args frameworks "-o"))
          (result error:status (append-value args flag output)))
-        (append-value args result (cast (pointer u8) (m:empty-env)))))))
+        (append-value args result nil)))))
 
 #+darwin (base:function shared-flag () (pointer u8)
            "-dynamiclib")
@@ -283,7 +283,7 @@
          (b error:status (append-value args a "rcs"))
          (c error:status (append-value args b output))
          (d error:status (append-value args c input)))
-        (append-value args d (cast (pointer u8) (m:empty-env)))))
+        (append-value args d nil)))
     (_
       (match (cstring:strcmp kind "shared-library")
         (0
@@ -295,7 +295,7 @@
               ((ok)
                ; Keep TOOL as argv[0], then the platform flag, before the object.
                (let ((count u64 (strings-length (deref args))))
-                 (match (strings-append args (cast (pointer u8) (m:empty-env)))
+                 (match (strings-append args nil)
                    ((ok)
                     (do
                       (shift-arguments (deref args) count)

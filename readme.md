@@ -53,8 +53,9 @@ The repository's pinned LLVM 23 environment is available through Nix:
 nix develop --offline path:.
 ```
 
-To rebuild the self-hosted compiler, supply a compatible seed compiler. A
-development checkout normally keeps that seed at `build/verona`:
+To rebuild the self-hosted compiler, supply a seed that supports the `nil`
+pointer literal in Base declarations such as `base:function`. A development
+checkout normally keeps that seed at `build/verona`:
 
 ```sh
 autoreconf -fi
@@ -62,6 +63,10 @@ autoreconf -fi
 make build
 make check
 ```
+
+If a seed accepts `nil` only in expanded core forms, first rebuild the previous
+compiler sources with the updated `src/core.expand.vrn`. Use the resulting
+compiler as the seed for this checkout.
 
 `make build` writes the compiler to `build/compiler/verona` and also builds
 `verona-formatter` and `verona-project`. `make install` installs all three

@@ -54,9 +54,7 @@
 (base:type values-array (tuple (pointer scalar-value) u64 u64 array:layout))
 
 (base:function values-new ((backing allocator:backend)) values-array
-  (values-empty
-    (cast (pointer scalar-value) (m:empty-env))
-    (array:layout 16 8 backing)))
+  (values-empty nil (array:layout 16 8 backing)))
 
 (base:function values-at ((items values-array) (id u64)) scalar-value
   (deref (pointer-offset (tuple-get items 0) id)))
@@ -76,9 +74,7 @@
 (base:type frames-array (tuple (pointer frame) u64 u64 array:layout))
 
 (base:function frames-new ((backing allocator:backend)) frames-array
-  (frames-empty
-    (cast (pointer frame) (m:empty-env))
-    (array:layout 48 8 backing)))
+  (frames-empty nil (array:layout 48 8 backing)))
 
 (base:function frames-at ((items frames-array) (id u64)) frame
   (deref (pointer-offset (tuple-get items 0) id)))
@@ -98,7 +94,7 @@
 (base:type steps-array (tuple (pointer step) u64 u64 array:layout))
 
 (base:function steps-new ((backing allocator:backend)) steps-array
-  (steps-empty (cast (pointer step) (m:empty-env)) (array:layout 40 8 backing)))
+  (steps-empty nil (array:layout 40 8 backing)))
 
 (base:function steps-at ((items steps-array) (id u64)) step
   (deref (pointer-offset (tuple-get items 0) id)))
@@ -119,7 +115,7 @@
 (base:type ids-array (tuple (pointer u64) u64 u64 array:layout))
 
 (base:function ids-new ((backing allocator:backend)) ids-array
-  (ids-empty (cast (pointer u64) (m:empty-env)) (array:layout 8 8 backing)))
+  (ids-empty nil (array:layout 8 8 backing)))
 
 (base:function ids-at ((items ids-array) (id u64)) u64
   (deref (pointer-offset (tuple-get items 0) id)))

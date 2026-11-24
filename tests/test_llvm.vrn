@@ -14,7 +14,6 @@
 (import llvm)
 (import llvm.core :as ir)
 (import llvm.types :as t)
-(import llvm.target :as target)
 (import llvm.passes :as passes)
 
 (base:type ir-check (pointer (function ((pointer u8) (pointer u8)) testing:result)))
@@ -23,13 +22,11 @@
   (match (base:is-null message) (true unit) (false (ir:message-dispose message))))
 
 (base:function verify ((owner llvm:session)) testing:result
-  (let
-    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
-     (status i32 (llvm:verify owner (& message))))
+  (let ((message (pointer u8) nil) (status i32 (llvm:verify owner (& message))))
     (do (release message) (testing:assert-equal status 0))))
 
 (base:function optimize ((owner llvm:session)) testing:result
-  (let ((message (pointer u8) (cast (pointer u8) (target:null-pointer))))
+  (let ((message (pointer u8) nil))
     (do
       (ir:builder-clear (field owner builder))
       (let
@@ -37,7 +34,7 @@
            i32
            (passes:run
              (field owner module)
-             (cast t:machine-ref (target:null-pointer))
+             nil
              "default<O2>"
              (& message)))
          (result
@@ -51,12 +48,12 @@
     (0 (testing:empty))
     (_
       (let
-        ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+        ((message (pointer u8) nil)
          (status
            i32
            (passes:run
              (field owner module)
-             (cast t:machine-ref (target:null-pointer))
+             nil
              "not-a-verona-llvm-pass"
              (& message)))
          (result

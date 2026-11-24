@@ -7,7 +7,6 @@
 (import llvm)
 (import llvm.types :as t)
 (import llvm.core :as ir)
-(import llvm.target :as target)
 
 ; Allocate arena-owned storage for count LLVM value handles; terminate on allocation failure.
 (base:function values ((c m:context) (count u64)) (pointer t:value-ref)
@@ -17,10 +16,7 @@
       (* count constants:llvm-handle-byte-size)
       constants:llvm-handle-alignment)
     ((allocated p) (cast (pointer t:value-ref) (cast (pointer void) p)))
-    (_
-      (do
-        (m:fatal "LLVM handle storage allocation failed")
-        (cast (pointer t:value-ref) (target:null-pointer))))))
+    (_ (do (m:fatal "LLVM handle storage allocation failed") nil))))
 
 (base:function scalar-type ((owner llvm:session) (ty u64)) t:type-ref
   (match ty

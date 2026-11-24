@@ -11,7 +11,6 @@
 (import llvm.types :as t)
 (import llvm.core :as ir)
 (import llvm.enums :as enum)
-(import llvm.target :as target)
 (import core.model :as m)
 (import core.check :as check)
 (import core.layout :as layout)
@@ -73,7 +72,7 @@
   t:metadata-ref
   (match (base:is-null (cast (pointer void) (field b scope)))
     (true
-      (let ((empty t:metadata-ref (cast t:metadata-ref (target:null-pointer))))
+      (let ((empty t:metadata-ref nil))
         (do
           (ir:builder-debug-location-set (field (field b owner) builder) empty)
           empty)))
@@ -87,7 +86,7 @@
              (base:convert (field pos line))
              (base:convert (field pos column))
              (field b scope)
-             (cast t:metadata-ref (target:null-pointer)))))
+             nil)))
         (do
           (ir:builder-debug-location-set
             (field (field b owner) builder)
@@ -655,10 +654,7 @@
               (put b fn function)
               ; The declaration name's otherwise unused slot caches its native
               ; callback entry point. Every address of this function shares it.
-              (put
-                b
-                (m:next c (m:child c fn))
-                (cast t:value-ref (target:null-pointer)))
+              (put b (m:next c (m:child c fn)) nil)
               unit))
           (declarations c b (m:next c fn)))))))
 
@@ -2304,7 +2300,7 @@
                (cstring:strlen (m:source-path c 0))
                ""
                0)))
-         (false (cast t:metadata-ref (target:null-pointer)))))
+         (false nil)))
      (compile-unit
        t:metadata-ref
        (match debug
@@ -2329,7 +2325,7 @@
              0
              ""
              0))
-         (false (cast t:metadata-ref (target:null-pointer)))))
+         (false nil)))
      (b
        backend
        (backend
@@ -2340,7 +2336,7 @@
          (passes:prepare c optimized remarks (passes:defaults))
          debug
          compile-unit
-         (cast t:metadata-ref (target:null-pointer)))))
+         nil)))
     (do
       (external-declarations c b all)
       (declarations c b all)
@@ -2371,9 +2367,7 @@
                    0)))
              (builder t:builder-ref (field owner builder)))
             (do
-              (ir:builder-debug-location-set
-                builder
-                (cast t:metadata-ref (target:null-pointer)))
+              (ir:builder-debug-location-set builder nil)
               (entry owner function)
               (let
                 ((result

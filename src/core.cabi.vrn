@@ -18,7 +18,7 @@
 
 (base:function create ((p m:context) (owner llvm:session)) context
   (let
-    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+    ((message (pointer u8) nil)
      (machine
        t:machine-ref
        (backend-target:configured-machine

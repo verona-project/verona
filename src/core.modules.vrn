@@ -29,9 +29,7 @@
 (base:type paths-array (tuple (pointer (pointer u8)) u64 u64 array:layout))
 
 (base:function paths-new ((backing allocator:backend)) paths-array
-  (paths-empty
-    (cast (pointer (pointer u8)) (m:empty-env))
-    (array:layout 8 8 backing)))
+  (paths-empty nil (array:layout 8 8 backing)))
 
 ; Borrowed loading working set: invocation arena, growing combined source
 ; and tape descriptors, module session, and shared error counter. The record

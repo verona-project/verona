@@ -417,9 +417,7 @@
      (seen data:data (data:empty (arena:allocator (field p memory))))
      (ordered
        ids-array
-       (ids-empty
-         (cast (pointer u64) (m:empty-env))
-         (array:layout 8 8 (arena:allocator (field p memory)))))
+       (ids-empty nil (array:layout 8 8 (arena:allocator (field p memory)))))
      (path data:data (data:empty (arena:allocator (field p memory))))
      (length u64 (cstring:strlen output)))
     (do

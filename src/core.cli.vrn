@@ -125,7 +125,7 @@
         (let
           ((args
              (tuple (pointer u8) (pointer u8) (pointer u8))
-             (tuple tool output (cast (pointer u8) (m:empty-env))))
+             (tuple tool output nil))
            (pid i32 (process:fork)))
           (match pid
             (-1 false)
@@ -155,7 +155,7 @@
 (base:function emit-object ((owner llvm:session) (machine t:machine-ref) (output (pointer u8)))
   exit-code
   (let
-    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+    ((message (pointer u8) nil)
      (status
        i32
        (target:emit-file machine (field owner module) output enum:object-file (& message))))
@@ -187,7 +187,7 @@
               (match closed
                 (0
                   (let
-                    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+                    ((message (pointer u8) nil)
                      (status
                        i32
                        (target:emit-file
@@ -245,7 +245,7 @@
              ((equal level "-O1") "default<O1>")
              ((equal level "-O2") "default<O2>")
              (true "default<O3>")))
-         (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+         (message (pointer u8) nil)
          (status
            i32
            (do
@@ -267,7 +267,7 @@
    (links link:options)
    (kind (pointer u8))) exit-code
   (let
-    ((message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+    ((message (pointer u8) nil)
      (machine
        t:machine-ref
        (backend-target:configured-machine
@@ -324,7 +324,7 @@
            (base:not (equal optimization "-O0")))
          (equal mode "optimization-report")
          debug))
-     (message (pointer u8) (cast (pointer u8) (target:null-pointer)))
+     (message (pointer u8) nil)
      (status i32 (llvm:verify owner (& message)))
      (result
        exit-code
@@ -469,7 +469,7 @@
          (files
            m:modules-array
            (m:modules-empty
-             (cast (pointer m:module-info) (m:empty-env))
+             nil
              (array:layout
                constants:module-byte-size
                constants:node-alignment
@@ -477,7 +477,7 @@
          (edges
            m:imports-array
            (m:imports-empty
-             (cast (pointer m:import-info) (m:empty-env))
+             nil
              (array:layout
                constants:import-byte-size
                constants:node-alignment

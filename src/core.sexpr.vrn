@@ -146,8 +146,7 @@
            "x86_64")
 
 (base:function null-features () (pointer void)
-  (let ((zero u64 0))
-    (deref (cast (pointer (pointer void)) (cast (pointer void) (& zero))))))
+  nil)
 
 (base:type context
   (product
