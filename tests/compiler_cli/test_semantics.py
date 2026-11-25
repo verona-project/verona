@@ -353,7 +353,7 @@ class SemanticTests(CompilerTestCase):
                     for message in messages:
                         self.assertIn(message, result.stderr)
                     diagnostics = [line for line in result.stderr.splitlines()
-                                   if "input.vrn:" in line and "note:" not in line]
+                                   if "input.vrn:" in line and "error[" in line]
                     self.assertEqual(len(diagnostics), count, result.stderr)
                     self.assertEqual(result.stdout, "")
                     self.assertFalse(output.exists())
@@ -363,9 +363,11 @@ class SemanticTests(CompilerTestCase):
             "(%function identity ((x i64)) i64 x)\n" +
             "(%function main () i64 (identity true))")
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("input.vrn:2:34: type mismatch: expected i64, actual bool", result.stderr)
-        self.assertIn("input.vrn:1:25: note: expected type established here", result.stderr)
-        self.assertEqual(result.stderr.count("type mismatch"), 1)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr.splitlines(), [
+            f"{self.source}:2:34: error[type-mismatch]: type mismatch: expected i64, actual bool",
+            f"{self.source}:1:25: note[expected-type-origin]: expected type established here",
+        ])
 
     def test_runtime_failures_and_argument_order(self):
         cases = [
@@ -393,15 +395,14 @@ class SemanticTests(CompilerTestCase):
                     self.assertIn(message, native.stderr)
                     self.assertEqual(native.stdout, "")
                     # Both engines must fail at the same expression, even when operands fail differently.
-                    self.assertEqual(native.stderr.splitlines()[0],
-                                     self.run_core("eval", source).stderr.splitlines()[0])
+                    self.assert_runtime_diagnostic_matches(native, self.run_core("eval", source))
 
     def test_runtime_source_locations_and_frames(self):
         source = ("(%function bad () i64\n  (%/-primitive-i64 1 0))\n"
                   "(%function main () i64\n  (bad))")
         result = self.run_core("eval", source)
         self.assertEqual(result.returncode, 70, result.stderr)
-        self.assertIn("input.vrn:2:3: division by zero", result.stderr)
+        self.assertIn("input.vrn:2:3: error[division-by-zero]: division by zero", result.stderr)
         self.assertIn(f"in bad at {self.source}:4:3:", result.stderr)
         self.assertIn(f"in main at {self.source}:3:1:", result.stderr)
         self.assertLess(result.stderr.index("in bad"), result.stderr.index("in main"))

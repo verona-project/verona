@@ -43,6 +43,7 @@
               (m:error-at
                 c
                 (field loc start)
+                "reader-form-limit"
                 "form count limit (4096) exceeded"))
             (false unit))
           (m:add
@@ -198,6 +199,7 @@
               (m:error-at
                 c
                 (field (field v location) start)
+                "reader-nesting-limit"
                 "syntax nesting limit (256) exceeded"))
             (false unit)))))
     (_
@@ -205,6 +207,67 @@
         (do
           (analysis-depth c tree start half depth)
           (analysis-depth c tree (+ start half) (- count half) depth))))))
+
+(base:function reader-error ((c m:context) (offset u64) (code u64)) unit
+  (let
+    ((description
+       (tuple (pointer u8) (pointer u8))
+       (match code
+         (1
+           (tuple
+             "unexpected-closing-parenthesis"
+             "unexpected closing parenthesis"))
+         (2
+           (tuple
+             "unclosed-list"
+             "unclosed list: expected a closing parenthesis"))
+         (3
+           (match (m:byte c offset)
+             (0 (tuple "nul-source-byte" "NUL byte in source"))
+             (92
+               (tuple
+                 "unsupported-reader-extension"
+                 "reader extension syntax is not supported by the core reader yet"))
+             (_
+               (tuple
+                 "invalid-source-byte"
+                 "invalid source byte (only ASCII core syntax is supported)"))))
+         (4
+           (tuple
+             "malformed-integer-literal"
+             "malformed integer literal (invalid decimal i64 literal)"))
+         (6
+           (tuple
+             "unterminated-data-literal"
+             "unterminated data literal: expected a closing quote"))
+         (7 (tuple "unsupported-data-escape" "unsupported data escape"))
+         (8
+           (tuple
+             "invalid-data-byte"
+             "data literal requires non-NUL ASCII bytes"))
+         (9
+           (tuple "invalid-character-literal" "invalid ASCII character literal"))
+         (10
+           (tuple
+             "missing-reader-prefix-operand"
+             "reader prefix requires an operand"))
+         (11
+           (tuple
+             "reader-prefix-nesting-limit"
+             "reader prefix nesting limit exceeded"))
+         (12
+           (tuple
+             "missing-reader-feature"
+             "expected a feature name after reader conditional"))
+         (13
+           (tuple
+             "missing-selected-reader-operand"
+             "reader prefix requires a selected operand"))
+         (_
+           (tuple
+             "compiler-storage-allocation-failed"
+             "compiler storage allocation failed")))))
+    (m:error-at c offset (tuple-get description 0) (tuple-get description 1))))
 
 (base:function run-with-features
   ((c m:context) (dump bool) (features syntax:features)) u64
@@ -232,29 +295,7 @@
               (syntax:destroy (& tree))
               (names:names-destroy (& table))
               (arena:destroy (& memory))
-              (m:error-at
-                c
-                offset
-                (match code
-                  (1 "unexpected closing parenthesis")
-                  (2 "unclosed list")
-                  (3
-                    (match (m:byte c offset)
-                      (0 "NUL byte in source")
-                      (92
-                        "reader extension syntax is not supported by the core reader yet")
-                      (_
-                        "invalid source byte (only ASCII core syntax is supported)")))
-                  (4 "malformed integer literal (invalid decimal i64 literal)")
-                  (6 "unterminated data literal")
-                  (7 "unsupported data escape")
-                  (8 "data literal requires non-NUL ASCII bytes")
-                  (9 "invalid ASCII character literal")
-                  (10 "reader prefix requires an operand")
-                  (11 "reader prefix nesting limit exceeded")
-                  (12 "expected a feature name after reader conditional")
-                  (13 "reader prefix requires a selected operand")
-                  (_ "compiler storage allocation failed")))))))
+              (reader-error c offset code)))))
       (let
         ((result
            u64
@@ -282,7 +323,12 @@
                    (>
                      (syntax:ids-length (field tree roots))
                      constants:sibling-form-limit)
-                   (true (m:error-at c 0 "form count limit (4096) exceeded"))
+                   (true
+                     (m:error-at
+                       c
+                       0
+                       "reader-form-limit"
+                       "form count limit (4096) exceeded"))
                    (false unit))
                  (m:add-record c (node-atom) 0 0 0 0 0 0 0 0 0)
                  (transfer c tree 0 (syntax:nodes-length (field tree items)))

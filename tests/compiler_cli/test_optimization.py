@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
             native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
             self.assertEqual(native.returncode, 70, native.stderr)
             self.assertEqual(native.stdout, "")
-            self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+            self.assert_runtime_diagnostic_matches(native, evaluated)
 
     def test_constant_propagation_aliases_select_branches_and_matches(self):
         source = """
@@ -255,7 +255,7 @@ int main(int argc, char **argv) {
                     self.assertEqual(compiled.returncode, 0, compiled.stderr)
                     native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
                     self.assertEqual(native.returncode, 70, native.stderr)
-                    self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+                    self.assert_runtime_diagnostic_matches(native, evaluated)
 
     def test_constant_propagation_alias_budget(self):
         bindings = ["(v0 bool true)"] + [f"(v{i} v{i - 1})" for i in range(1, 40)]
@@ -378,7 +378,7 @@ int main(int argc, char **argv) {
         self.assertEqual(ids, list(range(1, len(ids) + 1)))
         for rule in ("dead-binding", "known-match", "constant-fold"):
             self.assertIn(f"optimization: {rule} node=", first.stderr)
-        self.assertRegex(first.stderr, r"input\.vrn:\d+:\d+: optimization:")
+        self.assertRegex(first.stderr, r"input\.vrn:\d+:\d+: note\[[a-z-]+\]: optimization:")
         second = self.run_core("optimization-report", source)
         self.assertEqual(second.returncode, 0, second.stderr)
         self.assertEqual((first.stdout, first.stderr), (second.stdout, second.stderr))
@@ -417,7 +417,7 @@ int main(int argc, char **argv) {
             "(%function answer () i64 (%+-primitive-i64 40 2)) (export answer)")
         imported = self.run_core("optimization-report", "(import dep)" + self.program("(dep:answer)"))
         self.assertEqual(imported.returncode, 0, imported.stderr)
-        self.assertRegex(imported.stderr, r"dep\.vrn:1:\d+: optimization: constant-fold")
+        self.assertRegex(imported.stderr, r"dep\.vrn:1:\d+: note\[constant-fold\]: optimization: constant-fold")
         arms = " ".join(f"({value} 0)" for value in range(130))
         source = self.program(f"(match (cast i64 130) {arms} (_ 42))")
         report = self.run_core("optimization-report", source)
@@ -621,8 +621,7 @@ int main(int argc, char **argv) {
                                             text=True, timeout=10)
                     self.assertEqual(native.returncode, 70, native.stderr)
                     self.assertEqual(native.stdout, "")
-                    self.assertEqual(native.stderr.splitlines()[0],
-                                     evaluated.stderr.splitlines()[0])
+                    self.assert_runtime_diagnostic_matches(native, evaluated)
         invalid = self.run_core("emit-llvm", self.program("(let ((unused missing)) 42)"))
         self.assertEqual(invalid.returncode, 2, invalid.stderr)
         self.assertIn("unknown local", invalid.stderr)
@@ -756,7 +755,7 @@ int main(int argc, char **argv) {
                                     text=True, timeout=10)
             self.assertEqual(native.returncode, 70, native.stderr)
             self.assertEqual(native.stdout, "")
-            self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+            self.assert_runtime_diagnostic_matches(native, evaluated)
         invalid = """
 (%type Option (sum (Some i64) (None)))
 (%function main () i64 (match (Some 42) ((Some value) value) ((None) missing)))
@@ -859,8 +858,7 @@ int main(int argc, char **argv) {
                                             text=True, timeout=10)
                     self.assertEqual(native.returncode, 70, native.stderr)
                     self.assertEqual(native.stdout, "")
-                    self.assertEqual(native.stderr.splitlines()[0],
-                                     evaluated.stderr.splitlines()[0])
+                    self.assert_runtime_diagnostic_matches(native, evaluated)
 
     def test_constant_folding_depth_budget(self):
         expression = "42"

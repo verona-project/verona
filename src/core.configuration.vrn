@@ -60,7 +60,10 @@
            (do
              (store (deref link) (syntax:feature text (m:empty-env)))
              (append-feature head (cast (pointer void) link)))))
-        (_ (m:fatal "cannot allocate reader feature"))))))
+        (_
+          (m:fatal
+            "cannot-allocate-reader-feature"
+            "cannot allocate reader feature"))))))
 
 (base:function append-feature
   ((head (pointer (pointer void))) (link (pointer void))) unit
@@ -92,6 +95,7 @@
     (true
       (do
         (m:fatal
+          "unsupported-target-architecture"
           "unsupported target architecture: expected 64-bit AArch64 or x86-64")
         ""))))
 
@@ -100,7 +104,11 @@
     ((has triple "darwin") "darwin")
     ((base:or (has triple "linux") (has triple "gnu")) "linux")
     (true
-      (do (m:fatal "unsupported target platform: expected Darwin or Linux") ""))))
+      (do
+        (m:fatal
+          "unsupported-target-platform"
+          "unsupported target platform: expected Darwin or Linux")
+        ""))))
 
 (base:function from-context ((p m:context)) (pointer void)
   (match (base:is-null (field p session))

@@ -15,6 +15,7 @@
 (import core.model :as m)
 (import core.reader :as reader)
 (import core.source :as source)
+(import core.tool-output :as tool-output)
 (import core.modules :as modules)
 (import array)
 (import error)
@@ -64,7 +65,60 @@
       (-1 (match (== (deref (errno:errno-pointer)) c:EINTR) (true (wait-result pid)) (false false)))
       (_ (match status (0 true) (_ false))))))
 
-; Run Clang with owned argv storage. Option strings are borrowed; generated
+(base:function run-child ((tool (pointer u8)) (args (pointer (pointer u8))) (capture i32)) bool
+  (match (process:fork)
+    (-1 false)
+    (0
+      (do
+        (match (base:and-then (>= capture 0) (base:not (== capture c:STDERR-FILENO)))
+          (true
+            (match (tool-output:redirect capture)
+              (false (do (process:exit 127) unit))
+              (true (do (fd:close capture) unit))))
+          (false unit))
+        (process:execvp tool args)
+        (m:text c:STDERR-FILENO (cstring:strerror (deref (errno:errno-pointer))))
+        (m:text c:STDERR-FILENO "\n")
+        (process:exit 127)
+        false))
+    (pid (wait-result pid))))
+
+(base:function named-diagnostic
+  ((severity (pointer u8)) (code (pointer u8)) (message (pointer u8)) (tool (pointer u8))) unit
+  (do
+    (m:diagnostic-start severity code)
+    (m:text c:STDERR-FILENO message)
+    (m:text c:STDERR-FILENO ": ")
+    (m:text c:STDERR-FILENO tool)
+    (m:text c:STDERR-FILENO "\n")))
+
+(base:function run-tool
+  ((tool (pointer u8)) (args (pointer (pointer u8))) (code (pointer u8)) (message (pointer u8)))
+  bool
+  (let
+    ((file (pointer types:file-stream) (tool-output:open))
+     (capture i32 (tool-output:descriptor file))
+     (result
+       bool
+       (do
+         (match (< capture 0)
+           (true
+             (named-diagnostic
+               "note"
+               "native-tool-output"
+               "native tool stderr follows if present"
+               tool))
+           (false unit))
+         (run-child tool args capture))))
+    (do
+      (match result
+        (true (tool-output:replay file "note" "native-tool-output" "native tool wrote to stderr"))
+        (false
+          (do (named-diagnostic "error" code message tool) (tool-output:replay file nil nil nil))))
+      (tool-output:close file)
+      result)))
+
+; Run the linker or archiver with owned argv storage. Option strings are borrowed; generated
 ; library flags live in MEMORY until the parent has waited for the child.
 (base:function native-tool
   ((input (pointer u8))
@@ -98,12 +152,22 @@
        bool
        (match status
          ((ok)
-          (let ((pid i32 (process:fork)))
-            (match pid
-              (-1 false)
-              (0 (do (process:execvp tool (tuple-get args 0)) (process:exit 127) false))
-              (_ (wait-result pid)))))
-         (_ (do (m:text c:STDERR-FILENO "cannot allocate native linker arguments\n") false)))))
+          (match (equal kind "static-library")
+            (true
+              (run-tool tool (tuple-get args 0) "native-archive-failed" "native archiving failed"))
+            (false
+              (run-tool
+                tool
+                (tuple-get args 0)
+                "native-link-failed"
+                "native compilation failed during linking"))))
+         (_
+           (do
+             (m:diagnostic
+               "error"
+               "native-tool-arguments-failed"
+               "cannot assemble native tool arguments")
+             false)))))
     (do (link:strings-destroy (& args)) (arena:destroy (& memory)) result)))
 
 ; Darwin executables retain a debug map rather than copying DWARF from their
@@ -122,44 +186,48 @@
            (match (base:is-null (cast (pointer void) configured))
              (true "dsymutil")
              (false configured))))
-        (let
-          ((args
-             (tuple (pointer u8) (pointer u8) (pointer u8))
-             (tuple tool output nil))
-           (pid i32 (process:fork)))
-          (match pid
-            (-1 false)
-            (0
-              (do
-                (process:execvp tool (cast (pointer (pointer u8)) (cast (pointer void) (& args))))
-                (process:exit 127)
-                false))
-            (_ (wait-result pid))))))))
+        (let ((args (tuple (pointer u8) (pointer u8) (pointer u8)) (tuple tool output nil)))
+          (run-tool
+            tool
+            (cast (pointer (pointer u8)) (cast (pointer void) (& args)))
+            "native-debug-symbols-failed"
+            "cannot create native debug symbols"))))))
 
 ; Release a transferred LLVM diagnostic/text message if nonnull, including success messages.
 (base:function dispose-message ((message (pointer u8))) unit
   (match (base:is-null message) (true unit) (false (do (ir:message-dispose message) unit))))
 
 ; Print a transferred LLVM diagnostic (or fallback text) and release the message.
-(base:function llvm-error ((message (pointer u8))) unit
+(base:function llvm-error ((code (pointer u8)) (summary (pointer u8)) (message (pointer u8))) unit
   (do
-    (m:text c:STDERR-FILENO "LLVM: ")
+    (m:diagnostic "error" code summary)
     (match (base:is-null message)
-      (true (m:text c:STDERR-FILENO "operation failed"))
-      (false (m:text c:STDERR-FILENO message)))
-    (m:text c:STDERR-FILENO "\n")
+      (true unit)
+      (false
+        (do
+          (m:text c:STDERR-FILENO "LLVM: ")
+          (m:text c:STDERR-FILENO message)
+          (m:text c:STDERR-FILENO "\n"))))
     (dispose-message message)
     unit))
+
+(base:function emit-object-file
+  ((owner llvm:session)
+   (machine t:machine-ref)
+   (output (pointer u8))
+   (message (pointer (pointer u8)))) i32
+  (target:emit-file machine (field owner module) output enum:object-file message))
 
 ; Object output has no linker or entry wrapper. Own every LLVM diagnostic.
 (base:function emit-object ((owner llvm:session) (machine t:machine-ref) (output (pointer u8)))
   exit-code
-  (let
-    ((message (pointer u8) nil)
-     (status
-       i32
-       (target:emit-file machine (field owner module) output enum:object-file (& message))))
-    (match status (0 (do (dispose-message message) 0)) (_ (do (llvm-error message) 2)))))
+  (let ((message (pointer u8) nil) (status i32 (emit-object-file owner machine output (& message))))
+    (match status
+      (0 (do (dispose-message message) 0))
+      (_
+        (do
+          (llvm-error "llvm-object-emission-failed" "LLVM could not write the object file" message)
+          2)))))
 
 ; Emit an object to a private mkstemp file, invoke the native linker, and remove the file.
 ; Borrow the LLVM session/machine and return zero on success or compiler-error status on failure.
@@ -181,21 +249,20 @@
             (+ (cstring:strlen constants:temporary-object-template) 1))))
       (let ((descriptor i32 (fs:mkstemp (data:bytes path))))
         (match descriptor
-          (-1 (do (m:text c:STDERR-FILENO "cannot create temporary object file\n") 2))
+          (-1
+            (do
+              (m:diagnostic
+                "error"
+                "temporary-object-create-failed"
+                "cannot create temporary object file")
+              2))
           (_
             (let ((closed i32 (fd:close descriptor)))
               (match closed
                 (0
                   (let
                     ((message (pointer u8) nil)
-                     (status
-                       i32
-                       (target:emit-file
-                         machine
-                         (field owner module)
-                         (data:bytes path)
-                         enum:object-file
-                         (& message)))
+                     (status i32 (emit-object-file owner machine (data:bytes path) (& message)))
                      (result
                        exit-code
                        (match status
@@ -212,19 +279,23 @@
                                (true
                                  (match (debug-symbols debug output kind (config:target-platform c))
                                    (true 0)
-                                   (false
-                                     (do
-                                       (m:text
-                                         c:STDERR-FILENO
-                                         "cannot create native debug symbols\n")
-                                       2))))
-                               (false (do (m:text c:STDERR-FILENO "native compilation failed\n") 2)))))
-                         (_ (do (llvm-error message) 2)))))
+                                   (false 2)))
+                               (false 2))))
+                         (_
+                           (do
+                             (llvm-error
+                               "llvm-object-emission-failed"
+                               "LLVM could not write the object file"
+                               message)
+                             2)))))
                     (do (fs:unlink (data:bytes path)) result)))
                 (_
                   (do
                     (fs:unlink (data:bytes path))
-                    (m:text c:STDERR-FILENO "cannot close temporary object file\n")
+                    (m:diagnostic
+                      "error"
+                      "temporary-object-close-failed"
+                      "cannot close temporary object file")
                     2))))))))))
 
 (base:function optimization-level ((level (pointer u8))) i32
@@ -253,7 +324,12 @@
              (ir:builder-clear (field owner builder))
              (passes:run (field owner module) machine pipeline (& message))))
          (verified i32 (match status (0 (llvm:verify owner (& message))) (_ status))))
-        (match verified (0 (do (dispose-message message) 0)) (_ (do (llvm-error message) 2)))))))
+        (base:cond
+          ((== verified 0) (dispose-message message) 0)
+          ((== status 0)
+           (llvm-error "llvm-verification-failed" "LLVM rejected the optimized module" message)
+           2)
+          (true (llvm-error "llvm-optimization-failed" "LLVM optimization failed" message) 2))))))
 
 ; Create and own a native LLVM target machine while emitting/linking the borrowed module.
 ; Release the machine and transferred diagnostics before returning the command status.
@@ -276,7 +352,7 @@
          (optimization-level optimization)
          (& message))))
     (match (base:is-null machine)
-      (true (do (llvm-error message) 2))
+      (true (do (llvm-error "target-machine-failed" "cannot create LLVM target machine" message) 2))
       (false
         (do
           (dispose-message message)
@@ -348,7 +424,10 @@
                            (base:or (equal kind "static-library") (equal kind "shared-library")))
                          (true (match (header:write c all output) (true 0) (false 2)))
                          (false code)))))))))
-         (_ (do (llvm-error message) 2)))))
+         (_
+           (do
+             (llvm-error "llvm-verification-failed" "LLVM rejected the generated module" message)
+             2)))))
     (do (llvm:destroy owner) result)))
 
 ; Read a source file for syntax inspection.
@@ -365,11 +444,17 @@
      (file (pointer types:file-stream) (stdio:fopen path "rb")))
     (do
       (match (base:is-null (cast (pointer void) file))
-        (true (m:fatal "cannot open source file"))
+        (true
+          (do
+            (named-diagnostic "error" "source-open-failed" "cannot open source file" path)
+            (m:abort)))
         (false unit))
       (match (source:read-open file (& input))
         ((ok) unit)
-        ((invalid-input) (m:fatal "cannot read source file"))
+        ((invalid-input)
+         (do
+           (named-diagnostic "error" "source-read-failed" "cannot read source file" path)
+           (m:abort)))
         (status (m:storage status)))
       (let
         ((errors u64 0)
@@ -386,7 +471,8 @@
     (base:and
       (> (link:strings-length (field links frameworks)) 0)
       (base:not (equal platform "darwin")))
-    (true (m:fatal "frameworks are supported only on Darwin targets"))
+    (true
+      (m:fatal "unsupported-target-frameworks" "frameworks are supported only on Darwin targets"))
     (false unit)))
 
 ; Return the final dot after DIRECTORY, or END when the filename has no extension.
@@ -509,6 +595,7 @@
                 (m:report
                   c
                   main
+                  "eval-main-requires-arguments"
                   "eval requires a parameterless main; command-line arguments are unavailable")
                 2))
              ((equal mode "eval")
@@ -539,12 +626,15 @@
         (do (arena:destroy (& memory)) result)))))
 
 ; Print the compact top-level synopsis used with malformed invocations.
-(base:function usage () exit-code
+(base:function usage-summary () exit-code
   (do
     (m:text
       c:STDERR-FILENO
       "usage: verona [--help|-h] [--version|-V] COMMAND [OPTIONS]\n       verona {read|check|eval|emit-llvm|optimization-report} [OPTIONS] FILE\n       verona {compile|compile-report} [OPTIONS] FILE\n       verona build [OPTIONS] TARGET OUTPUT-DIRECTORY\n")
     2))
+
+(base:function usage ((code (pointer u8)) (message (pointer u8))) exit-code
+  (do (m:diagnostic "error" code message) (usage-summary)))
 
 ; Help is an interface contract, rather than the error-only synopsis above.
 (base:function help () exit-code
@@ -923,7 +1013,13 @@
                      machine
                      features
                      memory)))
-                (_ (do (m:text c:STDERR-FILENO "cannot allocate link options\n") false))))))))))
+                (_
+                  (do
+                    (m:diagnostic
+                      "error"
+                      "link-options-allocation-failed"
+                      "cannot allocate link options")
+                    false))))))))))
 
 (base:function native-library-option
   ((argv (pointer (pointer u8)))
@@ -965,7 +1061,13 @@
                  machine
                  features
                  memory))
-              (_ (do (m:text c:STDERR-FILENO "cannot allocate link options\n") false)))))))))
+              (_
+                (do
+                  (m:diagnostic
+                    "error"
+                    "link-options-allocation-failed"
+                    "cannot allocate link options")
+                  false)))))))))
 
 (base:function link-option
   ((argv (pointer (pointer u8)))
@@ -999,7 +1101,10 @@
            machine
            features
            memory))
-        (_ (do (m:text c:STDERR-FILENO "cannot allocate link options\n") false))))))
+        (_
+          (do
+            (m:diagnostic "error" "link-options-allocation-failed" "cannot allocate link options")
+            false))))))
 
 (base:function optimization-option
   ((argv (pointer (pointer u8)))
@@ -1049,7 +1154,10 @@
    (features (pointer (pointer void)))
    (memory (pointer arena:arena))) bool
   (match (== index end)
-    (true (field (deref state) provided))
+    (true
+      (match (field (deref state) provided)
+        (true true)
+        (false (do (m:diagnostic "error" "missing-source-operand" "expected a source file") false))))
     (false
       (let ((argument (pointer u8) (deref (pointer-offset argv index))))
         (base:cond
@@ -1075,7 +1183,14 @@
           ((base:and (base:not (field (deref state) stopped)) (option-like argument))
            (let ((count u64 (command-option-count argument)))
              (match (<= (+ index count) end)
-               (false false)
+               (false
+                 (do
+                   (named-diagnostic
+                     "error"
+                     "invalid-command-option"
+                     "unknown option or missing option value"
+                     argument)
+                   false))
                (true
                  (match
                    (command-options
@@ -1091,7 +1206,14 @@
                      machine
                      features
                      memory)
-                   (false false)
+                   (false
+                     (do
+                       (named-diagnostic
+                         "error"
+                         "invalid-command-option"
+                         "invalid option or option value"
+                         argument)
+                       false))
                    (true
                      (source-options
                        argv
@@ -1107,7 +1229,9 @@
                        machine
                        features
                        memory)))))))
-          ((field (deref state) provided) false)
+          ((field (deref state) provided)
+           (named-diagnostic "error" "unexpected-operand" "unexpected extra operand" argument)
+           false)
           (true
             (do
               (store (deref state) (source-state argument true (field (deref state) stopped)))
@@ -1128,21 +1252,12 @@
 
 (base:function source-command ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (match (< argc 3)
-    (true (usage))
+    (true (usage "missing-source-operand" "expected a source file"))
     (false
       (let
         ((mode (pointer u8) (deref (pointer-offset argv 1)))
          (state source-state (source-state "" false false))
          (compile bool (base:or-else (equal mode "compile") (equal mode "compile-report")))
-         (valid
-           bool
-           (base:or-else
-             (equal mode "read")
-             (equal mode "check")
-             (equal mode "eval")
-             (equal mode "emit-llvm")
-             (equal mode "optimization-report")
-             compile))
          (memory arena:arena (arena:create (system:create) 4096))
          (machine machine-options (machine-options "native" "generic" "" false))
          (features (pointer void) (m:empty-env))
@@ -1170,12 +1285,13 @@
              (& memory)))
          (result
            exit-code
-           (match
-             (base:or-else
-               (base:or (base:not valid) (base:not options))
-               (base:and (equal mode "compile-report") (base:not (equal kind "executable"))))
-             (true (usage))
-             (false
+           (base:cond
+             ((base:not options) (usage-summary))
+             ((base:and (equal mode "compile-report") (base:not (equal kind "executable")))
+              (usage
+                "invalid-compile-report-artifact"
+                "compile-report requires an executable artifact"))
+             (true
                (execute
                  mode
                  (field state path)
@@ -1224,7 +1340,23 @@
    (features (pointer (pointer void)))
    (state (pointer build-state))) bool
   (match (== index end)
-    (true (== (field (deref state) operands) 2))
+    (true
+      (match (field (deref state) operands)
+        (2 true)
+        (0
+          (do
+            (m:diagnostic
+              "error"
+              "missing-build-operands"
+              "build requires a target and an output directory")
+            false))
+        (_
+          (do
+            (m:diagnostic
+              "error"
+              "missing-build-operands"
+              "build requires an output directory after the target")
+            false))))
     (false
       (let ((argument (pointer u8) (deref (pointer-offset argv index))))
         (base:cond
@@ -1257,7 +1389,14 @@
                (base:and
                  (equal argument "--feature")
                  (> (cstring:strlen (deref (pointer-offset argv (+ index 1)))) 0)))
-             (false false)
+             (false
+               (do
+                 (named-diagnostic
+                   "error"
+                   "invalid-command-option"
+                   "invalid build option or option value"
+                   argument)
+                 false))
              (true
                (do
                  (config:add-feature memory features (deref (pointer-offset argv (+ index 1))))
@@ -1284,7 +1423,9 @@
                  (field (deref state) stopped)
                  (field (deref state) debug)))
              (build-options argv (+ index 1) end memory features state)))
-          (true false))))))
+          (true
+            (named-diagnostic "error" "unexpected-operand" "unexpected extra operand" argument)
+            false))))))
 
 (base:function build-command ((argc i32) (argv (pointer (pointer u8)))) exit-code
   (let
@@ -1295,7 +1436,7 @@
      (result
        exit-code
        (match valid
-         (false (usage))
+         (false (usage-summary))
          (true
            (let
              ((request
@@ -1383,7 +1524,7 @@
   ; ARGV[1] is unavailable for an invocation with no command.  Reject it
   ; before decoding the command so malformed CLI input cannot dereference it.
   (match (< argc 2)
-    (true (usage))
+    (true (usage "missing-command" "expected a compiler command"))
     (false
       (match (is-help-command argc argv)
         (true (help))
@@ -1406,19 +1547,16 @@
                    (match (is-command-help argc argv)
                      (true (source-help command))
                      (false (source-command argc argv))))
-                  ((base:or-else
-                     (equal command "compile")
-                     (equal command "compile-report"))
+                  ((base:or-else (equal command "compile") (equal command "compile-report"))
                    (match (is-command-help argc argv)
                      (true (source-help command))
                      (false (source-command argc argv))))
                   ((equal command "build")
                    (match (is-command-help argc argv)
                      (true (build-help))
-                     (false
-                       (match (< argc 4)
-                         (true (usage))
-                         (false (build-command argc argv))))))
+                     (false (build-command argc argv))))
                   ; Unknown commands and version flags with trailing arguments are
                   ; usage errors, not an unexplained status-one exit.
-                  (true (usage)))))))))))
+                  (true
+                    (named-diagnostic "error" "unknown-command" "unknown compiler command" command)
+                    (usage-summary)))))))))))

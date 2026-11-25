@@ -86,6 +86,7 @@
           (m:error
             (context l)
             site
+            "source-open-failed"
             "cannot open source file: cannot resolve module path"))
         (false unit))
       (data:bytes out))))
@@ -137,12 +138,23 @@
      (stream (pointer types:file-stream) (stdio:fopen path "rb")))
     (do
       (match (base:is-null (cast (pointer void) stream))
-        (true (m:error (context l) site "cannot open module source file"))
+        (true
+          (m:error
+            (context l)
+            site
+            "cannot-open-module-source-file"
+            "cannot open module source file"))
         (false unit))
       (match (source:read-open stream (& out))
         ((ok) out)
         ((invalid-input)
-         (do (m:error (context l) site "cannot read module source file") out))
+         (do
+           (m:error
+             (context l)
+             site
+             "cannot-read-module-source-file"
+             "cannot read module source file")
+           out))
         (status (do (m:storage status) out))))))
 
 (base:function directory-end ((path (pointer u8)) (start u64) (count u64)) u64
@@ -190,28 +202,37 @@
 (base:function module-name ((c m:context) (id u64)) unit
   (let ((v m:node (m:at c id)))
     (do
-      (m:require c id (check:atom c id) "expected module name")
+      (m:require
+        c
+        id
+        (check:atom c id)
+        "expected-module-name"
+        "expected module name")
       (m:require
         c
         id
         (match (check:integer-start c (field v start))
           (true false)
           (false true))
+        "expected-module-name"
         "expected module name")
       (m:require
         c
         id
         (match (m:is c id "unit") (true false) (false true))
+        "expected-module-name"
         "expected module name")
       (m:require
         c
         id
         (match (m:is c id "true") (true false) (false true))
+        "expected-module-name"
         "expected module name")
       (m:require
         c
         id
         (match (m:is c id "false") (true false) (false true))
+        "expected-module-name"
         "expected module name")
       (m:require
         c
@@ -219,11 +240,13 @@
         (==
           (check:colon c (field v start) (+ (field v start) (field v length)))
           (+ (field v start) (field v length)))
+        "expected-unqualified-module-name"
         "expected unqualified module name")
       (m:require
         c
         id
         (valid-module-name (m:spelling c id))
+        "empty-module-name-component"
         "module name contains an empty component"))))
 
 (base:function copy-string ((l loader) (value data:view)) (pointer u8)
@@ -244,15 +267,14 @@
       (true
         (do
           (match site
-            (0
-              (do
-                (m:text lconstants:STDERR-FILENO name)
-                (m:fatal ": module not found (cannot resolve module path)")))
-            (_
-              (m:error
-                (context l)
-                site
-                "module not found (cannot resolve module path)")))
+            (0 unit)
+            (_ (m:location (context l) (field (m:at (context l) site) start))))
+          (m:diagnostic-start "error" "module-not-found")
+          (m:text lconstants:STDERR-FILENO name)
+          (m:text
+            lconstants:STDERR-FILENO
+            ": module not found (cannot resolve module path)\n")
+          (m:abort)
           ""))
       (false
         (let
@@ -335,6 +357,7 @@
                   (match (m:same (context l) alias (field v alias))
                     (true false)
                     (false true))
+                  "duplicate-import-alias"
                   "duplicate import alias"))
               (false unit))
             (alias-conflict l owner alias (+ i 1))))))))
@@ -368,6 +391,7 @@
                (match (check:arity c head 2)
                  (true true)
                  (false (check:arity c head 4)))
+               "import-requires-module-name-and-optional-as-alias"
                "%import requires module name and optional :as alias")
              (let
                ((name u64 (m:next c head))
@@ -383,6 +407,7 @@
                          c
                          marker
                          (m:is c marker ":as")
+                         "import-requires-as-alias"
                          "%import requires :as alias")
                        (module-name c alias))))
                  (let
@@ -434,6 +459,7 @@
             (context l)
             site
             (< depth constants:module-depth-limit)
+            "module-dependency-depth-limit-exceeded"
             "module dependency depth limit (64) exceeded")
           (m:require
             (context l)
@@ -441,6 +467,7 @@
             (<
               (m:modules-length (deref (field (deref (field l session)) files)))
               constants:module-count-limit)
+            "module-count-limit-exceeded"
             "module count limit (256) exceeded")
           (let
             ((path (pointer u8) (source-path l name 0 site))
@@ -514,6 +541,7 @@
               ((loading)
                (do
                  (m:location (context l) (field (m:at (context l) site) start))
+                 (m:diagnostic-start "error" "import-cycle")
                  (m:text lconstants:STDERR-FILENO "import cycle: ")
                  (cycle-names
                    l
@@ -521,7 +549,8 @@
                    (m:modules-length
                      (deref (field (deref (field l session)) files))))
                  (m:text lconstants:STDERR-FILENO name)
-                 (m:fatal "")))
+                 (m:text lconstants:STDERR-FILENO "\n")
+                 (m:abort)))
               (_ unit))
             id))))))
 
@@ -546,8 +575,12 @@
       (true unit)
       (false
         (do
+          (m:diagnostic-start "error" "empty-module-name-component")
           (m:text lconstants:STDERR-FILENO name)
-          (m:fatal ": module name contains an empty component"))))
+          (m:text
+            lconstants:STDERR-FILENO
+            ": module name contains an empty component\n")
+          (m:abort))))
     (m:add-record (context l) (node-atom) 0 0 0 0 0 0 0 0 0)
     (load l name 0 0)
     (let ((first u64 0) (tail u64 0)) (do (order l 0 (& tail) (& first)) first))))

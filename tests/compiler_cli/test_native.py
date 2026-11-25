@@ -627,13 +627,19 @@ int main(void) {{
             f"#!{sys.executable}\n"
             "import json, pathlib, sys\n"
             f"pathlib.Path({str(log)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+            "sys.stderr.write('linker detail\\n' * 10000 + 'last line without newline')\n"
             "sys.exit(1)\n")
         wrapper.chmod(0o755)
         environment = dict(os.environ, VERONA_CORE_CLANG=str(wrapper))
         binary = self.root / "failed output"
         result = self.run_core("compile", self.program("0"), "-o", binary, env=environment)
         self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertIn("native compilation failed", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertTrue(result.stderr.startswith(
+            f"error[native-link-failed]: native compilation failed during linking: {wrapper}\n"
+        ), result.stderr[:200])
+        self.assertEqual(result.stderr.count("linker detail\n"), 10000)
+        self.assertTrue(result.stderr.endswith("last line without newline\n"))
         self.assertFalse(binary.exists())
         args = json.loads(log.read_text())
         self.assertEqual(args[1:], ["-o", str(binary)])

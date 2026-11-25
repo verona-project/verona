@@ -9,6 +9,58 @@ from .support import CompilerTestCase, FIXTURE_DIR
 
 
 class CliTests(CompilerTestCase):
+    def test_locationless_diagnostic_codes(self):
+        for command in (
+            "read", "check", "eval", "emit-llvm", "optimization-report",
+            "compile", "compile-report", "build",
+        ):
+            with self.subTest(command=command):
+                operands = ["target", "out"] if command == "build" else ["input.vrn"]
+                result = subprocess.run(
+                    [str(self.compiler), command, *operands, "--invalid"],
+                    cwd=self.root, capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertTrue(result.stderr.startswith("error[invalid-command-option]: "), result.stderr)
+                self.assertIn("--invalid\nusage:", result.stderr)
+
+        result = subprocess.run(
+            [str(self.compiler), "build", "target", "out"],
+            cwd=self.root, capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(
+            result.stderr,
+            "error[build-manifest-not-found]: cannot find verona.build in current directory\n",
+        )
+
+    def test_llvm_target_warning_reaches_stderr(self):
+        artifact = self.root / "warning.o"
+        result = self.run_core(
+            "compile", self.program("0"), "--emit", "object", "-o", artifact,
+            "--features", "+verona-unknown-feature",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertTrue(artifact.is_file())
+        self.assertNotIn("warning[llvm-backend-warning]", result.stderr)
+        self.assertIn("'+verona-unknown-feature' is not a recognized feature", result.stderr)
+
+    def test_llvm_backend_error_severity(self):
+        result = self.run_core(
+            "compile", "(%function main () f64 (cast f64 1.0))",
+            "--emit", "object", "-o", self.root / "result.o",
+            "--target", "x86_64-unknown-linux-gnu", "--features", "-sse,-sse2",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertRegex(
+            result.stderr,
+            r"error\[llvm-backend-error\]: [^\n]*SSE register return with SSE disabled",
+        )
+
     def test_cli_version_and_output_alias(self):
         host = self.reference_compiler
         reference = subprocess.run([str(host), "--version"], capture_output=True, text=True, timeout=10)

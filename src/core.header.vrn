@@ -11,7 +11,6 @@
 (import libc.string :as cstring)
 (import libc.stdio :as stdio)
 (import libc.types :as types)
-(import libc.constants :as constants)
 
 ; All construction storage belongs to the compilation arena. No LLVM handles
 ; are needed: headers describe checked C object layouts, not private values.
@@ -361,7 +360,10 @@
                   (text c "  } payload;\n")))
               (_ unit))
             (text c "};\n")))
-        (_ (m:fatal "internal error: invalid C header aggregate"))))))
+        (_
+          (m:fatal
+            "internal-error-invalid-c-header-aggregate"
+            "internal error: invalid C header aggregate"))))))
 
 (base:function declarations
   ((c context) (ordered ids-array) (index u64) (forward bool)) unit
@@ -443,7 +445,10 @@
         (match (base:is-null (cast (pointer void) file))
           (true
             (do
-              (m:text constants:STDERR-FILENO "cannot create library header\n")
+              (m:diagnostic
+                "error"
+                "library-header-create-failed"
+                "cannot create library header")
               false))
           (false
             (let
@@ -462,9 +467,10 @@
                 (true true)
                 (false
                   (do
-                    (m:text
-                      constants:STDERR-FILENO
-                      "cannot write library header\n")
+                    (m:diagnostic
+                      "error"
+                      "library-header-write-failed"
+                      "cannot write library header")
                     false))))))))))
 
 (export write)

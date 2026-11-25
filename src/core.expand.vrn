@@ -23,11 +23,13 @@
       c
       site
       (> (deref (field config steps)) 0)
+      "compile-time-evaluation-step-limit-exceeded"
       "compile-time evaluation step limit exceeded")
     (m:require
       c
       site
       (< (field config depth) 256)
+      "compile-time-evaluation-depth-limit-exceeded"
       "compile-time evaluation depth limit exceeded")
     (store (deref (field config steps)) (- (deref (field config steps)) 1))
     (evaluation
@@ -88,10 +90,16 @@
             (match (check:arity c param 2)
               (true (check:atom c (m:next c param)))
               (false false))
+            "missing-rest-parameter"
             "&rest requires a final parameter"))
         (false
           (do
-            (m:require c param (check:atom c param) "expected macro parameter")
+            (m:require
+              c
+              param
+              (check:atom c param)
+              "expected-macro-parameter"
+              "expected macro parameter")
             (parameters c (m:next c param))))))))
 
 (base:function install ((c m:context) (root u64)) unit
@@ -104,12 +112,19 @@
         c
         root
         (check:arity c head 4)
+        "macro-requires-a-name-parameters-and-one-body"
         "macro requires a name, parameters, and one body")
-      (m:require c name (check:atom c name) "expected macro name")
+      (m:require
+        c
+        name
+        (check:atom c name)
+        "expected-macro-name"
+        "expected macro name")
       (m:require
         c
         params
         (== (field (m:at c params) kind) 1)
+        "expected-macro-parameter-list"
         "expected macro parameter list")
       (parameters c (m:child c params))
       (let ((id u64 (attach c root head 0)))
@@ -168,11 +183,22 @@
 (base:function check-arguments ((c m:context) (site u64) (param u64) (arg u64))
   unit
   (base:cond
-    ((== param 0) (m:require c site (== arg 0) "too many macro arguments"))
+    ((== param 0)
+     (m:require
+       c
+       site
+       (== arg 0)
+       "too-many-macro-arguments"
+       "too many macro arguments"))
     ((m:is c param "&rest") unit)
     (true
       (do
-        (m:require c site (> arg 0) "missing macro argument")
+        (m:require
+          c
+          site
+          (> arg 0)
+          "missing-macro-argument"
+          "missing macro argument")
         (check-arguments c site (m:next c param) (m:next c arg))))))
 
 (base:function attach ((c m:context) (id u64) (child u64) (next u64)) u64
@@ -234,6 +260,7 @@
             c
             id
             (check:arity c child 2)
+            "quote-form-arity"
             "quote form requires one operand")
           (m:next c child)))
       (_ child))))
@@ -266,6 +293,7 @@
                     c
                     id
                     (== (field (m:at c value) kind) 1)
+                    "unquote-splicing-requires-a-list"
                     "unquote-splicing requires a list")
                   (splice-list
                     c
@@ -351,7 +379,13 @@
       (31
         (match (== depth 1)
           (true
-            (do (m:error c id "unquote-splicing requires a list element") 0))
+            (do
+              (m:error
+                c
+                id
+                "unquote-splicing-requires-a-list-element"
+                "unquote-splicing requires a list element")
+              0))
           (false
             (wrap-template
               c
@@ -401,13 +435,19 @@
               c
               site
               (symbol-value c value)
+              "symbol-concat-requires-data-or-symbols"
               "symbol-concat requires data or symbols")
             (grow-symbol c site out (field name length))
             (allocator:copy-bytes
               (pointer-offset (data:bytes (deref out)) start)
               (field name bytes)
               (field name length)))))
-      (_ (m:error c site "symbol-concat requires data or symbols")))))
+      (_
+        (m:error
+          c
+          site
+          "symbol-concat-requires-data-or-symbols"
+          "symbol-concat requires data or symbols")))))
 
 (base:function grow-symbol
   ((c m:context) (site u64) (out (pointer data:data)) (length u64)) unit
@@ -417,6 +457,7 @@
         c
         site
         (<= length (- (cast u64 18446744073709551615) start))
+        "generated-symbol-size-overflow"
         "generated symbol size overflow")
       (m:storage (data:resize out (+ start length))))))
 
@@ -447,12 +488,14 @@
         c
         site
         (> first 0)
+        "symbol-concat-requires-at-least-one-component"
         "symbol-concat requires at least one component")
       (symbol-parts c invocation-module first env config (& out))
       (m:require
         c
         site
         (> (data:length out) 0)
+        "symbol-concat-cannot-construct-an-empty-name"
         "symbol-concat cannot construct an empty name")
       (m:add
         c
@@ -502,6 +545,7 @@
       c
       site
       (boolean-p c value)
+      "compile-time-condition-requires-a-boolean"
       "compile-time condition requires a boolean")
     (match (field (m:at c value) kind)
       (3 (== (field (m:at c value) value) (cast i64 1)))
@@ -513,6 +557,7 @@
       c
       site
       (== (field (m:at c value) kind) 1)
+      "compile-time-operation-requires-a-list"
       "compile-time operation requires a list")
     value))
 
@@ -545,7 +590,12 @@
    (env (pointer void))
    (config evaluation)) u64
   (do
-    (m:require c forms (> forms 0) "compile-time body requires an expression")
+    (m:require
+      c
+      forms
+      (> forms 0)
+      "compile-time-body-requires-an-expression"
+      "compile-time body requires an expression")
     (let ((value u64 (eval c module forms env config)))
       (match (m:next c forms)
         (0 value)
@@ -570,6 +620,7 @@
             (match (== (field (m:at c bindings) kind) 1)
               (true (check:arity c name 2))
               (false false))
+            "invalid-compile-time-binding-form"
             "compile-time let binding requires a name and initializer")
           (m:require
             c
@@ -577,6 +628,7 @@
             (match (check:atom c name)
               (true (symbol-value c name))
               (false false))
+            "expected-compile-time-binding-name"
             "expected compile-time binding name")
           (m:require
             c
@@ -584,6 +636,7 @@
             (match (m:is c name "nil")
               (true false)
               (false (== (m:lookup c name seen) 0)))
+            "duplicate-or-reserved-compile-time-let-binding"
             "duplicate or reserved compile-time let binding")
           (let
             ((value u64 (eval c module init env config))
@@ -609,6 +662,7 @@
           (match (== (field (m:at c clauses) kind) 1)
             (true (> (m:next c (m:child c clauses)) 0))
             (false false))
+          "compile-time-cond-clauses-require-a-test-and-body"
           "compile-time cond clauses require a test and body")
         (validate-clauses c (m:next c clauses))))))
 
@@ -714,6 +768,7 @@
       c
       site
       (check:arity c args 3)
+      "compile-time-reduction-arity"
       "compile-time reduction requires three arguments")
     (let
       ((head u64 (eval c module args env config))
@@ -730,6 +785,7 @@
                 (base:not (boolean-p c head))
                 (base:not (unit-p c head))))
             (false false))
+          "compile-time-reduction-requires-a-callable-name"
           "compile-time reduction requires a callable name")
         (require-list c site values)
         ; All evaluator values are finite S-expression syntax. No host objects
@@ -918,7 +974,12 @@
     (match (>= index (m:imports-length edges))
       (true
         (do
-          (m:require c site (> found 0) "unknown state module qualifier")
+          (m:require
+            c
+            site
+            (> found 0)
+            "unknown-state-module-qualifier"
+            "unknown state module qualifier")
           (- found 1)))
       (false
         (let
@@ -944,6 +1005,7 @@
                     (base:and
                       (base:not self)
                       (base:or (== found 0) (== found target)))
+                    "ambiguous-state-module-qualifier"
                     "ambiguous state module qualifier")
                   (state-module
                     c
@@ -1078,6 +1140,7 @@
             (base:or
               (check:arity c args 1)
               (base:and ref (check:arity c args 2)))))
+        "invalid-compiler-state-operation-arity"
         "invalid compiler state operation arity")
       (let
         ((input u64 (eval c module args env config))
@@ -1091,6 +1154,7 @@
             c
             site
             (base:not (base:is-null (field c session)))
+            "missing-compilation-session"
             "compiler context operation requires an active compilation session")
           (let
             ((session
@@ -1160,13 +1224,19 @@
          (digit u64 (- byte 48)))
         (do
           (tick c site config)
-          (m:require c site (check:digit byte) "list index out of bounds")
+          (m:require
+            c
+            site
+            (check:digit byte)
+            "list-index-out-of-bounds"
+            "list index out of bounds")
           (m:require
             c
             site
             (<=
               (deref value)
               (/ (- (cast u64 18446744073709551615) digit) (cast u64 10)))
+            "list-index-out-of-bounds"
             "list index out of bounds")
           (store (deref value) (+ (* (deref value) 10) digit))
           unit)))
@@ -1180,7 +1250,12 @@
   ((c m:context) (site u64) (items u64) (index u64) (config evaluation)) u64
   (do
     (tick c site config)
-    (m:require c site (> items 0) "list index out of bounds")
+    (m:require
+      c
+      site
+      (> items 0)
+      "list-index-out-of-bounds"
+      "list index out of bounds")
     (match index
       (0 (attach c items (m:child c items) 0))
       (_ (nth-item c site (m:next c items) (- index 1) config)))))
@@ -1193,7 +1268,12 @@
    (env (pointer void))
    (config evaluation)) u64
   (do
-    (m:require c site (check:arity c args 2) "nth requires two arguments")
+    (m:require
+      c
+      site
+      (check:arity c args 2)
+      "nth-arity"
+      "nth requires two arguments")
     (let
       ((index u64 (eval c module args env config))
        (values
@@ -1206,6 +1286,7 @@
           c
           site
           (check:integer-node c index)
+          "list-index-out-of-bounds"
           "list index out of bounds")
         (let
           ((sign u64 (m:spelling-byte c index 0))
@@ -1227,6 +1308,7 @@
               c
               site
               (base:or (base:not (== sign 45)) (== value 0))
+              "list-index-out-of-bounds"
               "list index out of bounds")
             (nth-item c site (m:child c values) value config)))))))
 
@@ -1242,6 +1324,7 @@
             c
             site
             (> value 0)
+            "property-list-requires-key-value-pairs"
             "property list requires key/value pairs")
           (match (key-equal c items key config)
             (true value)
@@ -1259,6 +1342,7 @@
             c
             site
             (> value 0)
+            "property-list-requires-key-value-pairs"
             "property list requires key/value pairs")
           (plist-shape c site (m:next c value) config))))))
 
@@ -1274,11 +1358,13 @@
             c
             site
             (> value 0)
+            "property-list-requires-key-value-pairs"
             "property list requires key/value pairs")
           (m:require
             c
             site
             (== (plist-search c site (m:next c value) items config) 0)
+            "duplicate-collection-key"
             "duplicate collection key")
           (validate-plist c site (m:next c value) config))))))
 
@@ -1294,6 +1380,7 @@
       c
       site
       (base:or (check:arity c args 2) (check:arity c args 3))
+      "invalid-collection-operation-arity"
       "invalid collection operation arity")
     (let
       ((value u64 (eval c module args env config))
@@ -1464,7 +1551,12 @@
 
 (base:function string-input ((c m:context) (site u64) (id u64)) data:view
   (do
-    (m:require c site (== (syntax-kind c id) 25) "expected a string")
+    (m:require
+      c
+      site
+      (== (syntax-kind c id) 25)
+      "expected-a-string"
+      "expected a string")
     (data-value c id)))
 
 (base:function callable-name ((c m:context) (value u64)) bool
@@ -1485,6 +1577,7 @@
       c
       site
       (base:and (callable-name c id) (base:not (qualified-value c id)))
+      "symbol-name-requires-a-symbol"
       "symbol-name requires a symbol")
     (m:spelling c id)))
 
@@ -1509,6 +1602,7 @@
             c
             site
             (> item 0)
+            "compiler-map-requires-lists-of-equal-length"
             "compiler:map requires lists of equal length")
           (let
             ((value
@@ -1533,6 +1627,7 @@
           c
           site
           (== (m:child c (require-list c site lists)) 0)
+          "compiler-map-requires-lists-of-equal-length"
           "compiler:map requires lists of equal length")
         (empty-lists c site (m:next c lists) config)))))
 
@@ -1584,7 +1679,12 @@
      (sign u64 (m:spelling-byte c id 0))
      (skip u64 (match sign (43 1) (45 1) (_ 0))))
     (do
-      (m:require c site (check:integer-node c id) "list index out of bounds")
+      (m:require
+        c
+        site
+        (check:integer-node c id)
+        "list-index-out-of-bounds"
+        "list index out of bounds")
       (index-digits
         c
         id
@@ -1596,6 +1696,7 @@
         c
         site
         (base:or (base:not (== sign 45)) (== value 0))
+        "list-index-out-of-bounds"
         "list index out of bounds")
       value)))
 
@@ -1611,7 +1712,12 @@
     (_
       (do
         (tick c site config)
-        (m:require c site (> items 0) "list index out of bounds")
+        (m:require
+          c
+          site
+          (> items 0)
+          "list-index-out-of-bounds"
+          "list index out of bounds")
         (let
           ((rest
              u64
@@ -1670,11 +1776,13 @@
                c
                site
                (> first 0)
+               "compiler-call-requires-a-callable-name"
                "compiler:call requires a callable name")
              (m:require
                c
                site
                (callable-name c first)
+               "compiler-call-requires-a-callable-name"
                "compiler:call requires a callable name")
              (list-value c site (copy-items c values 0 config))))
           ((== code 3)
@@ -1683,11 +1791,13 @@
                c
                site
                (base:and (> first 0) (> second 0))
+               "invalid-compiler-map-form"
                "compiler:map requires a head and at least one proper list")
              (m:require
                c
                site
                (callable-name c first)
+               "compiler-map-requires-a-callable-name"
                "compiler:map requires a callable name")
              (list-value c site (map-calls c site first second config))))
           ((== code 8) (list-value c site (append-lists c site values config)))
@@ -1697,6 +1807,7 @@
                c
                site
                (check:arity c values 2)
+               "list-slice-arity"
                "list slice requires two arguments")
              (require-list c site second)
              (list-value
@@ -1715,6 +1826,7 @@
                 c
                 site
                 (check:arity c values 1)
+                "compile-time-helper-arity"
                 "compile-time helper requires one argument")
               (base:cond
                 ((== code 4)
@@ -1733,6 +1845,7 @@
                        c
                        site
                        (> (field text length) 0)
+                       "symbol-requires-a-non-empty-string"
                        "symbol requires a non-empty string")
                      (text-node c site 0 text))))
                 ((== code 6)
@@ -1785,6 +1898,7 @@
                             c
                             site
                             (keyword-p c first)
+                            "expected-a-colon-prefixed-keyword"
                             "expected a colon-prefixed keyword")
                           (let
                             ((text
@@ -1925,6 +2039,7 @@
            c
            site
            (check:arity c values 1)
+           "string-length-arity"
            "string-length requires one argument")
          (unsigned-value c site (field (string-input c site first) length))))
       ((== code 3)
@@ -1933,6 +2048,7 @@
            c
            site
            (base:or (check:arity c values 2) (check:arity c values 3))
+           "substring-requires-a-string-and-bounds"
            "substring requires a string and bounds")
          (let
            ((text data:view (string-input c site first))
@@ -1947,6 +2063,7 @@
                c
                site
                (base:and (<= start end) (<= end (field text length)))
+               "substring-bounds-out-of-range"
                "substring bounds out of range")
              (string-value
                c
@@ -1961,6 +2078,7 @@
            c
            site
            (check:arity c values 2)
+           "string-join-arity"
            "string-join requires two arguments")
          (let
            ((items u64 (m:child c (require-list c site first)))
@@ -1975,6 +2093,7 @@
             c
             site
             (check:arity c values (match code (9 3) (_ 2)))
+            "invalid-string-operation-arity"
             "invalid string operation arity")
           (let
             ((left data:view (string-input c site first))
@@ -2004,6 +2123,7 @@
                     c
                     site
                     (> (field right length) 0)
+                    "separator-must-not-be-empty"
                     "separator must not be empty")
                   (let ((items u64 (split-string c site left right 0 config)))
                     (match code
@@ -2062,12 +2182,16 @@
               site
               (> value 0)
               (match plist
+                (true "property-list-requires-key-value-pairs")
+                (false "association-list-entries-require-two-elements"))
+              (match plist
                 (true "property list requires key/value pairs")
                 (false "association list entries require two elements")))
             (m:require
               c
               site
               (base:or plist (check:arity c key 2))
+              "association-list-entries-require-two-elements"
               "association list entries require two elements")
             (let
               ((pair
@@ -2108,6 +2232,7 @@
           c
           site
           (== (entry-find c (m:next c entries) (m:child c entries) config) 0)
+          "duplicate-collection-key"
           "duplicate collection key")
         (validate-entries c site (m:next c entries) config)))))
 
@@ -2213,6 +2338,7 @@
           (5 (check:arity c values 1))
           (6 (check:arity c values 1))
           (_ (check:arity c values 2)))
+        "invalid-collection-operation-arity"
         "invalid collection operation arity")
       (let
         ((entries
@@ -2445,11 +2571,13 @@
       c
       site
       (base:not (base:is-null (field c session)))
+      "missing-compilation-session"
       "compiler context operation requires an active compilation session")
     (m:require
       c
       site
       (check:arity c args (match code (1 1) (_ 0)))
+      "invalid-compiler-context-arity"
       "invalid compiler context arity")
     (match code
       (1
@@ -2512,6 +2640,7 @@
         c
         site
         (float:finite 13 (base:convert bits))
+        "compile-time-floating-point-overflow"
         "compile-time floating-point overflow")
       (m:add
         c
@@ -2534,6 +2663,7 @@
         c
         site
         (== (float:parse c copy 13) 13)
+        "compile-time-floating-point-overflow"
         "compile-time floating-point overflow")
       (field (m:at c copy) value))))
 
@@ -2548,6 +2678,7 @@
           c
           site
           (base:or (check:integer-node c items) (== (syntax-kind c items) 35))
+          "expected-an-integer-or-floating-point-number"
           "expected an integer or floating-point number")
         (let ((rest bool (numeric-inputs c site (m:next c items) config)))
           (base:and (check:integer-node c items) rest))))))
@@ -2651,6 +2782,7 @@
                          (base:or
                            (base:not (== code 4))
                            (base:not (float:compare 5 13 b 0)))
+                         "compile-time-division-by-zero"
                          "division by zero")
                        (float-result c site (float:arithmetic code 13 a b))))))))))
         (numeric-fold c site (m:next c items) value config code integers)))))
@@ -2769,6 +2901,7 @@
           (6 (== count 2))
           (9 (== count 1))
           (_ (match (>= code 10) (true (>= count 2)) (false (> count 0)))))
+        "invalid-numeric-operation-arity"
         "invalid numeric operation arity")
       (base:cond
         ((>= code 10)
@@ -2779,6 +2912,7 @@
              c
              site
              integers
+             "integer-division-requires-integer-operands"
              "integer division requires integer operands")
            (integer-division c site values (m:next c values) config code)))
         ((== code 9)
@@ -2876,6 +3010,7 @@
               c
               site
               (== parsed bits)
+              "floating-point-decimal-conversion-did-not-round-trip"
               "floating-point decimal conversion did not round trip")
             text))
         (false
@@ -3046,7 +3181,13 @@
    (digits (pointer u64))
    (config evaluation)) unit
   (match (== index (field text length))
-    (true (m:require c site (> (deref digits) 0) "invalid numeric string"))
+    (true
+      (m:require
+        c
+        site
+        (> (deref digits) 0)
+        "invalid-numeric-string"
+        "invalid numeric string"))
     (false
       (let
         ((byte
@@ -3065,6 +3206,7 @@
                     (== byte 46)
                     (base:not (deref dot))
                     (> (deref digits) 0))
+                  "invalid-numeric-string"
                   "invalid numeric string")
                 (store (deref dot) true)
                 (store (deref digits) 0)
@@ -3084,6 +3226,7 @@
       c
       site
       (check:arity c args 1)
+      "numeric-conversion-arity"
       "numeric conversion requires one argument")
     (let ((value u64 (eval c module args env config)))
       (match (m:is c head "number->string")
@@ -3095,6 +3238,7 @@
               (base:or
                 (check:integer-node c value)
                 (== (syntax-kind c value) 35))
+              "expected-an-integer-or-floating-point-number"
               "expected an integer or floating-point number")
             (match (check:integer-node c value)
               (true
@@ -3109,7 +3253,12 @@
              (dot bool false)
              (digits u64 0))
             (do
-              (m:require c site (< start end) "invalid numeric string")
+              (m:require
+                c
+                site
+                (< start end)
+                "invalid-numeric-string"
+                "invalid numeric string")
               (let
                 ((trimmed
                    data:view
@@ -3152,6 +3301,7 @@
          (match (== (field (m:at c args) kind) 1)
            (true (> (m:next c args) 0))
            (false false))
+         "compile-time-let-requires-bindings-and-a-body"
          "compile-time let requires bindings and a body")
        (eval-bindings
          c
@@ -3172,6 +3322,7 @@
             c
             head
             (== (m:lookup c head env) 0)
+            "compile-time-value-is-not-callable"
             "compile-time value is not callable")
           (base:cond
             ((> macro 0)
@@ -3234,6 +3385,7 @@
                  c
                  site
                  (check:arity c args 2)
+                 "compile-time-cons-arity"
                  "compile-time cons requires two arguments")
                (let
                  ((item u64 (eval c module args env config))
@@ -3253,6 +3405,7 @@
                  c
                  site
                  (check:arity c args 2)
+                 "compile-time-equal-arity"
                  "compile-time equal? requires two arguments")
                (let
                  ((left u64 (eval c module args env config))
@@ -3264,6 +3417,7 @@
                  c
                  site
                  (check:arity c args 1)
+                 "compile-time-not-arity"
                  "compile-time not requires one argument")
                (boolean-value
                  c
@@ -3278,6 +3432,7 @@
                  c
                  site
                  (check:arity c args 1)
+                 "compile-time-list-operation-arity"
                  "compile-time list operation requires one argument")
                (let
                  ((value
@@ -3287,10 +3442,22 @@
                  (base:cond
                    ((m:is c head "empty?") (boolean-value c site (== child 0)))
                    ((== child 0)
-                    (do (m:error c site "car/cdr require a non-empty list") 0))
+                    (do
+                      (m:error
+                        c
+                        site
+                        "car-cdr-require-a-non-empty-list"
+                        "car/cdr require a non-empty list")
+                      0))
                    ((m:is c head "cdr") (list-value c site (m:next c child)))
                    (true (attach c child (m:child c child) 0))))))
-            (true (m:error c site "unsupported compile-time call") 0)))))))
+            (true
+              (m:error
+                c
+                site
+                "unsupported-compile-time-call"
+                "unsupported compile-time call")
+              0)))))))
 
 (base:function eval
   ((c m:context)
@@ -3319,7 +3486,12 @@
           (true
             (let ((value u64 (m:lookup c site env)))
               (do
-                (m:require c site (> value 0) "unknown compile-time name")
+                (m:require
+                  c
+                  site
+                  (> value 0)
+                  "unknown-compile-time-name"
+                  "unknown compile-time name")
                 value)))))
       (3 site)
       (25 site)
@@ -3333,18 +3505,30 @@
             c
             site
             (field config unquote)
+            "unquote-is-valid-only-inside-quasiquote"
             "unquote is valid only inside quasiquote")
           (eval c module (operand c site) env next)))
       (31
         (do
-          (m:error c site "unquote-splicing is valid only inside quasiquote")
+          (m:error
+            c
+            site
+            "unquote-splicing-is-valid-only-inside-quasiquote"
+            "unquote-splicing is valid only inside quasiquote")
           0))
       (1
         (let ((head u64 (m:child c site)))
           (match head
             (0 site)
             (_ (eval-call c module site head (m:next c head) env next)))))
-      (_ (do (m:error c site "unsupported compile-time expression") 0)))))
+      (_
+        (do
+          (m:error
+            c
+            site
+            "unsupported-compile-time-expression"
+            "unsupported compile-time expression")
+          0)))))
 
 (base:function form ((c m:context) (id u64)) bool
   (let ((head u64 (m:child c id)))
@@ -3360,7 +3544,12 @@
     (0 unit)
     (_
       (do
-        (m:require c id (form c id) "expected a flat list of top-level forms")
+        (m:require
+          c
+          id
+          (form c id)
+          "expected-a-flat-list-of-top-level-forms"
+          "expected a flat list of top-level forms")
         (validate-forms c (m:next c id))))))
 
 ; The reference compiler rehydrates every plain macro result in the invocation
@@ -3472,7 +3661,12 @@
     (base:cond
       ((> macro 0)
        (do
-         (m:require c root (> fuel 0) "macro expansion limit exceeded")
+         (m:require
+           c
+           root
+           (> fuel 0)
+           "macro-expansion-limit-exceeded"
+           "macro expansion limit exceeded")
          (let
            ((params u64 (m:next c (m:next c (m:child c macro))))
             (args u64 (m:next c head))
@@ -3503,6 +3697,7 @@
                    c
                    root
                    (== (field (m:at c result) kind) 1)
+                   "expected-a-top-level-form-or-list-of-forms"
                    "expected a top-level form or list of forms")
                  (match (form c result)
                    (true
@@ -3572,7 +3767,12 @@
               (false unit)))
           (_
             (do
-              (m:require c id (> fuel 0) "macro expansion limit exceeded")
+              (m:require
+                c
+                id
+                (> fuel 0)
+                "macro-expansion-limit-exceeded"
+                "macro expansion limit exceeded")
               (let
                 ((site m:node (m:at c id))
                  (value

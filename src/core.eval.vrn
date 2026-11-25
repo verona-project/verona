@@ -1422,19 +1422,27 @@
           aggregates))
       unit)))
 
-(base:function message ((code u64)) (pointer u8)
+(base:function error-description ((code u64)) (tuple (pointer u8) (pointer u8))
   (match code
-    (1 "division by zero")
-    (2 "signed division overflow")
-    (3 "evaluator step limit exceeded")
-    (4 "evaluator call depth limit exceeded")
-    (5 "evaluator storage allocation failed")
-    (7 "array index out of bounds")
-    (8 "native calls are unavailable in the evaluator")
-    (9 "invalid pointer access")
-    (10 "pointer refers to expired storage")
-    (11 "cannot write read-only storage")
-    (_ "internal error: invalid checked evaluator input")))
+    (1 (tuple "division-by-zero" "division by zero"))
+    (2 (tuple "signed-division-overflow" "signed division overflow"))
+    (3 (tuple "evaluator-step-limit" "evaluator step limit exceeded"))
+    (4
+      (tuple "evaluator-call-depth-limit" "evaluator call depth limit exceeded"))
+    (5
+      (tuple
+        "evaluator-storage-allocation-failed"
+        "evaluator storage allocation failed"))
+    (7 (tuple "array-index-out-of-bounds" "array index out of bounds"))
+    (8
+      (tuple "eval-native-call" "native calls are unavailable in the evaluator"))
+    (9 (tuple "invalid-pointer-access" "invalid pointer access"))
+    (10 (tuple "expired-pointer-storage" "pointer refers to expired storage"))
+    (11 (tuple "read-only-pointer-storage" "cannot write read-only storage"))
+    (_
+      (tuple
+        "invalid-evaluator-input"
+        "internal error: invalid checked evaluator input"))))
 
 (base:function trace-range
   ((p m:context) (frames frames-array) (start u64) (count u64)) unit
@@ -1443,7 +1451,8 @@
     (1
       (let ((f frame (frames-at frames start)))
         (do
-          (m:text constants:STDERR-FILENO "  in ")
+          (m:diagnostic-start "note" "evaluator-call-frame")
+          (m:text constants:STDERR-FILENO "in ")
           (m:write 2 (m:spelling p (m:next p (m:child p (field f function)))))
           (m:text constants:STDERR-FILENO " at ")
           (m:location p (field (m:at p (field f site)) start))
@@ -1455,11 +1464,20 @@
           (trace-range p frames start half))))))
 
 (base:function report ((p m:context) (result outcome)) unit
-  (do
-    (m:location p (field (m:at p (field result site)) start))
-    (m:text constants:STDERR-FILENO (message (field result code)))
-    (m:text constants:STDERR-FILENO "\n")
-    (trace-range p (field result trace) 0 (frames-length (field result trace)))))
+  (let
+    ((description
+       (tuple (pointer u8) (pointer u8))
+       (error-description (field result code))))
+    (do
+      (match (field result site)
+        (0 unit)
+        (_ (m:location p (field (m:at p (field result site)) start))))
+      (m:diagnostic "error" (tuple-get description 0) (tuple-get description 1))
+      (trace-range
+        p
+        (field result trace)
+        0
+        (frames-length (field result trace))))))
 
 (base:function signed-number ((value i64)) unit
   (let ((bits u64 (base:convert value)))

@@ -25,36 +25,41 @@
       (m:storage (data:append (& out) 0))
       (data:bytes out))))
 
-(base:function directory ((path (pointer u8)) (message (pointer u8))) (pointer u8)
+(base:function directory ((path (pointer u8)) (code (pointer u8)) (message (pointer u8)))
+  (pointer u8)
   (match
     (base:or-else
       (base:or-else (base:is-null (cast (pointer void) path)) (== (cstring:strlen path) 0))
       (base:not (== (deref path) 47)))
-    (true (do (m:fatal message) ""))
+    (true (do (m:fatal code message) ""))
     (false
       (let ((stream (pointer types:directory-stream) (fs:opendir path)))
         (match (base:is-null (cast (pointer void) stream))
-          (true (do (m:fatal message) ""))
+          (true (do (m:fatal code message) ""))
           (false (do (fs:closedir stream) path)))))))
 
 (base:function source-directory () (pointer u8)
   (directory
     (process:getenv "VERONA_SOURCE_DIR")
+    "invalid-package-source-directory"
     "VERONA_SOURCE_DIR must name an accessible absolute directory"))
 
 (base:function library-directory () (pointer u8)
   (directory
     (process:getenv "VERONA_LIBRARY_DIR")
+    "invalid-package-library-directory"
     "VERONA_LIBRARY_DIR must name an accessible absolute directory"))
 
 (base:function source-root ((c m:context) (package (pointer u8))) (pointer u8)
   (directory
     (join c (join c (source-directory) package) "src")
+    "invalid-package-source-root"
     "Verona package source root must name an accessible absolute directory"))
 
 (base:function artifact-root ((c m:context) (package (pointer u8))) (pointer u8)
   (directory
     (join c (library-directory) package)
+    "invalid-package-artifact-root"
     "Verona package artifact root must name an accessible absolute directory"))
 
 (base:function package-name ((path (pointer u8)) (index u64) (last u64)) (pointer u8)
@@ -107,38 +112,21 @@
       (m:storage (data:append (& out) 0))
       (data:bytes out))))
 
-(base:function directory-in ((path (pointer u8)) (message (pointer u8))) (pointer u8)
-  (match
-    (base:or-else
-      (base:or-else (base:is-null (cast (pointer void) path)) (== (cstring:strlen path) 0))
-      (base:not (== (deref path) 47)))
-    (true (do (m:fatal message) ""))
-    (false
-      (let ((stream (pointer types:directory-stream) (fs:opendir path)))
-        (match (base:is-null (cast (pointer void) stream))
-          (true (do (m:fatal message) ""))
-          (false (do (fs:closedir stream) path)))))))
-
 (base:function cli-source-root-in ((memory (pointer arena:arena)) (root (pointer u8))) (pointer u8)
   (do
-    (directory-in
-      (process:getenv "VERONA_SOURCE_DIR")
-      "VERONA_SOURCE_DIR must name an accessible absolute directory")
-    (directory-in
+    (source-directory)
+    (directory
       (join-in memory root "src")
+      "invalid-package-source-root"
       "Verona package root must name an accessible absolute directory with src")
     (join-in memory root "src")))
 
 (base:function cli-artifact-root-in ((memory (pointer arena:arena)) (root (pointer u8)))
   (pointer u8)
-  (let
-    ((library
-       (pointer u8)
-       (directory-in
-         (process:getenv "VERONA_LIBRARY_DIR")
-         "VERONA_LIBRARY_DIR must name an accessible absolute directory")))
-    (directory-in
+  (let ((library (pointer u8) (library-directory)))
+    (directory
       (join-in memory library (package-name root 0 0))
+      "invalid-package-artifact-root"
       "Verona package artifact root must name an accessible absolute directory")))
 
 (export

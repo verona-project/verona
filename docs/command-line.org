@@ -9,10 +9,15 @@ This is the command-line contract for the executables in this repository.
 The main compiler executable is named =verona=. =verona --help=, =verona -h=,
 and =verona help= print top-level help; =verona COMMAND --help=, =-h=, or
 =help= print command help. Help succeeds and writes to standard output. Invalid
-invocations write the compact usage synopsis to standard error and return 2.
+invocations write a diagnostic and the compact usage synopsis to standard
+error and return 2.
 =verona --version= and =verona -V= must be used without any other arguments.
 
 * Compiler (=verona=)
+
+Diagnostics include a severity and a stable code, with a file, line, and byte
+column when a source location is available.
+[[file:compiler-diagnostics.org][Compiler diagnostic codes]]
 
 ** Synopsis
 

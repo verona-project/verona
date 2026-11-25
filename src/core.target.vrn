@@ -75,6 +75,12 @@
           (match (base:is-null handle)
             (true
               (do
+                (m:diagnostic-start "error" "target-machine-failed")
+                (m:text
+                  constants:STDERR-FILENO
+                  "cannot resolve compilation target: ")
+                (m:text constants:STDERR-FILENO triple)
+                (m:text constants:STDERR-FILENO "\n")
                 (match (base:is-null (cast (pointer void) message))
                   (true unit)
                   (false
@@ -82,7 +88,7 @@
                       (m:text constants:STDERR-FILENO message)
                       (ir:message-dispose message))))
                 (llvm:destroy owner)
-                (m:fatal "cannot resolve compilation target")))
+                (m:abort)))
             (false unit))
           (match (base:is-null (cast (pointer void) message))
             (true unit)
@@ -108,6 +114,7 @@
                 (true unit)
                 (false
                   (m:fatal
+                    "unsupported-target-layout"
                     "unsupported target layout: requires 64-bit little-endian pointers")))
               (info:configuration
                 triple

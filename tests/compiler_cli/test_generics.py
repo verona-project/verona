@@ -160,7 +160,7 @@ class GenericTests(CompilerTestCase):
                     self.assertEqual(compiled.returncode, 0, compiled.stderr)
                     native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
                     self.assertEqual(native.returncode, 70, native.stderr)
-                    self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+                    self.assert_runtime_diagnostic_matches(native, evaluated)
 
     def test_default_operator_errors(self):
         for source, message in (

@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
             self.assertEqual(compiled.returncode, 0, compiled.stderr)
             native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
             self.assertEqual(native.returncode, 70, native.stderr)
-            self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+            self.assert_runtime_diagnostic_matches(native, evaluated)
 
     def test_inline_directives_and_auto_default(self):
         source = """
@@ -144,7 +144,11 @@ int main(int argc, char **argv) {
                 pattern = r"(?m)\b[tT] _?" + re.escape(names[1]) + r"$"
                 if level == "-O0":
                     self.assertRegex(symbols.stdout, pattern)
-                    self.assertIn("forced inlining is inactive at -O0", compiled.stderr)
+                    self.assertIn(
+                        "note[forced-inlining-disabled]: forced inlining is inactive at -O0",
+                        compiled.stderr,
+                    )
+                    self.assertEqual(compiled.stdout, "")
                 else:
                     self.assertNotRegex(symbols.stdout, pattern)
                 self.assertRegex(symbols.stdout, r"(?m)\b[tT] _?" + re.escape(names[2]) + r"$")
@@ -248,7 +252,7 @@ int main(int argc, char **argv) {
             self.assertEqual(compiled.returncode, 0, compiled.stderr)
             native = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
             self.assertEqual(native.returncode, 70, native.stderr)
-            self.assertEqual(native.stderr.splitlines()[0], evaluated.stderr.splitlines()[0])
+            self.assert_runtime_diagnostic_matches(native, evaluated)
 
     def test_inline_recursion_is_bounded_and_reported(self):
         source = """

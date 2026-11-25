@@ -48,10 +48,20 @@
            (match (finite ty (base:convert bits))
              (true (m:typed-kind c id (node-float) ty 0 bits))
              (false
-               (do (m:report c id "floating-point literal out of range") 0))))))
+               (do
+                 (m:report
+                   c
+                   id
+                   "floating-point-literal-out-of-range"
+                   "floating-point literal out of range")
+                 0))))))
       (_
         (do
-          (m:report c id "floating-point literal storage allocation failed")
+          (m:report
+            c
+            id
+            "floating-point-literal-storage-allocation-failed"
+            "floating-point literal storage allocation failed")
           0)))))
 
 (base:function parse ((c m:context) (id u64) (ty u64)) u64
@@ -64,7 +74,14 @@
            (match ty (12 (pack32 (base:convert (unpack64 value)))) (_ value))))
         (match (finite ty (base:convert bits))
           (true (m:typed-kind c id (node-float) ty 0 bits))
-          (false (do (m:report c id "floating-point literal out of range") 0)))))
+          (false
+            (do
+              (m:report
+                c
+                id
+                "floating-point-literal-out-of-range"
+                "floating-point literal out of range")
+              0)))))
     (_ (parse-text c id ty))))
 
 (base:function finite ((ty u64) (bits u64)) bool

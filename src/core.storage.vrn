@@ -16,6 +16,7 @@
       c
       0
       (<= a (- (cast u64 18446744073709551615) b))
+      "object-layout-overflow"
       "object layout overflow")
     (+ a b)))
 
@@ -77,6 +78,7 @@
                     (<=
                       count
                       (/ (cast u64 18446744073709551615) (field part size)))
+                    "object-layout-overflow"
                     "object layout overflow")))
               (layout (* count (field part size)) (field part alignment)))))
         (21
@@ -89,7 +91,10 @@
                 (add c (union-offset c ty) (field payload size))
                 alignment)
               alignment)))
-        (_ (do (m:error c 0 "incomplete object layout") (layout 0 1)))))))
+        (_
+          (do
+            (m:error c 0 "incomplete-object-layout" "incomplete object layout")
+            (layout 0 1)))))))
 
 (base:function component-offset
   ((c m:context) (fields u64) (index u64) (offset u64)) u64

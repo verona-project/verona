@@ -28,7 +28,10 @@
          (& message))))
     (do
       (match (base:is-null machine)
-        (true (m:fatal "cannot create native C ABI data layout"))
+        (true
+          (m:fatal
+            "cannot-create-native-c-abi-data-layout"
+            "cannot create native C ABI data layout"))
         (false unit))
       (match (base:is-null message)
         (true unit)
@@ -970,6 +973,7 @@
                (true unit)
                (false
                  (m:fatal
+                   "external-runtime-symbol-conflict"
                    "external symbol conflicts with a runtime declaration")))
              existing)))))
     function))

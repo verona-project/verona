@@ -16,6 +16,7 @@
         (field w context)
         (field w site)
         (> (deref left) 0)
+        "compile-time-evaluation-step-limit-exceeded"
         "compile-time evaluation step limit exceeded")
       (store (deref left) (- (deref left) 1))
       unit)))
@@ -85,6 +86,7 @@
             (field w context)
             id
             (base:and (>= byte 48) (<= byte 57))
+            "expected-an-integer"
             "expected an integer")
           (store
             (deref (pointer-offset out (- (- length index) 1)))
@@ -400,6 +402,7 @@
       (field w context)
       (field w site)
       (base:not (zero b))
+      "compile-time-division-by-zero"
       "division by zero")
     (let
       ((out data:data (buffer w (data:length (field a digits))))

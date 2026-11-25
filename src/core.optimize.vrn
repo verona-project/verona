@@ -342,7 +342,12 @@
                (memory:memset (cast (pointer void) used) 0 count)
                (mark-references c used 1 (- count 1))
                used)))
-          (_ (do (m:fatal "optimizer reference storage allocation failed") nil)))))))
+          (_
+            (do
+              (m:fatal
+                "optimizer-reference-storage-allocation-failed"
+                "optimizer reference storage allocation failed")
+              nil)))))))
 
 ; Map resolved immutable let binder IDs to their checked initializer IDs.
 ; Parameters, pattern binders, globals and stored/address-taken locals have no
@@ -399,7 +404,11 @@
                (initializer-range c locals 1 (- count 1))
                locals)))
           (_
-            (do (m:fatal "optimizer initializer storage allocation failed") nil)))))))
+            (do
+              (m:fatal
+                "optimizer-initializer-storage-allocation-failed"
+                "optimizer initializer storage allocation failed")
+              nil)))))))
 
 ; A deliberately small local CSE domain.  Leaves are stable scalar values and
 ; internal nodes are integer/boolean primitives which cannot read memory, call,

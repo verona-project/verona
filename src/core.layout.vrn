@@ -16,7 +16,12 @@
       (* count constants:llvm-handle-byte-size)
       constants:llvm-handle-alignment)
     ((allocated p) (cast (pointer t:value-ref) (cast (pointer void) p)))
-    (_ (do (m:fatal "LLVM handle storage allocation failed") nil))))
+    (_
+      (do
+        (m:fatal
+          "llvm-handle-storage-allocation-failed"
+          "LLVM handle storage allocation failed")
+        nil))))
 
 (base:function scalar-type ((owner llvm:session) (ty u64)) t:type-ref
   (match ty

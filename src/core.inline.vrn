@@ -7,7 +7,6 @@
 (import llvm.enums :as enum)
 (import data)
 (import libc.string :as cstring)
-(import libc.constants :as constants)
 
 ; Only explicit policies create attributes. No directive means automatic LLVM
 ; profitability decisions. Attributes apply to implementation bodies, leaving
@@ -118,7 +117,7 @@
             (remaining c owner id))
           (specialization-remaining c owner (m:next c id) template))))))
 
-; These are nonfatal remarks, not semantic diagnostics. LLVM owns inlining
+; These nonfatal remarks describe the result of LLVM inlining.
 ; legality and recursion limits; an always request cannot override them.
 ; O0 keeps the unoptimized baseline and explicitly reports inactive requests.
 (base:function remarks
@@ -141,12 +140,17 @@
                 (true
                   (do
                     (m:location c (field v start))
-                    (m:text
-                      constants:STDERR-FILENO
-                      (match disabled
-                        (true "note: forced inlining is inactive at -O0\n")
-                        (false
-                          "note: forced inlining left direct calls (recursion or LLVM constraints)\n")))
+                    (match disabled
+                      (true
+                        (m:diagnostic
+                          "note"
+                          "forced-inlining-disabled"
+                          "forced inlining is inactive at -O0"))
+                      (false
+                        (m:diagnostic
+                          "note"
+                          "forced-inlining-incomplete"
+                          "forced inlining left direct calls (recursion or LLVM constraints)")))
                     unit)))))
           (remarks c owner (m:next c id) all disabled))))))
 

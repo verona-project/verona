@@ -62,6 +62,12 @@ class CompilerTestCase(unittest.TestCase):
         self.assertEqual(compiled.returncode, 0, compiled.stderr)
         return subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
 
+    def assert_runtime_diagnostic_matches(self, native, evaluated):
+        evaluated_line = evaluated.stderr.splitlines()[0]
+        diagnostic = re.fullmatch(r"(.*:\d+:\d+: )error\[[a-z0-9-]+\]: (.*)", evaluated_line)
+        self.assertIsNotNone(diagnostic, evaluated_line)
+        self.assertEqual(native.stderr.splitlines()[0], diagnostic[1] + diagnostic[2])
+
     def named_cases(self, program, expected_count):
         source = FIXTURE_DIR / "programs" / program
         case_names = None

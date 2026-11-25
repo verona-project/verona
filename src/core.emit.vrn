@@ -325,7 +325,10 @@
               (& index)
               1
               ""))))
-      (_ (do (m:fatal "invalid checked place") (get b id))))))
+      (_
+        (do
+          (m:fatal "invalid-checked-place" "invalid checked place")
+          (get b id))))))
 
 (base:function load-place ((c m:context) (b backend) (id u64)) t:value-ref
   (let
@@ -2275,6 +2278,24 @@
                       0)
                     (report-text b print ")")))))))))))
 
+(base:function report-diagnostic
+  ((diagnostic t:diagnostic-ref) (user-data (pointer void))) unit
+  (let ((severity i32 (ir:diagnostic-severity diagnostic)))
+    ; The C callback receives optimization remarks even when they are disabled.
+    (match (== severity enum:diagnostic-remark)
+      (true unit)
+      (false
+        (let ((message (pointer u8) (ir:diagnostic-description diagnostic)))
+          (do
+            (base:cond
+              ((== severity enum:diagnostic-error)
+               (m:diagnostic "error" "llvm-backend-error" message))
+              ((== severity enum:diagnostic-warning)
+               (m:diagnostic "warning" "llvm-backend-warning" message))
+              (true (m:diagnostic "note" "llvm-backend-note" message)))
+            (ir:message-dispose message)
+            unit))))))
+
 ; Build a module containing runtime helpers, checked functions, and a native main wrapper.
 ; The wrapper either reports the full result or returns its low byte.
 ; The caller owns and must destroy the returned session.
@@ -2288,6 +2309,12 @@
    (debug bool)) llvm:session
   (let
     ((owner llvm:session (llvm:create "verona.core"))
+     (handler
+       unit
+       (ir:context-diagnostic-handler-set
+         (field owner context)
+         report-diagnostic
+         nil))
      (root-file
        t:metadata-ref
        (match debug

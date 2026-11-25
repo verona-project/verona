@@ -8,8 +8,17 @@ from .support import CompilerTestCase
 class ReaderTests(CompilerTestCase):
     def test_locations_and_comments(self):
         result = self.run_core("check", "; comment\r\n(%function main () i64\r\n  unknown)\r\n")
-        self.assertIn("input.vrn:3:3: unknown local", result.stderr)
+        self.assertIn("input.vrn:3:3: error[unknown-local-name]: unknown local", result.stderr)
         self.agrees("; before\n(%function main () i64 ; inside\n (%+-primitive-i64 2 3)) ; after", 5)
+
+    def test_reader_diagnostic_code(self):
+        result = self.run_core("read", "; comment\r\n  )")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(
+            result.stderr,
+            f"{self.source}:2:3: error[unexpected-closing-parenthesis]: unexpected closing parenthesis\n",
+        )
 
     def test_native_platform_conditionals(self):
         source = """

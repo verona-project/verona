@@ -1,0 +1,485 @@
+#+title: Verona compiler diagnostic codes
+#+options: toc:2
+
+* Reading a diagnostic
+
+The =verona= compiler reports diagnostics on standard error. Each diagnostic
+starts with =severity[code]:= after any source prefix. Source locations use
+=path:line:column:= with one-based lines and byte columns. Evaluator call-frame
+notes include their locations after the function name.
+
+#+begin_example
+input.vrn:2:34: error[type-mismatch]: type mismatch: expected i64, actual bool
+input.vrn:1:25: note[expected-type-origin]: expected type established here
+#+end_example
+
+Codes are stable lowercase strings. A code identifies a diagnostic kind even
+when its message changes. Related notes follow the primary diagnostic.
+LLVM or native tool details can continue on subsequent lines under the Verona
+diagnostic that introduced them. Warnings and notes alone do not cause failure.
+
+This catalog covers diagnostics emitted by =verona=, including errors while
+using its evaluator. Programs emitted by Verona have their own runtime output.
+
+* Commands
+
+All commands can report command-line, target configuration, and compiler
+storage errors.
+
+| Command | Additional diagnostic sources |
+|---------+-------------------------------|
+| =read= | File I/O and source reader. |
+| =check= | Module collection, source reader, macro expansion, and semantic checking. |
+| =eval= | The checks above and evaluator errors with call-frame notes. |
+| =emit-llvm= | The checks above, lowering, and LLVM verification. |
+| =optimization-report= | The checks above, lowering, LLVM verification, and optimization notes. |
+| =compile= | The checks above, lowering, LLVM verification, native compilation, and inlining notes. |
+| =compile-report= | The executable compilation pipeline and its diagnostics. |
+| =build= | Manifest reading and validation, package resolution, directory creation, and compilation. |
+
+* Diagnostic catalog
+
+** Command line and source files
+
+| Code | Severity | Trigger |
+|------+----------+---------|
+| =invalid-command-option= | error | An option is unknown, unavailable for the command, repeated where disallowed, or missing a valid value. |
+| =invalid-compile-report-artifact= | error | Compile-report was asked to emit an artifact other than an executable. |
+| =link-options-allocation-failed= | error | The command could not store the requested link options. |
+| =missing-build-operands= | error | The build command lacks a target or an output directory. |
+| =missing-command= | error | No compiler command was supplied. |
+| =missing-source-operand= | error | A source command has no input file operand. |
+| =source-read-failed= | error | Cannot read source file. |
+| =unexpected-operand= | error | The command received an extra positional operand. |
+| =unknown-command= | error | The command name or version invocation is unrecognized. |
+| =unsupported-target-frameworks= | error | Frameworks are supported only on Darwin targets. |
+
+** Reader
+
+| Code | Severity | Trigger |
+|------+----------+---------|
+| =invalid-character-literal= | error | A character literal does not encode a supported ASCII character. |
+| =invalid-data-byte= | error | A data literal contains a NUL or non-ASCII byte. |
+| =invalid-source-byte= | error | A byte is outside the supported ASCII source syntax. |
+| =malformed-integer-literal= | error | An integer token has malformed decimal syntax. |
+| =missing-reader-feature= | error | A reader conditional has no valid feature name. |
+| =missing-reader-prefix-operand= | error | A reader prefix has no operand. |
+| =missing-selected-reader-operand= | error | A conditional suppresses the operand required by a reader prefix. |
+| =nul-source-byte= | error | A NUL byte appears in source syntax. |
+| =reader-form-limit= | error | Form count limit (4096) exceeded. |
+| =reader-nesting-limit= | error | Syntax nesting limit (256) exceeded. |
+| =reader-prefix-nesting-limit= | error | Reader prefixes exceed the nesting limit. |
+| =unclosed-list= | error | The input ends before a list's closing parenthesis. |
+| =unexpected-closing-parenthesis= | error | A closing parenthesis has no matching opening parenthesis. |
+| =unsupported-data-escape= | error | A string contains an unsupported escape sequence. |
+| =unsupported-reader-extension= | error | The reader encounters an unsupported backslash extension. |
+| =unterminated-data-literal= | error | The input ends before a data literal's closing quote. |
+
+** Build manifests and package directories
+
+| Code | Severity | Trigger |
+|------+----------+---------|
+| =artifact-declaration-must-be-an-s-expression= | error | Artifact declaration must be an S-expression. |
+| =artifact-declaration-must-not-be-empty= | error | Artifact declaration must not be empty. |
+| =artifact-declaration-requires-a-target-name= | error | Artifact declaration requires a target name. |
+| =build-manifest-not-found= | error | Cannot find verona.build in current directory. |
+| =build-manifest-read-failed= | error | Cannot read verona.build. |
+| =build-option-arity= | error | Build option requires exactly one argument. |
+| =build-option-must-be-an-s-expression= | error | Build option must be an S-expression. |
+| =build-option-must-not-be-empty= | error | Build option must not be empty. |
+| =build-option-requires-a-data-string= | error | Build option requires a data string. |
+| =cannot-create-output-directory= | error | Cannot create output directory. |
+| =cannot-find-root-module= | error | Cannot find root module. |
+| =duplicate-build-option= | error | Duplicate build option. |
+| =duplicate-build-target= | error | Duplicate build target. |
+| =duplicate-package-link= | error | Duplicate package link. |
+| =duplicate-package-version= | error | Duplicate package version. |
+| =features-requires-at-least-one-feature-name= | error | Features requires at least one feature name. |
+| =invalid-build-name= | error | Build name must be an unqualified name / build name must be a name. |
+| =invalid-optimization-level= | error | Optimize must be an integer from 0 through 3. |
+| =invalid-package-artifact-root= | error | The package's artifact directory cannot be resolved or opened. |
+| =invalid-package-library-directory= | error | VERONA_LIBRARY_DIR does not name an accessible absolute directory. |
+| =invalid-package-source-directory= | error | VERONA_SOURCE_DIR does not name an accessible absolute directory. |
+| =invalid-package-source-root= | error | The package's source directory cannot be resolved or opened. |
+| =missing-build-root= | error | Build target requires exactly one root option. |
+| =native-library-does-not-accept-a-version= | error | Native library does not accept a version. |
+| =native-library-requires-a-link-option= | error | Native library requires a link option. |
+| =package-library-option-must-be-an-s-expression= | error | Package library option must be an S-expression. |
+| =package-library-requires-a-link-option= | error | Package library requires a link option. |
+| =package-link-requires-static-or-dynamic= | error | Package link requires static or dynamic. |
+| =package-version-requires-a-non-empty-single-line-string= | error | Package version requires a non-empty single-line string. |
+| =root-must-be-a-dotted-module-name= | error | Root must be a dotted module name. |
+| =target-requires-native-or-a-target-triple-string= | error | Target requires native or a target-triple string. |
+| =unknown-build-option= | error | Unknown build option. |
+| =unknown-build-target= | error | Unknown build target. |
+| =unknown-package-library-option= | error | Unknown package library option. |
+| =unknown-top-level-build-form= | error | Unknown top-level build form. |
+| =unsupported-target-triple= | error | Unsupported target triple. |
+| =version-requires-a-non-empty-single-line-string= | error | Version requires a non-empty single-line string. |
+| =working-directory-too-long= | error | Current directory path is too large. |
+| =working-directory-unavailable= | error | Cannot resolve current directory. |
+
+** Module collection
+
+| Code | Severity | Trigger |
+|------+----------+---------|
+| =cannot-open-module-source-file= | error | Cannot open module source file. |
+| =cannot-read-module-source-file= | error | Cannot read module source file. |
+| =duplicate-import-alias= | error | Duplicate import alias. |
+| =empty-module-name-component= | error | Module name contains an empty component. |
+| =expected-module-name= | error | Expected module name. |
+| =expected-unqualified-module-name= | error | Expected unqualified module name. |
+| =import-cycle= | error | A module transitively imports itself. The message gives the cycle in dependency order. |
+| =import-requires-as-alias= | error | %import requires :as alias. |
+| =import-requires-module-name-and-optional-as-alias= | error | %import requires module name and optional :as alias. |
+| =module-count-limit-exceeded= | error | Module count limit (256) exceeded. |
+| =module-dependency-depth-limit-exceeded= | error | Module dependency depth limit (64) exceeded. |
+| =module-not-found= | error | Module not found (cannot resolve module path). |
+| =source-open-failed= | error | Cannot open source file / cannot open source file: cannot resolve module path. |
+
+** Macro expansion and compile-time evaluation
+
+| Code | Severity | Trigger |
+|------+----------+---------|
+| =ambiguous-state-module-qualifier= | error | Ambiguous state module qualifier. |
+| =association-list-entries-require-two-elements= | error | Association list entries require two elements. |
+| =car-cdr-require-a-non-empty-list= | error | Car/cdr require a non-empty list. |
+| =compile-time-body-requires-an-expression= | error | Compile-time body requires an expression. |
+| =compile-time-cond-clauses-require-a-test-and-body= | error | Compile-time cond clauses require a test and body. |
+| =compile-time-condition-requires-a-boolean= | error | Compile-time condition requires a boolean. |
+| =compile-time-cons-arity= | error | Compile-time cons requires two arguments. |
+| =compile-time-division-by-zero= | error | Division by zero. |
+| =compile-time-equal-arity= | error | Compile-time equal? requires two arguments. |
+| =compile-time-evaluation-depth-limit-exceeded= | error | Compile-time evaluation depth limit exceeded. |
+| =compile-time-evaluation-step-limit-exceeded= | error | Compile-time evaluation step limit exceeded. |
+| =compile-time-floating-point-overflow= | error | Compile-time floating-point overflow. |
+| =compile-time-helper-arity= | error | Compile-time helper requires one argument. |
+| =compile-time-let-requires-bindings-and-a-body= | error | Compile-time let requires bindings and a body. |
+| =compile-time-list-operation-arity= | error | Compile-time list operation requires one argument. |
+| =compile-time-not-arity= | error | Compile-time not requires one argument. |
+| =compile-time-operation-requires-a-list= | error | Compile-time operation requires a list. |
+| =compile-time-reduction-arity= | error | Compile-time reduction requires three arguments. |
+| =compile-time-reduction-requires-a-callable-name= | error | Compile-time reduction requires a callable name. |
+| =compile-time-value-is-not-callable= | error | Compile-time value is not callable. |
+| =compiler-call-requires-a-callable-name= | error | Compiler:call requires a callable name. |
+| =compiler-map-requires-a-callable-name= | error | Compiler:map requires a callable name. |
+| =compiler-map-requires-lists-of-equal-length= | error | Compiler:map requires lists of equal length. |
+| =duplicate-collection-key= | error | Duplicate collection key. |
+| =duplicate-or-reserved-compile-time-let-binding= | error | Duplicate or reserved compile-time let binding. |
+| =expected-a-colon-prefixed-keyword= | error | Expected a colon-prefixed keyword. |
+| =expected-a-flat-list-of-top-level-forms= | error | Expected a flat list of top-level forms. |
+| =expected-a-string= | error | Expected a string. |
+| =expected-a-top-level-form-or-list-of-forms= | error | Expected a top-level form or list of forms. |
+| =expected-an-integer= | error | Expected an integer. |
+| =expected-an-integer-or-floating-point-number= | error | Expected an integer or floating-point number. |
+| =expected-compile-time-binding-name= | error | Expected compile-time binding name. |
+| =expected-macro-name= | error | Expected macro name. |
+| =expected-macro-parameter= | error | Expected macro parameter. |
+| =expected-macro-parameter-list= | error | Expected macro parameter list. |
+| =floating-point-decimal-conversion-did-not-round-trip= | error | Floating-point decimal conversion did not round trip. |
+| =generated-symbol-size-overflow= | error | Generated symbol size overflow. |
+| =integer-division-requires-integer-operands= | error | Integer division requires integer operands. |
+| =invalid-collection-operation-arity= | error | Invalid collection operation arity. |
+| =invalid-compile-time-binding-form= | error | Compile-time let binding requires a name and initializer. |
+| =invalid-compiler-context-arity= | error | Invalid compiler context arity. |
+| =invalid-compiler-map-form= | error | Compiler:map requires a head and at least one proper list. |
+| =invalid-compiler-state-operation-arity= | error | Invalid compiler state operation arity. |
+| =invalid-numeric-operation-arity= | error | Invalid numeric operation arity. |
+| =invalid-numeric-string= | error | Invalid numeric string. |
+| =invalid-string-operation-arity= | error | Invalid string operation arity. |
+| =list-index-out-of-bounds= | error | List index out of bounds. |
+| =list-slice-arity= | error | List slice requires two arguments. |
+| =macro-expansion-limit-exceeded= | error | Macro expansion limit exceeded. |
+| =macro-requires-a-name-parameters-and-one-body= | error | Macro requires a name, parameters, and one body. |
+| =missing-compilation-session= | error | Compiler context operation requires an active compilation session. |
+| =missing-macro-argument= | error | Missing macro argument. |
+| =missing-rest-parameter= | error | &rest requires a final parameter. |
+| =nth-arity= | error | Nth requires two arguments. |
+| =numeric-conversion-arity= | error | Numeric conversion requires one argument. |
+| =property-list-requires-key-value-pairs= | error | Property list requires key/value pairs. |
+| =quote-form-arity= | error | Quote form requires one operand. |
+| =separator-must-not-be-empty= | error | Separator must not be empty. |
+| =string-join-arity= | error | String-join requires two arguments. |
+| =string-length-arity= | error | String-length requires one argument. |
+| =substring-bounds-out-of-range= | error | Substring bounds out of range. |
+| =substring-requires-a-string-and-bounds= | error | Substring requires a string and bounds. |
+| =symbol-concat-cannot-construct-an-empty-name= | error | Symbol-concat cannot construct an empty name. |
+| =symbol-concat-requires-at-least-one-component= | error | Symbol-concat requires at least one component. |
+| =symbol-concat-requires-data-or-symbols= | error | Symbol-concat requires data or symbols. |
+| =symbol-name-requires-a-symbol= | error | Symbol-name requires a symbol. |
+| =symbol-requires-a-non-empty-string= | error | Symbol requires a non-empty string. |
+| =too-many-macro-arguments= | error | Too many macro arguments. |
+| =unknown-compile-time-name= | error | Unknown compile-time name. |
+| =unknown-state-module-qualifier= | error | Unknown state module qualifier. |
+| =unquote-is-valid-only-inside-quasiquote= | error | Unquote is valid only inside quasiquote. |
+| =unquote-splicing-is-valid-only-inside-quasiquote= | error | Unquote-splicing is valid only inside quasiquote. |
+| =unquote-splicing-requires-a-list= | error | Unquote-splicing requires a list. |
+| =unquote-splicing-requires-a-list-element= | error | Unquote-splicing requires a list element. |
+| =unsupported-compile-time-call= | error | Unsupported compile-time call. |
+| =unsupported-compile-time-expression= | error | Unsupported compile-time expression. |
+
+** Semantic checking
+
+| Code | Severity | Trigger |
+|------+----------+---------|
+| =access-requires-corresponding-structured-type= | error | Access requires corresponding structured type. |
+| =access-requires-value-and-field-or-index= | error | Access requires value and field or index. |
+| =address-of-arity= | error | & requires exactly one operand. |
+| =ambiguous-generic-implementation= | error | Ambiguous generic implementation. |
+| =ambiguous-numeric-literal= | error | Ambiguous numeric literal; supply a type with cast. |
+| =ambiguous-sum-constructor= | error | Ambiguous sum constructor; qualify with Type:case. |
+| =array-index-out-of-bounds= | error | An index is outside its array. The checker reports statically known failures and eval reports failures at runtime. |
+| =array-of-element-count-mismatch= | error | Array-of element count mismatch. |
+| =array-of-requires-an-expected-array-type= | error | Array-of requires an expected array type. |
+| =array-requires-an-element-type-and-length= | error | Array requires an element type and length. |
+| =boolean-pattern-requires-a-boolean-scrutinee= | error | Boolean pattern requires a boolean scrutinee. |
+| =cannot-infer-empty-array-element-type= | error | Cannot infer empty array element type. |
+| =cannot-infer-type-parameter= | error | Cannot infer type parameter. |
+| =cast-requires-a-numeric-or-pointer-target-type= | error | Cast requires a numeric or pointer target type. |
+| =cast-requires-a-target-type-and-one-operand= | error | Cast requires a target type and one operand. |
+| =character-pattern-requires-an-integer-scrutinee= | error | Character pattern requires an integer scrutinee. |
+| =conflicting-declarations-for-external-symbol= | error | Conflicting declarations for external symbol. |
+| =conflicting-inline-and-noinline-directives= | error | Conflicting inline and noinline directives. |
+| =conflicting-type-argument-inference= | error | Conflicting type argument inference. |
+| =constant-conflicts-with-sum-constructor= | error | Constant conflicts with sum constructor. |
+| =constant-conflicts-with-type-constructor= | error | Constant conflicts with type constructor. |
+| =constant-initializer-must-be-a-scalar-or-data-literal= | error | Constant initializer must be a scalar or data literal. |
+| =constant-requires-a-name-type-and-value= | error | %constant requires a name, type, and value. |
+| =constant-value-is-not-callable= | error | Constant value is not callable. |
+| =data-literal-storage-allocation-failed= | error | Data literal storage allocation failed. |
+| =deref-arity= | error | Deref requires exactly one operand. |
+| =duplicate-constant-or-declaration= | error | Duplicate constant or declaration. |
+| =duplicate-external-function-or-declaration= | error | Duplicate external function or declaration. |
+| =duplicate-field= | error | Duplicate field. |
+| =duplicate-function= | error | Duplicate function. |
+| =duplicate-generic-implementation= | error | Duplicate generic implementation. |
+| =duplicate-generic-or-function= | error | Duplicate generic or function. |
+| =duplicate-generic-parameter= | error | Duplicate generic parameter. |
+| =duplicate-local-binding= | error | Duplicate local binding. |
+| =duplicate-match-case= | error | Duplicate match case. |
+| =duplicate-match-pattern= | error | Duplicate match pattern. |
+| =duplicate-native-c-export-name= | error | Duplicate native C export name. |
+| =duplicate-parameter= | error | Duplicate parameter. |
+| =duplicate-payload-binding= | error | Duplicate payload binding. |
+| =duplicate-protocol-declaration= | error | Duplicate protocol declaration. |
+| =duplicate-protocol-implementation= | error | Duplicate protocol implementation. |
+| =duplicate-protocol-operation= | error | Duplicate protocol operation. |
+| =duplicate-protocol-parameter= | error | Duplicate protocol parameter. |
+| =duplicate-sum-case= | error | Duplicate sum case. |
+| =duplicate-type= | error | Duplicate type. |
+| =duplicate-variable-or-declaration= | error | Duplicate variable or declaration. |
+| =expected= | error | Expected (:type opaque). |
+| =expected-binding-list= | error | Expected binding list. |
+| =expected-concrete-type= | error | Expected concrete type. |
+| =expected-constraint-list= | error | Expected constraint list. |
+| =expected-core-function= | error | Only %function declarations are supported; %function requires name, parameters, return type, and one body / only %function declarations are supported. |
+| =expected-function-declaration= | error | Expected function declaration. |
+| =expected-generic-parameter-list= | error | Expected generic parameter list. |
+| =expected-identifier= | error | Expected identifier. |
+| =expected-identifier-for-local-binding= | error | Expected identifier for local binding. |
+| =expected-implementation-parameter-list= | error | Expected implementation parameter list. |
+| =expected-integer-digits= | error | Expected integer digits. |
+| =expected-operation-or-function-name= | error | Expected operation or function name. |
+| =expected-parameter-list= | error | Expected parameter list. |
+| =expected-product-constructor= | error | Expected product constructor. |
+| =expected-product-field-name= | error | Expected product field name. |
+| =expected-protocol-operation-parameters= | error | Expected protocol operation parameters. |
+| =expected-protocol-type-parameter-list= | error | Expected protocol type parameter list. |
+| =expected-sum-case= | error | Expected sum case. |
+| =expected-sum-case-pattern-or-wildcard= | error | Expected sum-case pattern or wildcard. |
+| =expected-tuple-pattern-or-catch-all= | error | Expected tuple pattern or catch-all. |
+| =expected-type-origin= | note | Related declaration established the expected type in a type mismatch. |
+| =expected-type-parameter-list= | error | Expected type parameter list. |
+| =export-names-an-unknown-function-constant-variable-or-type= | error | Export names an unknown function, constant, variable, or type. |
+| =expression-is-not-addressable= | error | Expression is not addressable. |
+| =expression-is-not-writable= | error | Expression is not writable. |
+| =external-function-conflicts-with-sum-constructor= | error | External function conflicts with sum constructor. |
+| =external-function-conflicts-with-type-constructor= | error | External function conflicts with type constructor. |
+| =external-symbol-cannot-be-empty= | error | External symbol cannot be empty. |
+| =field-requires-name-and-type= | error | Field requires name and type. |
+| =floating-point-literal-out-of-range= | error | Floating-point literal out of range. |
+| =floating-point-literal-storage-allocation-failed= | error | Floating-point literal storage allocation failed. |
+| =for-requires-type-parameters= | error | For requires type parameters. |
+| =for-requires-type-parameters-and-optional-constraints= | error | For requires type parameters and optional constraints. |
+| =function-conflicts-with-sum-constructor= | error | Function conflicts with sum constructor. |
+| =function-conflicts-with-type-constructor= | error | Function conflicts with type constructor. |
+| =function-pointer-signature-mismatch= | error | Function pointer signature mismatch. |
+| =function-type-requires-a-pointer= | error | Function type requires a pointer. |
+| =generic-conflicts-with-sum-constructor= | error | Generic conflicts with sum constructor. |
+| =generic-conflicts-with-type= | error | Generic conflicts with type. |
+| =generic-requires-a-name-and-parameter-list= | error | %generic requires a name and parameter list. |
+| =implementation-arity-does-not-match-generic= | error | Implementation arity does not match generic. |
+| =implementation-requires-a-generic= | error | Implementation requires a generic. |
+| =incomplete-object-layout= | error | Incomplete object layout. |
+| =index-requires-an-array= | error | Index requires an array. |
+| =index-requires-an-array-and-index= | error | Index requires an array and index. |
+| =integer-literal-out-of-range= | error | Integer literal out of range. |
+| =integer-pattern-requires-an-integer-scrutinee= | error | Integer pattern requires an integer scrutinee. |
+| =invalid-array-length= | error | Array length must be a non-negative integer literal. |
+| =invalid-binding-form= | error | Binding requires name and initializer, with optional type. |
+| =invalid-decimal-i64-literal= | error | Invalid decimal i64 literal. |
+| =invalid-external-function-form= | error | %external-function requires a name, external data name, parameter type list, and result type. |
+| =invalid-external-parameter-type= | error | External parameters require C-compatible value types. |
+| =invalid-external-result-type= | error | External result requires a C-compatible value type or void. |
+| =invalid-function-form= | error | %function requires name, parameters, return type, and one body. |
+| =invalid-function-type-form= | error | Function type requires a parameter list and result type. |
+| =invalid-identifier= | error | Invalid identifier. |
+| =invalid-inline-form= | error | Inline directive requires exactly one local function name. |
+| =invalid-inline-function= | error | Inline directive must name a local Verona function with a body. |
+| =invalid-main-parameters= | error | Main must have no parameters or parameters (i32, (pointer (pointer u8))). |
+| =invalid-main-result= | error | Command-line main must return exit-code (i32). |
+| =invalid-native-export-form= | error | Native-export requires a local function name and optional data name. |
+| =invalid-pointer-cast= | error | Cast permits only (pointer T) to or from (pointer void). |
+| =invalid-protocol-operation-form= | error | Protocol operation requires name, parameters and result type. |
+| =invalid-scalar-pattern= | error | Expected boolean, integer, character, binding, or wildcard pattern. |
+| =let-requires-bindings-and-a-body= | error | Let requires bindings and a body. |
+| =local-value-is-not-callable= | error | Local value is not callable. |
+| =match-arm-requires-pattern-and-body= | error | Match arm requires pattern and body. |
+| =match-requires-arms= | error | Match requires arms. |
+| =missing-main-function= | error | Missing main function. |
+| =missing-protocol-implementation-for-specialization= | error | Missing protocol implementation for specialization. |
+| =missing-protocol-operation= | error | Missing protocol operation. |
+| =native-export-must-name-a-verona-function= | error | Native-export must name a Verona function. |
+| =native-export-must-use-c-compatible-value-types= | error | Native export must use C-compatible value types. |
+| =native-export-name-cannot-be-empty= | error | Native export name cannot be empty. |
+| =native-export-name-must-be-data= | error | Native export name must be data. |
+| =native-export-requires-a-local-function-name= | error | Native-export requires a local function name. |
+| =nested-structured-patterns-are-not-supported= | error | Nested structured patterns are not supported. |
+| =no-matching-generic-implementation= | error | No matching generic implementation. |
+| =non-exhaustive-match= | error | Non-exhaustive match. |
+| =numeric-cast-requires-a-floating-point-literal= | error | Numeric cast requires a floating-point literal. |
+| =numeric-cast-requires-an-integer-literal= | error | Numeric cast requires an integer literal. |
+| =object-layout-overflow= | error | Object layout overflow. |
+| =opaque-type-requires-a-pointer= | error | Opaque type requires a pointer. |
+| =operation-requires-a-pointer= | error | Operation requires a pointer. |
+| =parameter-limit-exceeded= | error | Parameter limit (64) exceeded. |
+| =parameter-requires-name-and-type= | error | Parameter requires name and type. |
+| =pattern-belongs-to-another-sum= | error | Pattern belongs to another sum. |
+| =pointer-null-check-requires-a-pointer= | error | Pointer null check requires a pointer. |
+| =pointer-offset-pointee-mismatch= | error | Pointer pointee type must match the offset primitive suffix. |
+| =pointer-offset-requires-a-pointer-and-an-integer-offset= | error | Pointer-offset requires a pointer and an integer offset. |
+| =pointer-offset-requires-an-integer-offset= | error | Pointer-offset requires an integer offset. |
+| =pointer-operand-type-mismatch= | error | Pointer operands must have matching pointer types unless comparing nil or taking a difference. |
+| =pointer-operation-arity= | error | Pointer operation requires two arguments. |
+| =pointer-requires-a-complete-object-type= | error | Pointer requires a complete object type. |
+| =pointer-requires-one-pointee-type= | error | Pointer requires one pointee type. |
+| =primitive-arity= | error | A concrete primitive has the wrong number of operands. |
+| =private-module-member= | error | A name refers to a declaration that the imported module does not export. |
+| =protocol-argument-count-mismatch= | error | Protocol argument count mismatch. |
+| =protocol-conflicts-with-type= | error | Protocol conflicts with type. |
+| =protocol-implementation-requires-function-methods= | error | Protocol implementation requires function methods. |
+| =protocol-is-not-callable= | error | Protocol is not callable. |
+| =protocol-operation-parameter-type-mismatch= | error | Protocol operation parameter type mismatch. |
+| =protocol-operation-result-type-mismatch= | error | Protocol operation result type mismatch. |
+| =protocol-parameter-requires-a-name-and-a-type= | error | Protocol parameter requires a name and a type. |
+| =qualified-inline-name= | error | Inline directive requires an unqualified local function name. |
+| =recursive-specialization-changes-type-arguments= | error | Recursive specialization changes type arguments. |
+| =recursive-structured-layout= | error | Recursive structured layout. |
+| =reserved-external-main= | error | External symbol main is reserved for the entry point. |
+| =reserved-identifier= | error | Reserved identifier. |
+| =reserved-native-main= | error | Native symbol main is reserved for the entry point. |
+| =store-requires-a-target-and-a-value= | error | Store requires a target and a value. |
+| =sum-requires-at-least-one-case= | error | Sum requires at least one case. |
+| =too-few-arguments= | error | Too few arguments. |
+| =too-few-constructor-arguments= | error | Too few constructor arguments. |
+| =too-few-pattern-components= | error | Too few pattern components. |
+| =too-many-arguments= | error | Too many arguments. |
+| =too-many-constructor-arguments= | error | Too many constructor arguments. |
+| =too-many-pattern-components= | error | Too many pattern components. |
+| =top-level-aggregate-constants-are-not-supported-yet= | error | Top-level aggregate constants are not supported yet. |
+| =top-level-aggregate-variables-are-not-supported-yet= | error | Top-level aggregate variables are not supported yet. |
+| =tuple-index-must-be-an-integer-literal= | error | Tuple index must be an integer literal. |
+| =tuple-index-out-of-range= | error | Tuple index out of range. |
+| =type-alias-cycle= | error | Type alias cycle. |
+| =type-mismatch= | error | A checked expression has a type different from its expected type. Both types are shown. |
+| =type-requires-a-name-and-optional-type= | error | %type requires a name and optional type. |
+| =unknown-core-type= | error | Unknown core type. |
+| =unknown-function= | error | A call does not resolve to a known function. The message includes the call's name. |
+| =unknown-function-designator= | error | Unknown function designator. |
+| =unknown-local-name= | error | Unknown local name. |
+| =unknown-module-alias= | error | Unknown module alias (missing import). |
+| =unknown-module-member= | error | The imported module has no matching declaration. |
+| =unknown-product-field= | error | Unknown product field. |
+| =unknown-protocol= | error | Unknown protocol. |
+| =unknown-protocol-constraint= | error | Unknown protocol constraint. |
+| =unknown-protocol-operation= | error | Unknown protocol operation. |
+| =unknown-sum-case-in-pattern= | error | Unknown sum case in pattern. |
+| =unreachable-match-arm= | error | Unreachable match arm. |
+| =unreachable-tuple-pattern= | error | Unreachable tuple pattern. |
+| =unreachable-wildcard= | error | Unreachable wildcard. |
+| =unresolved-module-qualifier= | error | A qualified name uses a module that is unknown or has not been imported. |
+| =unsigned-integer-literal-cannot-be-negative= | error | Unsigned integer literal cannot be negative. |
+| =variable-conflicts-with-sum-constructor= | error | Variable conflicts with sum constructor. |
+| =variable-conflicts-with-type-constructor= | error | Variable conflicts with type constructor. |
+| =variable-initializer-must-be-a-scalar-or-data-literal= | error | Variable initializer must be a scalar or data literal. |
+| =variable-requires-a-name-type-and-initializer= | error | %variable requires a name, type, and initializer. |
+| =variable-value-is-not-callable= | error | Variable value is not callable. |
+| =void-type-requires-a-pointer= | error | Void type requires a pointer. |
+| =wrong-function-pointer-argument-count= | error | Wrong function pointer argument count. |
+| =wrong-generic-argument-count= | error | Wrong generic argument count. |
+| =wrong-parametric-function-argument-count= | error | Wrong parametric function argument count. |
+
+** Evaluator
+
+| Code | Severity | Trigger |
+|------+----------+---------|
+| =division-by-zero= | error | An evaluated division has a zero divisor. |
+| =eval-main-requires-arguments= | error | The main function takes command-line arguments, which eval cannot supply. |
+| =eval-native-call= | error | Evaluation attempts to call a native function. |
+| =evaluator-call-depth-limit= | error | Evaluation exceeds the maximum call depth. |
+| =evaluator-call-frame= | note | A call frame associated with an evaluator failure. |
+| =evaluator-step-limit= | error | Evaluation exceeds the step budget. |
+| =evaluator-storage-allocation-failed= | error | An evaluator storage operation fails. |
+| =expired-pointer-storage= | error | A pointer refers to storage whose lifetime has ended. |
+| =invalid-evaluator-input= | error | The evaluator encounters an invalid checked program. |
+| =invalid-pointer-access= | error | Evaluation attempts an invalid pointer access. |
+| =read-only-pointer-storage= | error | Evaluation tries to write to read-only storage. |
+| =signed-division-overflow= | error | An evaluated signed division overflows. |
+
+** LLVM, native tools, and artifacts
+
+| Code | Severity | Trigger |
+|------+----------+---------|
+| =cannot-allocate-reader-feature= | error | Cannot allocate reader feature. |
+| =cannot-create-native-c-abi-data-layout= | error | Cannot create native C ABI data layout. |
+| =constant-fold= | note | The optimization report records a folded primitive. |
+| =constant-propagation= | note | The optimization report records propagation of a constant binding. |
+| =dead-binding= | note | The optimization report records elimination of a dead binding. |
+| =external-runtime-symbol-conflict= | error | External symbol conflicts with a runtime declaration. |
+| =forced-inlining-disabled= | note | A forced-inlining directive is inactive at -O0. |
+| =forced-inlining-incomplete= | note | Calls remain after forced inlining, for example due to recursion or LLVM constraints. |
+| =internal-error-invalid-c-header-aggregate= | error | Internal error: invalid C header aggregate. |
+| =known-match= | note | The optimization report records lowering a match with a known result arm. |
+| =library-header-create-failed= | error | The driver cannot create the C header for a library artifact. |
+| =library-header-write-failed= | error | The driver cannot write or finish the C header for a library artifact. |
+| =llvm-backend-error= | error | LLVM reports a backend error through its context diagnostic callback. |
+| =llvm-backend-note= | note | LLVM reports a backend note through its context diagnostic callback. |
+| =llvm-backend-warning= | warning | LLVM reports a backend warning through its context diagnostic callback. |
+| =llvm-object-emission-failed= | error | LLVM cannot emit an object file. |
+| =llvm-optimization-failed= | error | The LLVM optimization pipeline fails. |
+| =llvm-verification-failed= | error | LLVM rejects the generated module before or after optimization. |
+| =local-cse= | note | The optimization report records reuse of a common local expression. |
+| =native-archive-failed= | error | The native archiver fails to start or exits unsuccessfully. |
+| =native-debug-symbols-failed= | error | The Darwin debug-symbol tool fails to start or exits unsuccessfully. |
+| =native-link-failed= | error | The native linker fails to start or exits unsuccessfully. |
+| =native-tool-arguments-failed= | error | The driver cannot assemble the native tool argument vector. |
+| =native-tool-output= | note | A successful native tool wrote to stderr, or the driver could not capture its stderr. |
+| =tail-call= | note | The optimization report records a call lowered as a tail call. |
+| =target-machine-failed= | error | LLVM cannot create a target machine for the selected configuration. |
+| =temporary-object-close-failed= | error | The driver cannot close the temporary object file. |
+| =temporary-object-create-failed= | error | The driver cannot create the temporary object file. |
+| =tool-output-read-failed= | note | The driver could not read captured LLVM or native tool output. |
+| =unsupported-target-architecture= | error | Unsupported target architecture: expected 64-bit AArch64 or x86-64. |
+| =unsupported-target-layout= | error | Unsupported target layout: requires 64-bit little-endian pointers. |
+| =unsupported-target-platform= | error | Unsupported target platform: expected Darwin or Linux. |
+
+** Compiler internals
+
+| Code | Severity | Trigger |
+|------+----------+---------|
+| =compiler-storage-allocation-failed= | error | Compiler or reader storage could not be allocated or resized. |
+| =internal-error-missing-resolved-binding= | error | Internal error: missing resolved binding. |
+| =invalid-checked-place= | error | Invalid checked place. |
+| =llvm-handle-storage-allocation-failed= | error | LLVM handle storage allocation failed. |
+| =optimizer-initializer-storage-allocation-failed= | error | Optimizer initializer storage allocation failed. |
+| =optimizer-reference-storage-allocation-failed= | error | Optimizer reference storage allocation failed. |

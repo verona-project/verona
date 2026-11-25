@@ -1,0 +1,97 @@
+(import base)
+(import core.model :as m)
+(import data)
+(import system_allocator :as system)
+(import libc.constants :as c)
+(import libc.descriptor :as fd)
+(import libc.errno :as errno)
+(import libc.stdio :as stdio)
+(import libc.types :as types)
+
+; A temporary file lets native tools write arbitrarily large diagnostics
+; without blocking the parent in waitpid or holding their output in memory.
+(base:function open () (pointer types:file-stream)
+  (stdio:tmpfile))
+
+(base:function descriptor ((file (pointer types:file-stream))) i32
+  (match (base:is-null file) (true -1) (false (stdio:fileno file))))
+
+(base:function close ((file (pointer types:file-stream))) unit
+  (match (base:is-null file) (true unit) (false (do (stdio:fclose file) unit))))
+
+(base:function redirect ((destination i32)) bool
+  (match (fd:dup2 destination c:STDERR-FILENO)
+    (-1
+      (match (== (deref (errno:errno-pointer)) c:EINTR)
+        (true (redirect destination))
+        (false false)))
+    (_ true)))
+
+(base:function unavailable () unit
+  (m:diagnostic
+    "note"
+    "tool-output-read-failed"
+    "cannot read captured tool output"))
+
+(base:function replay-chunks
+  ((input i32)
+   (buffer (pointer u8))
+   (severity (pointer u8))
+   (code (pointer u8))
+   (summary (pointer u8))
+   (first bool)
+   (last u8)) unit
+  (let ((count i64 (fd:read input (cast (pointer void) buffer) 4096)))
+    (base:cond
+      ((> count 0)
+       (let ((size u64 (base:convert count)))
+         (do
+           (match (base:and-then first (base:not (base:is-null code)))
+             (true (m:diagnostic severity code summary))
+             (false unit))
+           (m:write c:STDERR-FILENO (data:view buffer size))
+           (replay-chunks
+             input
+             buffer
+             severity
+             code
+             summary
+             false
+             (deref (pointer-offset buffer (- size 1)))))))
+      ((base:and-then (== count -1) (== (deref (errno:errno-pointer)) c:EINTR))
+       (replay-chunks input buffer severity code summary first last))
+      (true
+        (match (base:and (base:not first) (base:not (== last 10)))
+          (true (m:text c:STDERR-FILENO "\n"))
+          (false unit))
+        (match (== count -1) (true (unavailable)) (false unit))))))
+
+; A null code continues a diagnostic already started by the caller.
+(base:function replay
+  ((file (pointer types:file-stream))
+   (severity (pointer u8))
+   (code (pointer u8))
+   (summary (pointer u8))) unit
+  (let ((input i32 (descriptor file)))
+    (match (< input 0)
+      (true unit)
+      (false
+        (match (fd:lseek input 0 c:SEEK-SET)
+          (-1 (unavailable))
+          (_
+            (let ((buffer data:data (data:empty (system:create))))
+              (do
+                (match (data:resize (& buffer) 4096)
+                  ((ok)
+                   (replay-chunks
+                     input
+                     (data:bytes buffer)
+                     severity
+                     code
+                     summary
+                     true
+                     0))
+                  (_ (unavailable)))
+                (data:destroy (& buffer))))))))))
+
+(export open descriptor close redirect replay)

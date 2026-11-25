@@ -62,6 +62,7 @@
     (true
       (do
         (m:location (field p program) (field (m:at (field p program) id) start))
+        (m:diagnostic-start "note" rule)
         (m:text 2 "optimization: ")
         (m:text 2 rule)
         (m:text 2 " node=")

@@ -317,17 +317,36 @@
       (match (>= value 10) (true (number out (/ value 10))) (false unit))
       (write out (data:view (& digit) 1)))))
 
-; Print a diagnostic to stderr and terminate with compiler-error status 2.
-(base:function fatal ((message (pointer u8))) unit
+(base:function diagnostic-start ((severity (pointer u8)) (code (pointer u8)))
+  unit
   (do
+    (text c:STDERR-FILENO severity)
+    (text c:STDERR-FILENO "[")
+    (text c:STDERR-FILENO code)
+    (text c:STDERR-FILENO "]: ")))
+
+(base:function diagnostic
+  ((severity (pointer u8)) (code (pointer u8)) (message (pointer u8))) unit
+  (do
+    (diagnostic-start severity code)
     (text c:STDERR-FILENO message)
-    (text c:STDERR-FILENO "\n")
-    (process:exit 2)
-    unit))
+    (text c:STDERR-FILENO "\n")))
+
+(base:function abort () unit
+  (do (process:exit 2) unit))
+
+; Print a diagnostic to stderr and terminate with compiler-error status 2.
+(base:function fatal ((code (pointer u8)) (message (pointer u8))) unit
+  (do (diagnostic "error" code message) (abort)))
 
 ; Accept a successful Foundation operation; terminate on any storage error.
 (base:function storage ((result error:status)) unit
-  (match result ((ok) unit) (_ (fatal "compiler storage allocation failed"))))
+  (match result
+    ((ok) unit)
+    (_
+      (fatal
+        "compiler-storage-allocation-failed"
+        "compiler storage allocation failed"))))
 
 ; Create an empty syntax tape using the supplied allocator; no nodes exist yet.
 (base:function empty ((backing allocator:backend)) tape
@@ -766,26 +785,32 @@
       unit)))
 
 ; Report a fatal diagnostic at a source byte offset, then exit with status 2.
-(base:function error-at ((c context) (offset u64) (message (pointer u8))) unit
-  (do (location c offset) (fatal message)))
+(base:function error-at
+  ((c context) (offset u64) (code (pointer u8)) (message (pointer u8))) unit
+  (do (location c offset) (fatal code message)))
 
 ; Report a fatal diagnostic at the start of the specified syntax node.
-(base:function error ((c context) (id u64) (message (pointer u8))) unit
-  (error-at c (field (at c id) start) message))
+(base:function error
+  ((c context) (id u64) (code (pointer u8)) (message (pointer u8))) unit
+  (error-at c (field (at c id) start) code message))
 
 ; Record a semantic diagnostic without terminating analysis.
-(base:function report ((c context) (id u64) (message (pointer u8))) unit
+(base:function report
+  ((c context) (id u64) (code (pointer u8)) (message (pointer u8))) unit
   (do
     (location c (field (at c id) start))
-    (text c:STDERR-FILENO message)
-    (text c:STDERR-FILENO "\n")
+    (diagnostic "error" code message)
     (store (deref (field c errors)) (+ (deref (field c errors)) 1))
     unit))
 
 ; Enforce an analysis invariant or report the supplied diagnostic at the node.
 (base:function require
-  ((c context) (id u64) (condition bool) (message (pointer u8))) unit
-  (match condition (true unit) (false (error c id message))))
+  ((c context)
+   (id u64)
+   (condition bool)
+   (code (pointer u8))
+   (message (pointer u8))) unit
+  (match condition (true unit) (false (error c id code message))))
 
 ; A linked environment on the host stack; no pointer escapes its recursive scope.
 ; NAME is a syntax index, BINDER a stable identity, VALUE an evaluated i64.
@@ -822,7 +847,9 @@
   (match (base:is-null env)
     (true
       (do
-        (fatal "internal error: missing resolved binding")
+        (fatal
+          "internal-error-missing-resolved-binding"
+          "internal error: missing resolved binding")
         (let ((zero i64 0)) zero)))
     (false
       (let ((b binding (deref (cast (pointer binding) env))))
@@ -892,6 +919,9 @@
   text
   write
   number
+  diagnostic-start
+  diagnostic
+  abort
   fatal
   storage
   position
