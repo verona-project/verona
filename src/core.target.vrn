@@ -1,5 +1,6 @@
 (import base)
 (import core.model :as m)
+(import core.diagnostic :as diag)
 (import core.configuration :as info)
 (import core.sexpr :as syntax)
 (import arena)
@@ -9,7 +10,6 @@
 (import llvm.types :as t)
 (import llvm.target :as target)
 (import libc.string :as cstring)
-(import libc.constants :as constants)
 
 (base:function machine
   ((config info:configuration)
@@ -74,21 +74,25 @@
         (do
           (match (base:is-null handle)
             (true
-              (do
-                (m:diagnostic-start "error" "target-machine-failed")
-                (m:text
-                  constants:STDERR-FILENO
-                  "cannot resolve compilation target: ")
-                (m:text constants:STDERR-FILENO triple)
-                (m:text constants:STDERR-FILENO "\n")
-                (match (base:is-null (cast (pointer void) message))
-                  (true unit)
-                  (false
-                    (do
-                      (m:text constants:STDERR-FILENO message)
-                      (ir:message-dispose message))))
-                (llvm:destroy owner)
-                (m:abort)))
+              (let ((summary data:data (diag:buffer)))
+                (do
+                  (diag:append
+                    (& summary)
+                    "cannot resolve compilation target: ")
+                  (diag:append (& summary) triple)
+                  (diag:emit
+                    (diag:entry
+                      "error"
+                      "target-machine-failed"
+                      (data:borrow summary)
+                      (diag:no-location))
+                    nil
+                    (diag:string-view message))
+                  (match (base:is-null message)
+                    (true unit)
+                    (false (ir:message-dispose message)))
+                  (llvm:destroy owner)
+                  (m:abort))))
             (false unit))
           (match (base:is-null (cast (pointer void) message))
             (true unit)

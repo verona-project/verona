@@ -5,11 +5,11 @@
 (import core.float :as float)
 (import core.constants :as constants)
 (import core.model :as m)
+(import core.diagnostic :as diag)
 (import core.syntax-support :as raw)
 (import core.expand :as expand)
 (import data)
 (import libc.string :as cstring)
-(import libc.constants :as lconstants)
 
 (base:function require
   ((c m:context)
@@ -1896,39 +1896,43 @@
           ty
           (match negative (true (- 0 magnitude)) (false magnitude)))))))
 
-; Require identical actual/expected type IDs and diagnose a mismatch at the expression.
-(base:function expect ((c m:context) (id u64) (actual u64) (expected u64)) unit
+(base:function expect-origin
+  ((c m:context) (id u64) (actual u64) (expected u64) (origin u64)) unit
   (base:cond
     ((== actual 0) unit)
     ((== expected 0) unit)
     ((== actual expected) unit)
     (true
-      (m:location c (field (m:at c id) start))
-      (m:diagnostic-start "error" "type-mismatch")
-      (m:text lconstants:STDERR-FILENO "type mismatch: expected ")
-      (write-type c expected)
-      (m:text lconstants:STDERR-FILENO ", actual ")
-      (write-type c actual)
-      (m:text lconstants:STDERR-FILENO "\n")
-      (store (deref (field c errors)) (+ (deref (field c errors)) 1))
-      unit)))
+      (let
+        ((message data:data (diag:buffer))
+         (related
+           diag:note
+           (diag:note
+             (diag:entry
+               "note"
+               "expected-type-origin"
+               (diag:string-view "expected type established here")
+               (m:site c origin))
+             nil)))
+        (do
+          (diag:append (& message) "type mismatch: expected ")
+          (write-type (& message) c expected)
+          (diag:append (& message) ", actual ")
+          (write-type (& message) c actual)
+          (diag:emit
+            (diag:entry
+              "error"
+              "type-mismatch"
+              (data:borrow message)
+              (m:site c id))
+            (match origin (0 nil) (_ (cast (pointer void) (& related))))
+            (data:view nil 0))
+          (data:destroy (& message))
+          (m:count-error c))))))
 
-; Retain the declaration that established an expected type in diagnostics.
-(base:function expect-origin
-  ((c m:context) (id u64) (actual u64) (expected u64) (origin u64)) unit
-  (let ((before u64 (deref (field c errors))))
-    (do
-      (expect c id actual expected)
-      (match (== before (deref (field c errors)))
-        (true unit)
-        (false
-          (do
-            (m:location c (field (m:at c origin) start))
-            (m:diagnostic
-              "note"
-              "expected-type-origin"
-              "expected type established here")
-            unit))))))
+; Require identical actual and expected type IDs.
+(base:function expect ((c m:context) (id u64) (actual u64) (expected u64)) unit
+  (expect-origin c id actual expected 0))
 
 ; Check call arguments left to right against parameter types, including exact arity.
 (base:function arguments
@@ -2893,14 +2897,20 @@
 
 ; Report an unresolved call with its source spelling, including any module qualifier.
 (base:function unknown-function ((c m:context) (name u64)) unit
-  (do
-    (m:location c (field (m:at c name) start))
-    (m:diagnostic-start "error" "unknown-function")
-    (m:text lconstants:STDERR-FILENO "unknown function: ")
-    (m:write 2 (m:spelling c name))
-    (m:text lconstants:STDERR-FILENO "\n")
-    (store (deref (field c errors)) (+ (deref (field c errors)) 1))
-    unit))
+  (let ((message data:data (diag:buffer)))
+    (do
+      (diag:append (& message) "unknown function: ")
+      (diag:append-view (& message) (m:spelling c name))
+      (diag:emit
+        (diag:entry
+          "error"
+          "unknown-function"
+          (data:borrow message)
+          (m:site c name))
+        nil
+        (data:view nil 0))
+      (data:destroy (& message))
+      (m:count-error c))))
 
 ; Resolve the nearest namespace first; invalid declarations never supply a signature.
 (base:function direct-call
@@ -5675,60 +5685,64 @@
                          false)))
                     (m:typed-kind c id (node-match) result 0 0)))))))))))
 
-(base:function write-type-components ((c m:context) (id u64)) unit
+(base:function write-type-components
+  ((out (pointer data:data)) (c m:context) (id u64)) unit
   (match id
     (0 unit)
     (_
       (do
-        (m:text lconstants:STDERR-FILENO " ")
-        (write-type c (field (m:at c id) ty))
-        (write-type-components c (m:next c id))))))
+        (diag:append out " ")
+        (write-type out c (field (m:at c id) ty))
+        (write-type-components out c (m:next c id))))))
 
-(base:function write-type ((c m:context) (ty u64)) unit
+(base:function write-type ((out (pointer data:data)) (c m:context) (ty u64))
+  unit
   (match ty
-    (0 (m:text lconstants:STDERR-FILENO "<invalid>"))
-    (1 (m:text lconstants:STDERR-FILENO "unit"))
-    (2 (m:text lconstants:STDERR-FILENO "bool"))
-    (3 (m:text lconstants:STDERR-FILENO "i64"))
-    (11 (m:text lconstants:STDERR-FILENO "(pointer u8)"))
-    (14 (m:text lconstants:STDERR-FILENO "void"))
+    (0 (diag:append out "<invalid>"))
+    (1 (diag:append out "unit"))
+    (2 (diag:append out "bool"))
+    (3 (diag:append out "i64"))
+    (11 (diag:append out "(pointer u8)"))
+    (14 (diag:append out "void"))
     (_
       (match
         (match (num:integer-type ty) (true true) (false (num:float-type ty)))
-        (true (m:text lconstants:STDERR-FILENO (num:name ty)))
+        (true (diag:append out (num:name ty)))
         (false
           (match (type-kind c ty)
             (34
               (do
-                (m:text lconstants:STDERR-FILENO "(pointer ")
-                (write-type c (m:descriptor-target c ty))
-                (m:text lconstants:STDERR-FILENO ")")))
+                (diag:append out "(pointer ")
+                (write-type out c (m:descriptor-target c ty))
+                (diag:append out ")")))
             (49
               (do
-                (m:text lconstants:STDERR-FILENO "(array ")
-                (write-type c (array-element c ty))
-                (m:text lconstants:STDERR-FILENO " ")
-                (m:number 2 (array-length c ty))
-                (m:text lconstants:STDERR-FILENO ")")))
+                (diag:append out "(array ")
+                (write-type out c (array-element c ty))
+                (diag:append out " ")
+                (diag:digits out (array-length c ty))
+                (diag:append out ")")))
             (46
               (let ((v m:node (m:at c (m:descriptor-id ty))))
                 (do
-                  (m:text lconstants:STDERR-FILENO "(function (")
-                  (write-type-components c (field v child))
-                  (m:text lconstants:STDERR-FILENO ") ")
-                  (write-type c (field v target))
-                  (m:text lconstants:STDERR-FILENO ")"))))
+                  (diag:append out "(function (")
+                  (write-type-components out c (field v child))
+                  (diag:append out ") ")
+                  (write-type out c (field v target))
+                  (diag:append out ")"))))
             (22
               (do
-                (m:text lconstants:STDERR-FILENO "(tuple")
-                (write-type-components c (type-components c ty))
-                (m:text lconstants:STDERR-FILENO ")")))
+                (diag:append out "(tuple")
+                (write-type-components out c (type-components c ty))
+                (diag:append out ")")))
             (_
               (let ((id u64 (m:descriptor-id ty)))
                 (do
-                  (m:number 2 (m:owner c id))
-                  (m:text lconstants:STDERR-FILENO ":")
-                  (m:write 2 (m:spelling c (m:next c (m:child c id)))))))))))))
+                  (diag:digits out (m:owner c id))
+                  (diag:append out ":")
+                  (diag:append-view
+                    out
+                    (m:spelling c (m:next c (m:child c id)))))))))))))
 
 (export
   letter

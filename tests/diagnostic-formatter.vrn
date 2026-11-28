@@ -1,0 +1,122 @@
+; Test formatter for the Verona CLI's diagnostic ABI.
+(%type Bytes (product (bytes (pointer u8)) (length u64)))
+
+(%type Location
+  (product
+    (path (pointer u8))
+    (line u64)
+    (column u64)
+    (start u64)
+    (end u64)
+    (source Bytes)))
+
+(%type Entry
+  (product
+    (severity (pointer u8))
+    (code (pointer u8))
+    (message Bytes)
+    (site Location)))
+
+(%type Note (product (item Entry) (next (pointer void))))
+
+(%type Diagnostic
+  (product (primary Entry) (notes (pointer void)) (detail Bytes)))
+
+(%type Write (pointer (function ((pointer u8) u64) unit)))
+
+(%type Formatter (pointer (function ((pointer Diagnostic) Write) unit)))
+
+(%type Api (product (version u32) (format Formatter)))
+
+(%variable descriptor (pointer Api) nil)
+
+(%external-function strlen "strlen" ((pointer u8)) u64)
+
+(%external-function malloc "malloc" (u64) (pointer void))
+
+(%function text ((write Write) (value (pointer u8))) unit
+  (write value (strlen value)))
+
+(%function number ((write Write) (value u64)) unit
+  (let
+    ((prefix u64 (/ value 10))
+     (digit u8 (%trunc-primitive-u64-u8 (+ 48 (- value (* prefix 10))))))
+    (do
+      (match (== prefix 0) (true unit) (false (number write prefix)))
+      (write (& digit) 1))))
+
+(%function bytes ((write Write) (value Bytes)) unit
+  (write (field value bytes) (field value length)))
+
+(%function print-site ((write Write) (site Location)) unit
+  (let ((path (pointer u8) (field site path)))
+    (match (== (cast (pointer void) path) nil)
+      (true (text write "-|-"))
+      (false
+        (do
+          (text write path)
+          (text write ":")
+          (number write (field site line))
+          (text write ":")
+          (number write (field site column))
+          (text write "|")
+          (number write (field site start))
+          (text write ":")
+          (number write (field site end))
+          (text write ":")
+          (number write (field (field site source) length)))))))
+
+(%function print-entry ((write Write) (kind (pointer u8)) (item Entry)) unit
+  (do
+    (text write kind)
+    (text write "|")
+    (text write (field item severity))
+    (text write "|")
+    (text write (field item code))
+    (text write "|")
+    (print-site write (field item site))
+    (text write "|")
+    (bytes write (field item message))
+    (text write "\n")))
+
+(%function print-notes ((write Write) (notes (pointer void))) unit
+  (match (== notes nil)
+    (true unit)
+    (false
+      (let ((note Note (deref (cast (pointer Note) notes))))
+        (do
+          (print-entry write "R" (field note item))
+          (print-notes write (field note next)))))))
+
+(%function format ((value (pointer Diagnostic)) (write Write)) unit
+  (let
+    ((diagnostic Diagnostic (deref value))
+     (detail Bytes (field diagnostic detail)))
+    (do
+      (print-entry write "D" (field diagnostic primary))
+      (print-notes write (field diagnostic notes))
+      (match (== (field detail length) 0)
+        (true unit)
+        (false (do (text write "T|") (bytes write detail) (text write "\n")))))))
+
+(%function provide () (pointer void)
+  (match (== (cast (pointer void) descriptor) nil)
+    (false (cast (pointer void) descriptor))
+    (true
+      ; The descriptor uses one aligned 16-byte allocation for the library lifetime.
+      (let
+        ((slot (pointer Api) (cast (pointer Api) (malloc 16)))
+         (callback Formatter format))
+        (match (== (cast (pointer void) slot) nil)
+          (true nil)
+          (false
+            (do
+              (store
+                (deref slot)
+                (Api #+bad_version 2 #-bad_version 1 callback))
+              (store descriptor slot)
+              (cast (pointer void) slot))))))))
+
+#+missing_entry (native-export provide "unrelated_symbol")
+
+#-missing_entry (native-export provide "verona_diagnostic_formatter")

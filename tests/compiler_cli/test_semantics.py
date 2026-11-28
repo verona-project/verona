@@ -364,7 +364,8 @@ class SemanticTests(CompilerTestCase):
             "(%function main () i64 (identity true))")
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr.splitlines(), [
+        lines = result.stderr.splitlines()
+        self.assertEqual([line for line in lines if line.startswith(str(self.source))], [
             f"{self.source}:2:34: error[type-mismatch]: type mismatch: expected i64, actual bool",
             f"{self.source}:1:25: note[expected-type-origin]: expected type established here",
         ])
@@ -403,8 +404,8 @@ class SemanticTests(CompilerTestCase):
         result = self.run_core("eval", source)
         self.assertEqual(result.returncode, 70, result.stderr)
         self.assertIn("input.vrn:2:3: error[division-by-zero]: division by zero", result.stderr)
-        self.assertIn(f"in bad at {self.source}:4:3:", result.stderr)
-        self.assertIn(f"in main at {self.source}:3:1:", result.stderr)
+        self.assertIn(f"{self.source}:4:3: note[evaluator-call-frame]: in bad", result.stderr)
+        self.assertIn(f"{self.source}:3:1: note[evaluator-call-frame]: in main", result.stderr)
         self.assertLess(result.stderr.index("in bad"), result.stderr.index("in main"))
         self.assertEqual(result.stdout, "")
 

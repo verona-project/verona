@@ -1,5 +1,6 @@
 (import base)
 (import core.constants :as constants)
+(import core.diagnostic :as diag)
 (import allocator)
 (import array)
 (import error)
@@ -317,20 +318,9 @@
       (match (>= value 10) (true (number out (/ value 10))) (false unit))
       (write out (data:view (& digit) 1)))))
 
-(base:function diagnostic-start ((severity (pointer u8)) (code (pointer u8)))
-  unit
-  (do
-    (text c:STDERR-FILENO severity)
-    (text c:STDERR-FILENO "[")
-    (text c:STDERR-FILENO code)
-    (text c:STDERR-FILENO "]: ")))
-
 (base:function diagnostic
   ((severity (pointer u8)) (code (pointer u8)) (message (pointer u8))) unit
-  (do
-    (diagnostic-start severity code)
-    (text c:STDERR-FILENO message)
-    (text c:STDERR-FILENO "\n")))
+  (diag:simple severity code message))
 
 (base:function abort () unit
   (do (process:exit 2) unit))
@@ -767,41 +757,116 @@
           (locate c start half pos)
           (locate c (+ start half) (- count half) pos))))))
 
-; Print FILE:LINE:COLUMN followed by a colon and space to stderr for a byte offset.
-(base:function location ((c context) (offset u64)) unit
-  (let ((pos position (position 1 1 false)))
-    (do
-      (locate
+(base:function location-in-file
+  ((c context)
+   (path (pointer u8))
+   (first u64)
+   (size u64)
+   (offset u64)
+   (length u64)) diag:location
+  (let ((relative u64 (- offset first)) (pos position (position 1 1 false)))
+    (match (base:and (>= offset first) (<= relative size))
+      (false (diag:no-location))
+      (true
+        (do
+          (locate c first relative (& pos))
+          (diag:location
+            path
+            (field pos line)
+            (field pos column)
+            relative
+            (match (<= length (- size relative))
+              (true (+ relative length))
+              (false relative))
+            (data:view
+              (pointer-offset (field (field c source) bytes) first)
+              size)))))))
+
+(base:function source-location ((c context) (offset u64) (length u64))
+  diag:location
+  (match (has-files c)
+    (false
+      (location-in-file
         c
-        (source-start c offset)
-        (- offset (source-start c offset))
-        (& pos))
-      (text c:STDERR-FILENO (source-path c offset))
-      (text c:STDERR-FILENO ":")
-      (number 2 (field pos line))
-      (text c:STDERR-FILENO ":")
-      (number 2 (field pos column))
-      (text c:STDERR-FILENO ": ")
-      unit)))
+        (field c path)
+        0
+        (field (field c source) length)
+        offset
+        length))
+    (true
+      (let ((v module-info (file-info c (module-at c offset 0))))
+        ; The combined source has a synthetic separator after each file.
+        (location-in-file
+          c
+          (field v path)
+          (field v start)
+          (- (field v length) 1)
+          offset
+          length)))))
+
+; Generated spellings can have a different length from their source site.
+(base:function site ((c context) (id u64)) diag:location
+  (match id
+    (0 (diag:no-location))
+    (_
+      (let ((v node (at c id)))
+        (source-location
+          c
+          (field v start)
+          (match (field v generated) (0 (field v length)) (_ 0)))))))
+
+(base:function diagnostic-at
+  ((c context)
+   (id u64)
+   (severity (pointer u8))
+   (code (pointer u8))
+   (message (pointer u8))) unit
+  (diag:emit
+    (diag:entry
+      severity
+      code
+      (diag:string-view message)
+      (match id
+        ; Required syntax can be missing from an empty file. Keep its start location.
+        (0 (source-location c 0 0))
+        (_ (site c id))))
+    nil
+    (data:view nil 0)))
+
+(base:function error-range
+  ((c context)
+   (offset u64)
+   (length u64)
+   (code (pointer u8))
+   (message (pointer u8))) unit
+  (do
+    (diag:emit
+      (diag:entry
+        "error"
+        code
+        (diag:string-view message)
+        (source-location c offset length))
+      nil
+      (data:view nil 0))
+    (abort)))
 
 ; Report a fatal diagnostic at a source byte offset, then exit with status 2.
 (base:function error-at
   ((c context) (offset u64) (code (pointer u8)) (message (pointer u8))) unit
-  (do (location c offset) (fatal code message)))
+  (error-range c offset 0 code message))
 
-; Report a fatal diagnostic at the start of the specified syntax node.
+; Report a fatal diagnostic at the specified syntax node.
 (base:function error
   ((c context) (id u64) (code (pointer u8)) (message (pointer u8))) unit
-  (error-at c (field (at c id) start) code message))
+  (do (diagnostic-at c id "error" code message) (abort)))
+
+(base:function count-error ((c context)) unit
+  (do (store (deref (field c errors)) (+ (deref (field c errors)) 1)) unit))
 
 ; Record a semantic diagnostic without terminating analysis.
 (base:function report
   ((c context) (id u64) (code (pointer u8)) (message (pointer u8))) unit
-  (do
-    (location c (field (at c id) start))
-    (diagnostic "error" code message)
-    (store (deref (field c errors)) (+ (deref (field c errors)) 1))
-    unit))
+  (do (diagnostic-at c id "error" code message) (count-error c)))
 
 ; Enforce an analysis invariant or report the supplied diagnostic at the node.
 (base:function require
@@ -919,14 +984,16 @@
   text
   write
   number
-  diagnostic-start
   diagnostic
   abort
   fatal
   storage
   position
   locate
-  location
+  site
+  diagnostic-at
+  count-error
+  error-range
   error-at
   error
   require

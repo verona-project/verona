@@ -11,7 +11,7 @@ and =verona help= print top-level help; =verona COMMAND --help=, =-h=, or
 =help= print command help. Help succeeds and writes to standard output. Invalid
 invocations write a diagnostic and the compact usage synopsis to standard
 error and return 2.
-=verona --version= and =verona -V= must be used without any other arguments.
+=verona --version= and =verona -V= take no command options or operands.
 
 * Compiler (=verona=)
 
@@ -30,7 +30,7 @@ verona {compile|compile-report} [OPTIONS] FILE
   [--library NAME ...] [--library-path DIRECTORY ...] [--framework NAME ...] \
   [--feature NAME ...] [--target TRIPLE] [--cpu CPU] [--features FEATURES]
 
-verona build [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY
+verona build [--diagnostic-plugin PATH] [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY
 verona --version | -V
 #+end_example
 
@@ -39,6 +39,65 @@ operands. =--= stops option processing; use it for an operand beginning with a
 dash. Option abbreviations, attached short-option values (such as =-oout=),
 and =--option=value= are rejected. Every long option that takes a value uses a
 separate following argument.
+
+** Diagnostic formatters
+
+All eight commands accept =--diagnostic-plugin PATH=. By default, diagnostics
+use the built-in text formatter on standard error. Located diagnostics start
+with =path:line:column:= and include an excerpt when the source is available.
+Related notes follow the primary diagnostic. The compiler keeps its normal
+standard output, recovery, and exit status when a formatter is selected.
+
+Supply a single path to a Linux =.so= or macOS =.dylib=. A relative path resolves
+from the working directory. Use =./= before a path whose name starts with a
+dash. The driver reserves the exact =--diagnostic-plugin= token anywhere
+before the first =--=, including before the command, and removes it and its
+value before parsing other arguments. It scans even if other arguments are
+malformed, so the first valid option can format usage errors. An empty,
+missing, or option-like path or a repeated option is a usage error. A library
+load or ABI error is reported in built-in text and returns status 2 before the
+command runs.
+
+A formatter library exports =verona_diagnostic_formatter= with no arguments.
+It returns a pointer to a descriptor whose =abi_version= is =1= and whose
+=format= field holds the formatter callback. The
+[[file:../tests/diagnostic-formatter.vrn][Verona test formatter]] defines these
+types and can be built with =verona compile --emit shared-library=.
+
+ABI version 1 uses the platform C calling convention, natural alignment, and
+the fields below in declaration order. =u32= and =u64= are unsigned integers
+of 32 and 64 bits. Byte pointers and pointers to records are borrowed.
+
+| Record | Fields in order |
+|--------+-----------------|
+| Bytes | =bytes= (byte pointer), =length= (u64) |
+| Location | =path= (NUL-terminated string pointer), =line= (u64), =column= (u64), =start= (u64), =end= (u64), =source= (Bytes) |
+| Entry | =severity= (NUL-terminated string pointer), =code= (NUL-terminated string pointer), =message= (Bytes), =location= (Location) |
+| Note | =entry= (Entry), =next= (pointer to Note) |
+| Diagnostic | =primary= (Entry), =notes= (pointer to Note), =detail= (Bytes) |
+| Descriptor | =abi_version= (u32), =format= (formatter callback pointer) |
+
+The formatter callback takes a pointer to a Diagnostic and a write callback.
+The write callback takes a byte pointer and a u64 length. Both callbacks
+return void.
+
+The driver calls =format= synchronously once per diagnostic. The primary entry
+and each related note contain a NUL-terminated severity (=error=, =warning=, or
+=note=) and stable code, a length-delimited message, and an optional location.
+Locations have one-based lines and byte columns and zero-based file byte
+offsets. The half-open range =[start, end)= has =start == end= for a point
+location. A null path means the location is absent. The source byte view, when
+available, contains only the owning file. Related notes form a linked list in
+display order. The diagnostic detail byte view can contain multiline LLVM or
+native-tool output. Byte views can contain NULs and may have a null pointer at
+zero length.
+
+The descriptor and its function must remain valid while the library is
+loaded. The compiler owns the diagnostic, its notes, all referenced bytes, and
+the write callback. Use them only for the duration of the format call. Pass
+formatted bytes to the supplied =write= callback, which writes to the
+compiler's standard error. The formatter should return normally and use this
+callback for all its output.
 
 ** Source inspection and analysis commands
 
@@ -85,7 +144,7 @@ static libraries, and =lib*.so= or =lib*.dylib= for shared libraries.
 ** Manifest build command
 
 #+begin_example
-verona build [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY
+verona build [--diagnostic-plugin PATH] [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY
 #+end_example
 
 The command reads =verona.build= from the current directory, selects =TARGET=,

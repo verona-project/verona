@@ -13,6 +13,7 @@
 (import libc.process :as process)
 (import libc.string :as cstring)
 (import core.model :as m)
+(import core.diagnostic :as diag)
 (import core.reader :as reader)
 (import core.source :as source)
 (import core.tool-output :as tool-output)
@@ -37,6 +38,8 @@
 (import llvm.types :as t)
 (import llvm.target :as target)
 (import llvm.passes :as passes)
+
+(base:external-function child-exit "_exit" (i32) void)
 
 (base:type machine-options
   (product (triple (pointer u8)) (cpu (pointer u8)) (features (pointer u8)) (debug bool)))
@@ -73,50 +76,77 @@
         (match (base:and-then (>= capture 0) (base:not (== capture c:STDERR-FILENO)))
           (true
             (match (tool-output:redirect capture)
-              (false (do (process:exit 127) unit))
+              (false (do (child-exit 127) unit))
               (true (do (fd:close capture) unit))))
           (false unit))
+        (diag:close-capture-in-child)
         (process:execvp tool args)
         (m:text c:STDERR-FILENO (cstring:strerror (deref (errno:errno-pointer))))
         (m:text c:STDERR-FILENO "\n")
-        (process:exit 127)
+        (child-exit 127)
         false))
     (pid (wait-result pid))))
 
+(base:function named-detail
+  ((severity (pointer u8))
+   (code (pointer u8))
+   (message (pointer u8))
+   (name (pointer u8))
+   (detail data:view)) unit
+  (let ((summary data:data (diag:buffer)))
+    (do
+      (diag:append (& summary) message)
+      (diag:append (& summary) ": ")
+      (diag:append (& summary) name)
+      (diag:emit (diag:entry severity code (data:borrow summary) (diag:no-location)) nil detail)
+      (data:destroy (& summary)))))
+
 (base:function named-diagnostic
-  ((severity (pointer u8)) (code (pointer u8)) (message (pointer u8)) (tool (pointer u8))) unit
-  (do
-    (m:diagnostic-start severity code)
-    (m:text c:STDERR-FILENO message)
-    (m:text c:STDERR-FILENO ": ")
-    (m:text c:STDERR-FILENO tool)
-    (m:text c:STDERR-FILENO "\n")))
+  ((severity (pointer u8)) (code (pointer u8)) (message (pointer u8)) (name (pointer u8))) unit
+  (named-detail severity code message name (data:view nil 0)))
 
 (base:function run-tool
   ((tool (pointer u8)) (args (pointer (pointer u8))) (code (pointer u8)) (message (pointer u8)))
   bool
   (let
     ((file (pointer types:file-stream) (tool-output:open))
-     (capture i32 (tool-output:descriptor file))
-     (result
-       bool
-       (do
-         (match (< capture 0)
-           (true
-             (named-diagnostic
-               "note"
-               "native-tool-output"
-               "native tool stderr follows if present"
-               tool))
-           (false unit))
-         (run-child tool args capture))))
-    (do
-      (match result
-        (true (tool-output:replay file "note" "native-tool-output" "native tool wrote to stderr"))
-        (false
-          (do (named-diagnostic "error" code message tool) (tool-output:replay file nil nil nil))))
-      (tool-output:close file)
-      result)))
+     (capture i32 (tool-output:descriptor file)))
+    (match (< capture 0)
+      (true
+        (do
+          (tool-output:close file)
+          (named-diagnostic
+            "error"
+            "native-tool-capture-failed"
+            "cannot capture native tool stderr"
+            tool)
+          false))
+      (false
+        (let
+          ((result bool (run-child tool args capture))
+           (stderr-data data:data (diag:buffer))
+           (status error:status (tool-output:read file (& stderr-data)))
+           (detail data:view (match status ((ok) (data:borrow stderr-data)) (_ (data:view nil 0)))))
+          (do
+            (match result
+              (false (named-detail "error" code message tool detail))
+              (true
+                (match (> (field detail length) 0)
+                  (false unit)
+                  (true
+                    (diag:emit
+                      (diag:entry
+                        "note"
+                        "native-tool-output"
+                        (diag:string-view "native tool wrote to stderr")
+                        (diag:no-location))
+                      nil
+                      detail)))))
+            (match status
+              ((ok) unit)
+              (_ (m:diagnostic "note" "tool-output-read-failed" "cannot read captured tool output")))
+            (data:destroy (& stderr-data))
+            result))))))
 
 ; Run the linker or archiver with owned argv storage. Option strings are borrowed; generated
 ; library flags live in MEMORY until the parent has waited for the child.
@@ -200,14 +230,10 @@
 ; Print a transferred LLVM diagnostic (or fallback text) and release the message.
 (base:function llvm-error ((code (pointer u8)) (summary (pointer u8)) (message (pointer u8))) unit
   (do
-    (m:diagnostic "error" code summary)
-    (match (base:is-null message)
-      (true unit)
-      (false
-        (do
-          (m:text c:STDERR-FILENO "LLVM: ")
-          (m:text c:STDERR-FILENO message)
-          (m:text c:STDERR-FILENO "\n"))))
+    (diag:emit
+      (diag:entry "error" code (diag:string-view summary) (diag:no-location))
+      nil
+      (diag:string-view message))
     (dispose-message message)
     unit))
 
@@ -628,8 +654,9 @@
 ; Print the compact top-level synopsis used with malformed invocations.
 (base:function usage-summary () exit-code
   (do
-    (m:text
-      c:STDERR-FILENO
+    (m:diagnostic
+      "note"
+      "command-usage"
       "usage: verona [--help|-h] [--version|-V] COMMAND [OPTIONS]\n       verona {read|check|eval|emit-llvm|optimization-report} [OPTIONS] FILE\n       verona {compile|compile-report} [OPTIONS] FILE\n       verona build [OPTIONS] TARGET OUTPUT-DIRECTORY\n")
     2))
 
@@ -641,7 +668,7 @@
   (do
     (m:text
       c:STDOUT-FILENO
-      "usage: verona [--help|-h] [--version|-V] COMMAND [OPTIONS]\n\ncommands:\n  read FILE                 parse and print source\n  check FILE                load and type-check source\n  eval FILE                 evaluate a parameterless main\n  emit-llvm FILE            print checked LLVM IR\n  optimization-report FILE  print lowering optimization reports\n  compile FILE              emit an artifact\n  compile-report FILE       emit an executable result reporter\n  build TARGET DIRECTORY    build a target from verona.build\n\nUse 'verona COMMAND --help' for command options. Options may precede or follow operands; '--' ends option processing.\n")
+      "usage: verona [--help|-h] [--version|-V] COMMAND [OPTIONS]\n\ncommands:\n  read FILE                 parse and print source\n  check FILE                load and type-check source\n  eval FILE                 evaluate a parameterless main\n  emit-llvm FILE            print checked LLVM IR\n  optimization-report FILE  print lowering optimization reports\n  compile FILE              emit an artifact\n  compile-report FILE       emit an executable result reporter\n  build TARGET DIRECTORY    build a target from verona.build\n\nUse 'verona COMMAND --help' for command options. --diagnostic-plugin PATH selects a formatter. Options may precede or follow operands; '--' ends option processing.\n")
     0))
 
 (base:function source-help ((mode (pointer u8))) exit-code
@@ -651,7 +678,7 @@
     (m:text c:STDOUT-FILENO " [OPTIONS] FILE\n\n")
     (m:text
       c:STDOUT-FILENO
-      "source options:\n  --module-path DIRECTORY  add a module search path (repeatable)\n  --feature NAME           enable a reader feature (repeatable)\n  --target TRIPLE          select a target triple (last value wins)\n")
+      "source options:\n  --diagnostic-plugin PATH select a diagnostic formatter\n  --module-path DIRECTORY  add a module search path (repeatable)\n  --feature NAME           enable a reader feature (repeatable)\n  --target TRIPLE          select a target triple (last value wins)\n")
     (match (base:or-else (equal mode "compile") (equal mode "compile-report"))
       (true
         (m:text
@@ -667,7 +694,7 @@
   (do
     (m:text
       c:STDOUT-FILENO
-      "usage: verona build [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY\n\nBuild TARGET from ./verona.build and write it below OUTPUT-DIRECTORY. --debug enables source-level debug information for this invocation; --feature is repeatable. All artifact, target, optimization, and link configuration comes from the manifest. Options may precede or follow operands; '--' ends option processing.\n")
+      "usage: verona build [--diagnostic-plugin PATH] [--debug] [--feature NAME ...] TARGET OUTPUT-DIRECTORY\n\nBuild TARGET from ./verona.build and write it below OUTPUT-DIRECTORY. --debug enables source-level debug information for this invocation; --feature is repeatable. All artifact, target, optimization, and link configuration comes from the manifest. Options may precede or follow operands; '--' ends option processing.\n")
     0))
 
 (base:function option-like ((value (pointer u8))) bool
@@ -1520,7 +1547,7 @@
     (let ((option (pointer u8) (deref (pointer-offset argv 2))))
       (base:or-else (base:or (equal option "--help") (equal option "-h")) (equal option "help")))))
 
-(base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
+(base:function dispatch ((argc i32) (argv (pointer (pointer u8)))) exit-code
   ; ARGV[1] is unavailable for an invocation with no command.  Reject it
   ; before decoding the command so malformed CLI input cannot dereference it.
   (match (< argc 2)
@@ -1560,3 +1587,82 @@
                   (true
                     (named-diagnostic "error" "unknown-command" "unknown compiler command" command)
                     (usage-summary)))))))))))
+
+(base:type formatter-option (product (argc i32) (path (pointer u8)) (problem (pointer u8))))
+
+; Reserve the formatter option before ordinary validation. Keep scanning after
+; malformed arguments and compact the remaining arguments in their original order.
+(base:function formatter-options
+  ((argc i32) (argv (pointer (pointer u8))) (index i32) (state formatter-option) (stopped bool))
+  formatter-option
+  (match (>= index argc)
+    (true state)
+    (false
+      (let
+        ((option (pointer u8) (deref (pointer-offset argv index)))
+         (next i32 (+ index 1))
+         (count i32 (field state argc))
+         (path (pointer u8) (field state path))
+         (problem (pointer u8) (field state problem)))
+        (match (base:and (base:not stopped) (equal option "--diagnostic-plugin"))
+          (false
+            (do
+              (store (deref (pointer-offset argv count)) option)
+              (formatter-options
+                argc
+                argv
+                next
+                (formatter-option (+ count 1) path problem)
+                (base:or stopped (equal option "--")))))
+          (true
+            (let
+              ((value
+                 (pointer u8)
+                 (match (< next argc) (true (deref (pointer-offset argv next))) (false ""))))
+              (base:cond
+                ((base:or (== (deref value) 0) (option-like value))
+                 (formatter-options
+                   argc
+                   argv
+                   next
+                   (formatter-option count path "--diagnostic-plugin requires a path")
+                   false))
+                ((base:is-null path)
+                 (formatter-options
+                   argc
+                   argv
+                   (+ next 1)
+                   (formatter-option count value problem)
+                   false))
+                (true
+                  (formatter-options
+                    argc
+                    argv
+                    (+ next 1)
+                    (formatter-option count path "--diagnostic-plugin may be supplied only once")
+                    false))))))))))
+
+(base:function dispatch-with-capture ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (match (diag:capture-start)
+    (0 (let ((result exit-code (dispatch argc argv))) (do (diag:capture-end) result)))
+    (status status)))
+
+(base:function main ((argc i32) (argv (pointer (pointer u8)))) exit-code
+  (let
+    ((options formatter-option (formatter-options argc argv 1 (formatter-option 1 nil nil) false))
+     (count i32 (field options argc))
+     (path (pointer u8) (field options path))
+     (status i32 (match (base:is-null path) (true 0) (false (diag:load path)))))
+    (do
+      (store (deref (pointer-offset argv count)) nil)
+      (match status
+        (0
+          (let
+            ((problem (pointer u8) (field options problem))
+             (result
+               exit-code
+               (match (base:is-null problem)
+                 (true (dispatch-with-capture count argv))
+                 (false (usage "invalid-command-option" problem)))))
+            (do (diag:unload) result)))
+        (_ status)))))

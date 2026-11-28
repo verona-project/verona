@@ -5,8 +5,9 @@
 
 The =verona= compiler reports diagnostics on standard error. Each diagnostic
 starts with =severity[code]:= after any source prefix. Source locations use
-=path:line:column:= with one-based lines and byte columns. Evaluator call-frame
-notes include their locations after the function name.
+=path:line:column:= with one-based lines and byte columns. The built-in text
+formatter includes a source excerpt and underline when source bytes are available.
+Evaluator call frames appear as related notes at their call sites.
 
 #+begin_example
 input.vrn:2:34: error[type-mismatch]: type mismatch: expected i64, actual bool
@@ -43,6 +44,11 @@ storage errors.
 
 | Code | Severity | Trigger |
 |------+----------+---------|
+| =command-usage= | note | A malformed invocation needs the compact usage synopsis. |
+| =diagnostic-plugin-open-failed= | error | The formatter library cannot be opened. |
+| =diagnostic-plugin-entry-missing= | error | The formatter library has no required entry point. |
+| =diagnostic-plugin-abi-mismatch= | error | The formatter descriptor has an incompatible ABI or lacks a callback. |
+| =diagnostic-plugin-loader-detail= | note | The platform loader supplied additional context for a plugin failure. |
 | =invalid-command-option= | error | An option is unknown, unavailable for the command, repeated where disallowed, or missing a valid value. |
 | =invalid-compile-report-artifact= | error | Compile-report was asked to emit an artifact other than an executable. |
 | =link-options-allocation-failed= | error | The command could not store the requested link options. |
@@ -463,7 +469,11 @@ storage errors.
 | =native-debug-symbols-failed= | error | The Darwin debug-symbol tool fails to start or exits unsuccessfully. |
 | =native-link-failed= | error | The native linker fails to start or exits unsuccessfully. |
 | =native-tool-arguments-failed= | error | The driver cannot assemble the native tool argument vector. |
-| =native-tool-output= | note | A successful native tool wrote to stderr, or the driver could not capture its stderr. |
+| =llvm-fatal-error= | error | LLVM reported a fatal error. |
+| =llvm-stderr= | warning | LLVM wrote to stderr outside its diagnostic callback. |
+| =llvm-stderr-capture-failed= | error | The driver could not set up or restore LLVM stderr capture. |
+| =native-tool-capture-failed= | error | The driver could not capture native tool stderr. |
+| =native-tool-output= | note | A successful native tool wrote to stderr. |
 | =tail-call= | note | The optimization report records a call lowered as a tail call. |
 | =target-machine-failed= | error | LLVM cannot create a target machine for the selected configuration. |
 | =temporary-object-close-failed= | error | The driver cannot close the temporary object file. |

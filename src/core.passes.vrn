@@ -1,5 +1,7 @@
 (import base)
+(import data)
 (import core.model :as m)
+(import core.diagnostic :as diag)
 (import core.optimize :as simplify)
 
 ; One invocation borrows a fully checked, specialization-complete program.
@@ -60,16 +62,23 @@
   (match (field p remarks)
     (false unit)
     (true
-      (do
-        (m:location (field p program) (field (m:at (field p program) id) start))
-        (m:diagnostic-start "note" rule)
-        (m:text 2 "optimization: ")
-        (m:text 2 rule)
-        (m:text 2 " node=")
-        (m:number 2 id)
-        (m:text 2 " selected=")
-        (m:number 2 selected)
-        (m:text 2 "\n")))))
+      (let ((message data:data (diag:buffer)))
+        (do
+          (diag:append (& message) "optimization: ")
+          (diag:append (& message) rule)
+          (diag:append (& message) " node=")
+          (diag:digits (& message) id)
+          (diag:append (& message) " selected=")
+          (diag:digits (& message) selected)
+          (diag:emit
+            (diag:entry
+              "note"
+              rule
+              (data:borrow message)
+              (m:site (field p program) id))
+            nil
+            (data:view nil 0))
+          (data:destroy (& message)))))))
 
 (base:function fold ((p context) (id u64)) simplify:constant-result
   (let

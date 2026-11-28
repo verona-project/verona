@@ -3,7 +3,6 @@
 (import error)
 (import libc.stdio :as io)
 (import libc.types :as types)
-(import core.model :as m)
 
 ; Double the read window after each full read. Recursion is logarithmic in
 ; file size, and the buffer retains the exact bytes including embedded NULs.

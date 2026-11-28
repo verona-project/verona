@@ -1,0 +1,609 @@
+(import base)
+(import allocator)
+(import data)
+(import error)
+(import system_allocator :as system)
+(import libc.process :as process)
+(import libc.string :as cstring)
+(import libc.constants :as c)
+(import libc.descriptor :as fd)
+(import libc.errno :as errno)
+(import libc.memory :as memory)
+(import libc.types :as types)
+(import core.tool-output :as tool-output)
+
+; These products define the formatter ABI documented in docs/command-line.org.
+; The formatter borrows their storage and referenced bytes during the call.
+(base:type location
+  (product
+    (path (pointer u8))
+    (line u64)
+    (column u64)
+    (start u64)
+    (end u64)
+    (source data:view)))
+
+(base:type entry
+  (product
+    (severity (pointer u8))
+    (code (pointer u8))
+    (message data:view)
+    (site location)))
+
+(base:type note (product (item entry) (next (pointer void))))
+
+(base:type diagnostic
+  (product (primary entry) (notes (pointer void)) (detail data:view)))
+
+(base:type writer (pointer (function ((pointer u8) u64) unit)))
+
+(base:type formatter (pointer (function ((pointer diagnostic) writer) unit)))
+
+(base:type formatter-api (product (version u32) (format formatter)))
+
+(base:type entry-point (pointer (function () (pointer formatter-api))))
+
+; The native driver owns one formatter and one LLVM stderr capture per invocation.
+(base:variable loaded-library (pointer void) nil)
+
+(base:variable selected-formatter (pointer void) nil)
+
+(base:variable capture-file (pointer types:file-stream) nil)
+
+(base:variable output-fd i32 2)
+
+(base:variable capture-offset i64 0)
+
+(base:external-function
+  realpath
+  "realpath"
+  ((pointer u8) (pointer u8))
+  (pointer u8))
+
+(base:external-function dlopen "dlopen" ((pointer u8) i32) (pointer void))
+
+(base:external-function
+  dlsym
+  "dlsym"
+  ((pointer void) (pointer u8))
+  (pointer void))
+
+(base:external-function dlerror "dlerror" () (pointer u8))
+
+(base:external-function dlclose "dlclose" ((pointer void)) i32)
+
+(base:external-function read-at "pread" (i32 (pointer void) u64 i64) i64)
+
+(base:external-function
+  install-fatal-handler
+  "LLVMInstallFatalErrorHandler"
+  ((pointer void))
+  void)
+
+(base:external-function
+  reset-fatal-handler
+  "LLVMResetFatalErrorHandler"
+  ()
+  void)
+
+; RTLD_NOW | RTLD_LOCAL on the supported hosts.
+#+darwin (base:constant loader-flags i32 6)
+
+#+linux (base:constant loader-flags i32 2)
+
+(base:function string-view ((text (pointer u8))) data:view
+  (match (base:is-null text)
+    (true (data:view nil 0))
+    (false (data:view text (cstring:strlen text)))))
+
+(base:function no-location () location
+  (location nil 0 0 0 0 (data:view nil 0)))
+
+(base:function last-error () i32
+  (deref (errno:errno-pointer)))
+
+(base:function write-stderr ((bytes (pointer u8)) (length u64)) unit
+  (match length
+    (0 unit)
+    (_
+      (let
+        ((chunk u64 (match (> length 65536) (true 65536) (false length)))
+         (count i64 (fd:write output-fd (cast (pointer void) bytes) chunk)))
+        (base:cond
+          ((> count 0)
+           (let ((size u64 (base:convert count)))
+             (write-stderr (pointer-offset bytes size) (- length size))))
+          ((base:and-then (== count -1) (== (last-error) c:EINTR))
+           (write-stderr bytes length))
+          (true (do (process:exit 2) unit)))))))
+
+(base:function write-text ((output writer) (text (pointer u8))) unit
+  (output text (cstring:strlen text)))
+
+(base:function write-byte ((output writer) (byte u8)) unit
+  (output (& byte) 1))
+
+(base:function write-number ((output writer) (value u64)) unit
+  (do
+    (match (>= value 10) (true (write-number output (/ value 10))) (false unit))
+    (write-byte output (base:convert (+ 48 (- value (* (/ value 10) 10)))))))
+
+(base:function view-byte ((value data:view) (index u64)) u8
+  (deref (pointer-offset (field value bytes) index)))
+
+(base:function write-line ((output writer) (value data:view)) unit
+  (let ((length u64 (field value length)))
+    (do
+      (output (field value bytes) length)
+      (match
+        (base:or-else
+          (== length 0)
+          (base:not (== (view-byte value (- length 1)) 10)))
+        (true (write-text output "\n"))
+        (false unit)))))
+
+(base:function newline-at ((source data:view) (at u64)) bool
+  (match (view-byte source at) (10 true) (13 true) (_ false)))
+
+(base:function excerpt-end ((source data:view) (index u64) (limit u64)) u64
+  (match (base:or-else (== index limit) (newline-at source index))
+    (true index)
+    (false (excerpt-end source (+ index 1) limit))))
+
+; Gather one excerpt row before writing, keeping tabs aligned with the caret row.
+(base:function excerpt-row
+  ((out (pointer u8)) (source data:view) (index u64) (end u64) (marker bool))
+  unit
+  (match (== index end)
+    (true unit)
+    (false
+      (let ((byte u8 (view-byte source index)))
+        (do
+          (store
+            (deref out)
+            (base:cond
+              ((== byte 9) byte)
+              (marker 32)
+              ((base:and (>= byte 32) (<= byte 126)) byte)
+              (true 46)))
+          (excerpt-row (pointer-offset out 1) source (+ index 1) end marker))))))
+
+(base:function underline
+  ((output writer)
+   (row (pointer u8))
+   (source data:view)
+   (first u64)
+   (at u64)
+   (end u64)) unit
+  (do
+    (excerpt-row row source first at true)
+    (output row (- at first))
+    (write-byte output 94)
+    (match (> end (+ at 1))
+      (true
+        (let ((count u64 (- end (+ at 1))))
+          (do
+            (memory:memset (cast (pointer void) row) 126 count)
+            (output row count))))
+      (false unit))
+    (write-text output "\n")))
+
+(base:function draw-excerpt
+  ((output writer) (site location) (source data:view) (line-start u64) (at u64))
+  unit
+  (let
+    ((clipped-left bool (> (- at line-start) 64))
+     (first u64 (match clipped-left (true (- at 64)) (false line-start)))
+     (size u64 (field source length))
+     (limit u64 (match (> (- size at) 96) (true (+ at 96)) (false size)))
+     (last u64 (excerpt-end source at limit))
+     (end
+       u64
+       (match (< (field site end) last) (true (field site end)) (false last)))
+     (row (pointer u8) (cast (pointer u8) (memory:malloc 160))))
+    (do
+      (match (base:is-null row)
+        (true unit)
+        (false
+          (do
+            (match clipped-left (true (write-text output "...")) (false unit))
+            (excerpt-row row source first last false)
+            (output row (- last first))
+            (match
+              (base:and-then
+                (== last limit)
+                (< last size)
+                (base:not (newline-at source last)))
+              (true (write-text output "..."))
+              (false unit))
+            (write-text output "\n")
+            (match clipped-left (true (write-text output "   ")) (false unit))
+            (underline output row source first at end)
+            (memory:free (cast (pointer void) row))
+            unit))))))
+
+(base:function excerpt ((output writer) (site location)) unit
+  (let
+    ((source data:view (field site source))
+     (column u64 (field site column))
+     (at u64 (field site start)))
+    (match
+      (base:or-else
+        (base:is-null (field source bytes))
+        (> at (field source length))
+        (== column 0)
+        (> (- column 1) at))
+      (true unit)
+      (false
+        (let ((first u64 (- at (- column 1))))
+          ; The LF half of a CRLF already belongs to the following line.
+          (match
+            (base:and-then
+              (== at first)
+              (> at 0)
+              (< at (field source length))
+              (== (view-byte source at) 10)
+              (== (view-byte source (- at 1)) 13))
+            (true (draw-excerpt output site source (+ at 1) (+ at 1)))
+            (false (draw-excerpt output site source first at))))))))
+
+(base:function render-entry ((output writer) (item entry)) unit
+  (let ((site location (field item site)) (path (pointer u8) (field site path)))
+    (do
+      (match (base:is-null path)
+        (true unit)
+        (false
+          (do
+            (write-text output path)
+            (write-text output ":")
+            (write-number output (field site line))
+            (write-text output ":")
+            (write-number output (field site column))
+            (write-text output ": "))))
+      (write-text output (field item severity))
+      (write-text output "[")
+      (write-text output (field item code))
+      (write-text output "]: ")
+      (write-line output (field item message))
+      (match (base:is-null path) (true unit) (false (excerpt output site))))))
+
+(base:function render-notes ((output writer) (notes (pointer void))) unit
+  (match (base:is-null notes)
+    (true unit)
+    (false
+      (let ((related note (deref (cast (pointer note) notes))))
+        (do
+          (render-entry output (field related item))
+          (render-notes output (field related next)))))))
+
+(base:function render-text ((value (pointer diagnostic)) (output writer)) unit
+  (let
+    ((item entry (field (deref value) primary))
+     (detail data:view (field (deref value) detail)))
+    (do
+      ; Keep the standalone CLI synopsis in its existing format.
+      (match (cstring:strcmp (field item code) "command-usage")
+        (0 (write-line output (field item message)))
+        (_ (render-entry output item)))
+      (match (field detail length) (0 unit) (_ (write-line output detail)))
+      (render-notes output (field (deref value) notes)))))
+
+(base:function dispatch ((value (pointer diagnostic))) unit
+  (let ((selected formatter (cast formatter selected-formatter)))
+    (match (base:is-null selected)
+      (true (render-text value write-stderr))
+      (false (selected value write-stderr)))))
+
+(base:function report
+  ((severity (pointer u8))
+   (code (pointer u8))
+   (message (pointer u8))
+   (detail data:view)) unit
+  (let
+    ((value
+       diagnostic
+       (diagnostic
+         (entry severity code (string-view message) (no-location))
+         nil
+         detail)))
+    (dispatch (& value))))
+
+(base:function read-capture
+  ((input i32) (bytes (pointer u8)) (start i64) (length u64) (used u64)) u64
+  (match (== used length)
+    (true used)
+    (false
+      (let
+        ((remaining u64 (- length used))
+         (chunk u64 (match (> remaining 65536) (true 65536) (false remaining)))
+         (offset i64 (base:convert used))
+         (count
+           i64
+           (read-at
+             input
+             (cast (pointer void) (pointer-offset bytes used))
+             chunk
+             (+ start offset))))
+        (base:cond
+          ((> count 0)
+           (let ((size u64 (base:convert count)))
+             (read-capture input bytes start length (+ used size))))
+          ((base:and-then (== count -1) (== (last-error) c:EINTR))
+           (read-capture input bytes start length used))
+          (true used))))))
+
+(base:function drain-capture () unit
+  (let
+    ((input i32 (tool-output:descriptor capture-file))
+     (end i64 (fd:lseek input 0 c:SEEK-CUR))
+     (start i64 capture-offset))
+    (base:cond
+      ((< end 0)
+       (report
+         "note"
+         "tool-output-read-failed"
+         "cannot read captured LLVM output"
+         (string-view (cstring:strerror (last-error)))))
+      ((> end start)
+       (let
+         ((length u64 (base:convert (- end start)))
+          (bytes (pointer u8) (cast (pointer u8) (memory:malloc length)))
+          (used
+            u64
+            (match (base:is-null bytes)
+              (true 0)
+              (false (read-capture input bytes start length 0)))))
+         (do
+           (store capture-offset end)
+           (match used
+             (0 unit)
+             (_
+               (report
+                 "warning"
+                 "llvm-stderr"
+                 "LLVM wrote to stderr"
+                 (data:view bytes used))))
+           (memory:free (cast (pointer void) bytes))
+           (match (== used length)
+             (true unit)
+             (false
+               (report
+                 "note"
+                 "tool-output-read-failed"
+                 "cannot read captured LLVM output"
+                 (data:view nil 0)))))))
+      (true unit))))
+
+(base:function emit ((item entry) (notes (pointer void)) (detail data:view))
+  unit
+  (let ((value diagnostic (diagnostic item notes detail)))
+    (do
+      (match (base:is-null capture-file) (true unit) (false (drain-capture)))
+      (dispatch (& value)))))
+
+(base:function llvm-fatal ((reason (pointer u8))) unit
+  (do
+    (drain-capture)
+    (report "error" "llvm-fatal-error" reason (data:view nil 0))))
+
+(base:function capture-error ((message (pointer u8)) (reason i32)) i32
+  (do
+    (report
+      "error"
+      "llvm-stderr-capture-failed"
+      message
+      (string-view (cstring:strerror reason)))
+    2))
+
+(base:function capture-start () i32
+  (let ((saved i32 (fd:dup c:STDERR-FILENO)))
+    (match (< saved 0)
+      (true (capture-error "cannot capture LLVM stderr" (last-error)))
+      (false
+        (let
+          ((file (pointer types:file-stream) (tool-output:open))
+           (input i32 (tool-output:descriptor file)))
+          (match (base:and-then (>= input 0) (tool-output:redirect input))
+            (false
+              (let ((reason i32 (last-error)))
+                (do
+                  (tool-output:close file)
+                  (fd:close saved)
+                  (capture-error "cannot capture LLVM stderr" reason))))
+            (true
+              (do
+                (store output-fd saved)
+                (store capture-file file)
+                (store capture-offset 0)
+                (let
+                  ((handler (pointer (function ((pointer u8)) unit)) llvm-fatal))
+                  (do
+                    (install-fatal-handler (cast (pointer void) handler))
+                    unit))
+                0))))))))
+
+(base:function capture-end () unit
+  (do
+    (reset-fatal-handler)
+    (drain-capture)
+    (match (tool-output:redirect output-fd)
+      (false
+        (do
+          (process:exit
+            (capture-error "cannot restore compiler stderr" (last-error)))
+          unit))
+      (true
+        (do
+          (fd:close output-fd)
+          (tool-output:close capture-file)
+          (store output-fd c:STDERR-FILENO)
+          (store capture-file nil)
+          unit)))))
+
+; After redirecting the child to its own capture, release the parent's copies.
+(base:function close-capture-in-child () unit
+  (match (base:is-null capture-file)
+    (true unit)
+    (false
+      (do
+        (fd:close output-fd)
+        (fd:close (tool-output:descriptor capture-file))
+        unit))))
+
+(base:function loader-error
+  ((path (pointer u8))
+   (code (pointer u8))
+   (message (pointer u8))
+   (detail (pointer u8))) i32
+  (let
+    ((related
+       note
+       (note
+         (entry
+           "note"
+           "diagnostic-plugin-loader-detail"
+           (string-view detail)
+           (no-location))
+         nil))
+     (notes
+       (pointer void)
+       (match (base:is-null detail)
+         (true nil)
+         (false (cast (pointer void) (& related)))))
+     (value
+       diagnostic
+       (diagnostic
+         (entry "error" code (string-view message) (no-location))
+         notes
+         (string-view path))))
+    (do (render-text (& value) write-stderr) 2)))
+
+(base:function plugin-open-error ((path (pointer u8)) (detail (pointer u8))) i32
+  (loader-error
+    path
+    "diagnostic-plugin-open-failed"
+    "cannot open diagnostic formatter plugin"
+    detail))
+
+(base:function validate-plugin ((handle (pointer void)) (path (pointer u8))) i32
+  (let
+    ((lookup
+       entry-point
+       (do
+         (dlerror)
+         (cast entry-point (dlsym handle "verona_diagnostic_formatter"))))
+     (detail (pointer u8) (dlerror)))
+    (match (base:or (base:is-null lookup) (base:not (base:is-null detail)))
+      (true
+        (loader-error
+          path
+          "diagnostic-plugin-entry-missing"
+          "diagnostic formatter entry point is missing"
+          detail))
+      (false
+        (let ((api (pointer formatter-api) (lookup)))
+          (match
+            (base:or-else
+              (base:is-null api)
+              (base:not (== (field (deref api) version) (cast u32 1)))
+              (base:is-null (field (deref api) format)))
+            (true
+              (loader-error
+                path
+                "diagnostic-plugin-abi-mismatch"
+                "incompatible diagnostic formatter ABI (expected version 1)"
+                nil))
+            (false
+              (do
+                (store loaded-library handle)
+                (store
+                  selected-formatter
+                  (cast (pointer void) (field (deref api) format)))
+                0))))))))
+
+(base:function load ((path (pointer u8))) i32
+  ; Resolve the explicit path before calling the platform loader.
+  (let ((absolute (pointer u8) (realpath path nil)))
+    (match (base:is-null absolute)
+      (true (plugin-open-error path (cstring:strerror (last-error))))
+      (false
+        (let ((handle (pointer void) (dlopen absolute loader-flags)))
+          (do
+            (memory:free (cast (pointer void) absolute))
+            (match (base:is-null handle)
+              (true (plugin-open-error path (dlerror)))
+              (false
+                (let ((status i32 (validate-plugin handle path)))
+                  (do
+                    (match status (0 unit) (_ (do (dlclose handle) unit)))
+                    status))))))))))
+
+(base:function unload () unit
+  (match (base:is-null loaded-library)
+    (true unit)
+    (_
+      (do
+        (store selected-formatter nil)
+        (dlclose loaded-library)
+        (store loaded-library nil)
+        unit))))
+
+(base:function simple
+  ((severity (pointer u8)) (code (pointer u8)) (message (pointer u8))) unit
+  (emit
+    (entry severity code (string-view message) (no-location))
+    nil
+    (data:view nil 0)))
+
+(base:function buffer () data:data
+  (data:empty (system:create)))
+
+(base:function storage-failure () unit
+  (do
+    (simple
+      "error"
+      "compiler-storage-allocation-failed"
+      "cannot allocate compiler storage")
+    (process:exit 2)
+    unit))
+
+(base:function append-view ((out (pointer data:data)) (value data:view)) unit
+  (let ((start u64 (data:length (deref out))))
+    (match (allocator:checked-add-size start (field value length))
+      ((tuple false _) (storage-failure))
+      ((tuple _ size)
+       (match (data:resize out size)
+         ((ok)
+          (allocator:copy-bytes
+            (pointer-offset (data:bytes (deref out)) start)
+            (field value bytes)
+            (field value length)))
+         (_ (storage-failure)))))))
+
+(base:function append ((out (pointer data:data)) (text (pointer u8))) unit
+  (append-view out (string-view text)))
+
+(base:function digits ((out (pointer data:data)) (value u64)) unit
+  (do
+    (match (>= value 10) (true (digits out (/ value 10))) (false unit))
+    (match (data:append out (base:convert (+ 48 (- value (* (/ value 10) 10)))))
+      ((ok) unit)
+      (_ (storage-failure)))))
+
+(export
+  location
+  entry
+  note
+  load
+  unload
+  capture-start
+  capture-end
+  close-capture-in-child
+  string-view
+  no-location
+  emit
+  simple
+  buffer
+  append-view
+  append
+  digits)

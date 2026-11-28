@@ -208,7 +208,8 @@
           (analysis-depth c tree start half depth)
           (analysis-depth c tree (+ start half) (- count half) depth))))))
 
-(base:function reader-error ((c m:context) (offset u64) (code u64)) unit
+(base:function reader-error ((c m:context) (offset u64) (length u64) (code u64))
+  unit
   (let
     ((description
        (tuple (pointer u8) (pointer u8))
@@ -267,7 +268,12 @@
            (tuple
              "compiler-storage-allocation-failed"
              "compiler storage allocation failed")))))
-    (m:error-at c offset (tuple-get description 0) (tuple-get description 1))))
+    (m:error-range
+      c
+      offset
+      length
+      (tuple-get description 0)
+      (tuple-get description 1))))
 
 (base:function run-with-features
   ((c m:context) (dump bool) (features syntax:features)) u64
@@ -290,12 +296,14 @@
       (match code
         (0 unit)
         (_
-          (let ((offset u64 (field (field diagnostic location) start)))
+          (let
+            ((offset u64 (field (field diagnostic location) start))
+             (length u64 (field (field diagnostic location) length)))
             (do
               (syntax:destroy (& tree))
               (names:names-destroy (& table))
               (arena:destroy (& memory))
-              (reader-error c offset code)))))
+              (reader-error c offset length code)))))
       (let
         ((result
            u64

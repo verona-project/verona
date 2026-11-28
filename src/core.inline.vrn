@@ -138,20 +138,21 @@
                     (_ (remaining c owner (field v target)))))
                 (false unit)
                 (true
-                  (do
-                    (m:location c (field v start))
-                    (match disabled
-                      (true
-                        (m:diagnostic
-                          "note"
-                          "forced-inlining-disabled"
-                          "forced inlining is inactive at -O0"))
-                      (false
-                        (m:diagnostic
-                          "note"
-                          "forced-inlining-incomplete"
-                          "forced inlining left direct calls (recursion or LLVM constraints)")))
-                    unit)))))
+                  (match disabled
+                    (true
+                      (m:diagnostic-at
+                        c
+                        id
+                        "note"
+                        "forced-inlining-disabled"
+                        "forced inlining is inactive at -O0"))
+                    (false
+                      (m:diagnostic-at
+                        c
+                        id
+                        "note"
+                        "forced-inlining-incomplete"
+                        "forced inlining left direct calls (recursion or LLVM constraints)")))))))
           (remarks c owner (m:next c id) all disabled))))))
 
 (export apply-directives remarks)

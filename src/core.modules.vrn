@@ -1,5 +1,6 @@
 (import base)
 (import core.model :as m)
+(import core.diagnostic :as diag)
 (import core.reader :as reader)
 (import core.configuration :as config)
 (import core.source :as source)
@@ -14,7 +15,6 @@
 (import libc.stdio :as stdio)
 (import libc.types :as types)
 (import libc.string :as cstring)
-(import libc.constants :as lconstants)
 
 ; Private host boundary: realpath writes at most PATH_MAX bytes (<=4096 on our targets).
 (base:external-function
@@ -265,17 +265,22 @@
   (let ((roots paths-array (deref (field l roots))))
     (match (>= index (paths-length roots))
       (true
-        (do
-          (match site
-            (0 unit)
-            (_ (m:location (context l) (field (m:at (context l) site) start))))
-          (m:diagnostic-start "error" "module-not-found")
-          (m:text lconstants:STDERR-FILENO name)
-          (m:text
-            lconstants:STDERR-FILENO
-            ": module not found (cannot resolve module path)\n")
-          (m:abort)
-          ""))
+        (let ((message data:data (diag:buffer)))
+          (do
+            (diag:append (& message) name)
+            (diag:append
+              (& message)
+              ": module not found (cannot resolve module path)")
+            (diag:emit
+              (diag:entry
+                "error"
+                "module-not-found"
+                (data:borrow message)
+                (m:site (context l) site))
+              nil
+              (data:view nil 0))
+            (m:abort)
+            "")))
       (false
         (let
           ((root
@@ -539,18 +544,25 @@
           (do
             (match (field (file l id) state)
               ((loading)
-               (do
-                 (m:location (context l) (field (m:at (context l) site) start))
-                 (m:diagnostic-start "error" "import-cycle")
-                 (m:text lconstants:STDERR-FILENO "import cycle: ")
-                 (cycle-names
-                   l
-                   id
-                   (m:modules-length
-                     (deref (field (deref (field l session)) files))))
-                 (m:text lconstants:STDERR-FILENO name)
-                 (m:text lconstants:STDERR-FILENO "\n")
-                 (m:abort)))
+               (let ((message data:data (diag:buffer)))
+                 (do
+                   (diag:append (& message) "import cycle: ")
+                   (cycle-names
+                     (& message)
+                     l
+                     id
+                     (m:modules-length
+                       (deref (field (deref (field l session)) files))))
+                   (diag:append (& message) name)
+                   (diag:emit
+                     (diag:entry
+                       "error"
+                       "import-cycle"
+                       (data:borrow message)
+                       (m:site (context l) site))
+                     nil
+                     (data:view nil 0))
+                   (m:abort))))
               (_ unit))
             id))))))
 
@@ -574,13 +586,21 @@
     (match (valid-module-name (data:view name (cstring:strlen name)))
       (true unit)
       (false
-        (do
-          (m:diagnostic-start "error" "empty-module-name-component")
-          (m:text lconstants:STDERR-FILENO name)
-          (m:text
-            lconstants:STDERR-FILENO
-            ": module name contains an empty component\n")
-          (m:abort))))
+        (let ((message data:data (diag:buffer)))
+          (do
+            (diag:append (& message) name)
+            (diag:append
+              (& message)
+              ": module name contains an empty component")
+            (diag:emit
+              (diag:entry
+                "error"
+                "empty-module-name-component"
+                (data:borrow message)
+                (diag:no-location))
+              nil
+              (data:view nil 0))
+            (m:abort)))))
     (m:add-record (context l) (node-atom) 0 0 0 0 0 0 0 0 0)
     (load l name 0 0)
     (let ((first u64 0) (tail u64 0)) (do (order l 0 (& tail) (& first)) first))))
@@ -631,7 +651,8 @@
                 (store (deref tail) (field v last))
                 unit))))))))
 
-(base:function cycle-names ((l loader) (i u64) (end u64)) unit
+(base:function cycle-names
+  ((out (pointer data:data)) (l loader) (i u64) (end u64)) unit
   (match (>= i end)
     (true unit)
     (false
@@ -639,10 +660,10 @@
         (match (field (file l i) state)
           ((loading)
            (do
-             (m:text lconstants:STDERR-FILENO (field (file l i) name))
-             (m:text lconstants:STDERR-FILENO " -> ")))
+             (diag:append out (field (file l i) name))
+             (diag:append out " -> ")))
           (_ unit))
-        (cycle-names l (+ i 1) end)))))
+        (cycle-names out l (+ i 1) end)))))
 
 (export
   access

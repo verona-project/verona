@@ -4,6 +4,7 @@
 (import core.numeric :as num)
 (import core.float :as float)
 (import core.model :as m)
+(import core.diagnostic :as diag)
 (import core.check :as check)
 (import core.storage :as mem)
 (import core.format :as format)
@@ -1444,40 +1445,57 @@
         "invalid-evaluator-input"
         "internal error: invalid checked evaluator input"))))
 
-(base:function trace-range
-  ((p m:context) (frames frames-array) (start u64) (count u64)) unit
-  (match count
-    (0 unit)
-    (1
-      (let ((f frame (frames-at frames start)))
+; Add frames oldest first so prepending yields the existing newest-first order.
+; The frame and its message stay live until the formatter returns.
+(base:function report-with-trace
+  ((p m:context)
+   (frames frames-array)
+   (index u64)
+   (primary diag:entry)
+   (notes (pointer void))) unit
+  (match (== index (frames-length frames))
+    (true (diag:emit primary notes (data:view nil 0)))
+    (false
+      (let
+        ((f frame (frames-at frames index)) (message data:data (diag:buffer)))
         (do
-          (m:diagnostic-start "note" "evaluator-call-frame")
-          (m:text constants:STDERR-FILENO "in ")
-          (m:write 2 (m:spelling p (m:next p (m:child p (field f function)))))
-          (m:text constants:STDERR-FILENO " at ")
-          (m:location p (field (m:at p (field f site)) start))
-          (m:text constants:STDERR-FILENO "\n"))))
-    (_
-      (let ((half u64 (/ count 2)))
-        (do
-          (trace-range p frames (+ start half) (- count half))
-          (trace-range p frames start half))))))
+          (diag:append (& message) "in ")
+          (diag:append-view
+            (& message)
+            (m:spelling p (m:next p (m:child p (field f function)))))
+          (let
+            ((related
+               diag:note
+               (diag:note
+                 (diag:entry
+                   "note"
+                   "evaluator-call-frame"
+                   (data:borrow message)
+                   (m:site p (field f site)))
+                 notes)))
+            (report-with-trace
+              p
+              frames
+              (+ index 1)
+              primary
+              (cast (pointer void) (& related))))
+          (data:destroy (& message)))))))
 
 (base:function report ((p m:context) (result outcome)) unit
   (let
     ((description
        (tuple (pointer u8) (pointer u8))
        (error-description (field result code))))
-    (do
-      (match (field result site)
-        (0 unit)
-        (_ (m:location p (field (m:at p (field result site)) start))))
-      (m:diagnostic "error" (tuple-get description 0) (tuple-get description 1))
-      (trace-range
-        p
-        (field result trace)
-        0
-        (frames-length (field result trace))))))
+    (report-with-trace
+      p
+      (field result trace)
+      0
+      (diag:entry
+        "error"
+        (tuple-get description 0)
+        (diag:string-view (tuple-get description 1))
+        (m:site p (field result site)))
+      nil)))
 
 (base:function signed-number ((value i64)) unit
   (let ((bits u64 (base:convert value)))

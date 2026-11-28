@@ -17,7 +17,8 @@ class ReaderTests(CompilerTestCase):
         self.assertEqual(result.stdout, "")
         self.assertEqual(
             result.stderr,
-            f"{self.source}:2:3: error[unexpected-closing-parenthesis]: unexpected closing parenthesis\n",
+            f"{self.source}:2:3: error[unexpected-closing-parenthesis]: unexpected closing parenthesis\n"
+            "  )\n  ^\n",
         )
 
     def test_native_platform_conditionals(self):
