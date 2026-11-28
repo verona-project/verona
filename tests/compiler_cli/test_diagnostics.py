@@ -1,12 +1,14 @@
 """Test the diagnostic stream and the public formatter ABI end to end."""
 
+import csv
+import io
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from .support import CompilerTestCase, FIXTURE_DIR
+from .support import CompilerTestCase, FIXTURE_DIR, REPO_ROOT
 
 
 COMMANDS = (
@@ -37,6 +39,85 @@ class DiagnosticTests(CompilerTestCase):
             if result.returncode:
                 raise RuntimeError(f"Could not build {name}: {result.stderr}")
             cls.plugins[name] = output
+        suffix = ".dylib" if sys.platform == "darwin" else ".so"
+        cls.csv_plugin = REPO_ROOT / "build/install/lib" / (
+            "libverona-csv-diagnostic-format" + suffix
+        )
+
+    def csv_rows(self, result):
+        return list(csv.DictReader(io.StringIO(result.stderr, newline="")))
+
+    def test_csv_diagnostic_plugin(self):
+        plugin = str(self.csv_plugin)
+        self.assertTrue(self.csv_plugin.is_file(), self.csv_plugin)
+
+        helper = self.root / "helper.vrn"
+        helper_source = "(export identity)\n(%function identity ((value i64)) i64 value)"
+        helper.write_text(helper_source)
+        main_source = "(import helper :as h)\n(%function main () i64 (h:identity true))"
+        self.source.write_text(main_source)
+        mismatch = self.invoke("check", self.source, "--diagnostic-plugin", plugin)
+        self.assertEqual(mismatch.returncode, 2, mismatch.stderr)
+        rows = self.csv_rows(mismatch)
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(list(rows[0]), [
+            "severity", "code", "path", "line", "column", "message", "notes"
+        ])
+        self.assertEqual((rows[0]["severity"], rows[0]["code"]),
+                         ("error", "type-mismatch"))
+        self.assertEqual(rows[0]["path"], str(self.source))
+        self.assertEqual(rows[0]["line"], "2")
+        self.assertEqual(rows[0]["column"],
+                         str(main_source.splitlines()[1].index("true") + 1))
+        self.assertIn(
+            f"{helper}:2:{helper_source.splitlines()[1].index('i64') + 1}: "
+            "expected type established here",
+            rows[0]["notes"],
+        )
+
+        self.source.write_text(
+            "(%function bad-one () i64 true)\n"
+            "(%function bad-two () i64 false)\n"
+            "(%function main () i64 0)"
+        )
+        multiple = self.invoke("check", self.source, "--diagnostic-plugin", plugin)
+        records = self.csv_rows(multiple)
+        self.assertEqual([row["code"] for row in records], [
+            "type-mismatch", "type-mismatch"
+        ])
+        self.assertEqual([row["line"] for row in records], ["1", "2"])
+
+        self.source.write_text(self.program("42"))
+        native_tool = self.root / "failing tool"
+        native_tool.write_text("#!/bin/sh\nprintf 'comma, quote \\\" and\\nline 2' >&2\nexit 1\n")
+        native_tool.chmod(0o755)
+        failed = self.invoke(
+            "compile", self.source, "--emit", "shared-library", "-o",
+            self.root / "artifact", "--diagnostic-plugin", plugin,
+            env=dict(os.environ, VERONA_CORE_CLANG=str(native_tool)),
+        )
+        self.assertEqual(failed.returncode, 2, failed.stderr)
+        rows = self.csv_rows(failed)
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["code"], "native-link-failed")
+        self.assertIn('comma, quote " and\nline 2', rows[0]["notes"])
+
+        malformed = self.invoke("not-a-command", "--diagnostic-plugin", plugin)
+        self.assertEqual(malformed.returncode, 2)
+        rows = self.csv_rows(malformed)
+        self.assertEqual([row["code"] for row in rows],
+                         ["unknown-command", "command-usage"])
+
+        clean = self.invoke("eval", self.source, "--diagnostic-plugin", plugin)
+        self.assertEqual((clean.returncode, clean.stdout, clean.stderr), (0, "42\n", ""))
+
+        self.source.write_text("(%inline value)(%function value () i32 42)(native-export value)")
+        artifact = self.root / "note.o"
+        noted = self.invoke("compile", self.source, "--emit", "object", "-o", artifact,
+                            "--diagnostic-plugin", plugin)
+        self.assertEqual((noted.returncode, noted.stdout), (0, ""), noted.stderr)
+        self.assertTrue(artifact.is_file())
+        self.assertEqual(self.csv_rows(noted)[0]["severity"], "note")
 
     def invoke(self, *args, **kwargs):
         return subprocess.run(

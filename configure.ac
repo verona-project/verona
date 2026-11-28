@@ -5,6 +5,12 @@ AC_CONFIG_AUX_DIR([build-aux])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 AC_PROG_INSTALL
 AC_PROG_MKDIR_P
+dnl The self-hosted compiler selects the platform's shared-library format.
+AS_CASE([`uname -s`],
+  [Darwin], [SHLIB_EXT=dylib],
+  [Linux], [SHLIB_EXT=so],
+  [AC_MSG_ERROR([the CSV diagnostic formatter supports Linux and macOS])])
+AC_SUBST([SHLIB_EXT])
 
 dnl The compiler is self-hosted.  A development checkout may use its local
 dnl seed, while a source release must name the recorded compatible seed.

@@ -11,6 +11,9 @@ VERONA_CORE_CLANG = @VERONA_CORE_CLANG@
 VERONA_CORE_AR = @VERONA_CORE_AR@
 VERONA_LINKER = @VERONA_LINKER@
 VERONA_AR = @VERONA_AR@
+SHLIB_EXT = @SHLIB_EXT@
+CSV_DIAGNOSTIC_PLUGIN = $(abs_top_builddir)/build/plugins/libverona-csv-diagnostic-format.$(SHLIB_EXT)
+CSV_DIAGNOSTIC_PLUGIN_INSTALLED = $(abs_top_builddir)/build/install/lib/libverona-csv-diagnostic-format.$(SHLIB_EXT)
 
 # Preserve any caller-supplied paths while ensuring the configured LLVM shared
 # library is found by both the compiler and executables produced during tests.
@@ -28,7 +31,7 @@ EXTRA_DIST = \
 	AGENTS.md flake.nix flake.lock license readme.md verona.build \
 	docs assets src tests projects
 
-.PHONY: help build formatter project compiler-tests check test test-python test-verona
+.PHONY: help build formatter project compiler-tests check test test-python test-verona csv-diagnostic-plugin install-csv-diagnostic-plugin
 
 help:
 	@printf '%s\n' 'Verona self-hosted compiler commands:'
@@ -60,10 +63,22 @@ compiler-tests: $(VERONA) $(verona_srcdir)/verona.build $(verona_sources) $(comp
 	@$(MKDIR_P) $(abs_top_builddir)/build/compiler-tests
 	cd $(verona_srcdir) && $(VERONA) build compiler-tests $(abs_top_builddir)/build/compiler-tests
 
-test-python: $(VERONA) $(VERONA_PROJECT)
+test-python: $(VERONA) $(VERONA_PROJECT) install-csv-diagnostic-plugin
 	cd $(verona_srcdir) && VERONA_REFERENCE=$(VERONA_SEED) $(PYTHON) tests/test_core.py $(VERONA)
 	cd $(verona_srcdir) && $(PYTHON) tests/shared_suite.py $(VERONA)
 	cd $(verona_srcdir) && $(PYTHON) tests/test_project.py $(VERONA_PROJECT)
+
+$(CSV_DIAGNOSTIC_PLUGIN): $(VERONA) $(verona_srcdir)/projects/csv-diagnostic-format/verona.build $(verona_srcdir)/projects/csv-diagnostic-format/src/csv-diagnostic-format.vrn $(verona_sources)
+	@$(MKDIR_P) $(@D)
+	cd $(verona_srcdir)/projects/csv-diagnostic-format && $(VERONA) build verona-csv-diagnostic-format $(abs_top_builddir)/build/plugins
+
+csv-diagnostic-plugin: $(CSV_DIAGNOSTIC_PLUGIN)
+
+$(CSV_DIAGNOSTIC_PLUGIN_INSTALLED): $(CSV_DIAGNOSTIC_PLUGIN)
+	@$(MKDIR_P) $(@D)
+	$(INSTALL_DATA) $< $@
+
+install-csv-diagnostic-plugin: $(CSV_DIAGNOSTIC_PLUGIN_INSTALLED)
 
 test-verona: compiler-tests
 	$(abs_top_builddir)/build/compiler-tests/compiler-tests
@@ -71,17 +86,21 @@ test-verona: compiler-tests
 check: test-python test-verona
 test: check
 
-install-exec-local: build
+install-exec-local: build csv-diagnostic-plugin
 	$(MKDIR_P) '$(DESTDIR)$(bindir)'
+	$(MKDIR_P) '$(DESTDIR)$(libdir)'
 	$(INSTALL_PROGRAM) $(VERONA) '$(DESTDIR)$(bindir)/verona'
 	$(INSTALL_PROGRAM) $(VERONA_FORMATTER) '$(DESTDIR)$(bindir)/verona-formatter'
 	$(INSTALL_PROGRAM) $(VERONA_PROJECT) '$(DESTDIR)$(bindir)/verona-project'
+	$(INSTALL_DATA) $(CSV_DIAGNOSTIC_PLUGIN) '$(DESTDIR)$(libdir)/libverona-csv-diagnostic-format.$(SHLIB_EXT)'
 
 uninstall-local:
 	$(RM) '$(DESTDIR)$(bindir)/verona' '$(DESTDIR)$(bindir)/verona-formatter' '$(DESTDIR)$(bindir)/verona-project'
+	$(RM) '$(DESTDIR)$(libdir)/libverona-csv-diagnostic-format.$(SHLIB_EXT)'
 
 clean-local:
 	$(RM) $(VERONA) $(VERONA_FORMATTER) $(VERONA_PROJECT)
+	$(RM) $(CSV_DIAGNOSTIC_PLUGIN) $(CSV_DIAGNOSTIC_PLUGIN_INSTALLED)
 	$(RM) $(abs_top_builddir)/build/compiler-tests/compiler-tests
 
 format:

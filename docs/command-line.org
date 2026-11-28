@@ -99,6 +99,26 @@ formatted bytes to the supplied =write= callback, which writes to the
 compiler's standard error. The formatter should return normally and use this
 callback for all its output.
 
+The repository also provides =libverona-csv-diagnostic-format.so= on Linux
+and =libverona-csv-diagnostic-format.dylib= on macOS. Its columns are
+=severity,code,path,line,column,message,notes=. Line and byte-column
+coordinates are one-based; location fields are empty when absent. Related
+notes are joined with line feeds in the final cell and include their source
+location. Captured native-tool detail is included in that cell. Use Python's
+standard CSV reader to filter by stable code:
+
+#+begin_src python
+import csv
+import sys
+
+for diagnostic in csv.DictReader(sys.stdin):
+    if diagnostic["code"] == "type-mismatch":
+        print(diagnostic["path"], diagnostic["message"])
+#+end_src
+
+The plugin writes a header with the first diagnostic, so clean invocations
+leave standard error empty.
+
 ** Source inspection and analysis commands
 
 | Command | Effect | Accepted options |

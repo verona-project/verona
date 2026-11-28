@@ -1,0 +1,9 @@
+(shared-library
+  verona-csv-diagnostic-format
+  (root csv-diagnostic-format)
+  (module-path "src")
+  (module-path "../base/src")
+  (module-path "../foundation/src")
+  (module-path "../libc/src")
+  (target native)
+  (optimize 0))

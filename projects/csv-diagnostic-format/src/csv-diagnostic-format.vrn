@@ -1,0 +1,170 @@
+(import base)
+(import allocator)
+(import data :as d)
+(import libc.memory :as memory)
+(import system_allocator :as system)
+
+(base:type location
+  (product (path (pointer u8)) (line u64) (column u64) (start u64) (end u64) (source d:view)))
+
+(base:type entry
+  (product (severity (pointer u8)) (code (pointer u8)) (message d:view) (site location)))
+
+(base:type note (product (item entry) (next (pointer void))))
+
+(base:type diagnostic (product (primary entry) (notes (pointer void)) (detail d:view)))
+
+(base:type writer (pointer (function ((pointer u8) u64) unit)))
+
+(base:type formatter (pointer (function ((pointer diagnostic) writer) unit)))
+
+(base:type api (product (version u32) (format formatter)))
+
+(base:variable header-written bool false)
+
+(base:variable descriptor (pointer api) nil)
+
+(base:function cstring-length ((value (pointer u8)) (index u64)) u64
+  (match (== (deref (pointer-offset value index)) 0)
+    (true index)
+    (false (cstring-length value (+ index 1)))))
+
+(base:function cstring-view ((value (pointer u8))) d:view
+  (match (base:is-null value) (true (d:view nil 0)) (false (d:view value (cstring-length value 0)))))
+
+(base:function append-byte ((output (pointer d:data)) (byte u8)) unit
+  (match (d:append output byte) ((ok) unit) (_ unit)))
+
+(base:function append-view ((output (pointer d:data)) (value d:view)) unit
+  (let ((start u64 (d:length (deref output))))
+    (match (allocator:checked-add-size start (field value length))
+      ((tuple false _) unit)
+      ((tuple true size)
+       (match (d:resize output size)
+         ((ok)
+          (allocator:copy-bytes
+            (pointer-offset (d:bytes (deref output)) start)
+            (field value bytes)
+            (field value length)))
+         (_ unit)))
+      (_ unit))))
+
+(base:function append-text ((output (pointer d:data)) (value (pointer u8))) unit
+  (append-view output (cstring-view value)))
+
+(base:function append-number ((output (pointer d:data)) (value u64)) unit
+  (do
+    (match (>= value 10) (true (append-number output (/ value 10))) (false unit))
+    (append-byte output (base:convert (+ 48 (- value (* (/ value 10) 10)))))))
+
+(base:function view-byte ((value d:view) (index u64)) u8
+  (deref (pointer-offset (field value bytes) index)))
+
+(base:function needs-quotes ((value d:view) (index u64)) bool
+  (match (== index (field value length))
+    (true false)
+    (false
+      (let ((byte u8 (view-byte value index)))
+        (match (base:or (== byte 44) (== byte 34) (== byte 10) (== byte 13))
+          (true true)
+          (false (needs-quotes value (+ index 1))))))))
+
+(base:function append-escaped ((output (pointer d:data)) (value d:view) (index u64)) unit
+  (match (== index (field value length))
+    (true unit)
+    (false
+      (let ((byte u8 (view-byte value index)))
+        (do
+          (match (== byte 34) (true (append-byte output 34)) (false unit))
+          (append-byte output byte)
+          (append-escaped output value (+ index 1)))))))
+
+(base:function append-csv-field ((output (pointer d:data)) (value d:view)) unit
+  (match (needs-quotes value 0)
+    (false (append-view output value))
+    (true (do (append-byte output 34) (append-escaped output value 0) (append-byte output 34)))))
+
+(base:function append-field ((output (pointer d:data)) (value d:view)) unit
+  (do (append-byte output 44) (append-csv-field output value)))
+
+(base:function append-number-field ((output (pointer d:data)) (path (pointer u8)) (value u64)) unit
+  (do
+    (append-byte output 44)
+    (match (base:is-null path) (true unit) (false (append-number output value)))))
+
+(base:function append-note-entry ((output (pointer d:data)) (item entry)) unit
+  (let ((site location (field item site)))
+    (do
+      (match (base:is-null (field site path))
+        (true unit)
+        (false
+          (do
+            (append-text output (field site path))
+            (append-byte output 58)
+            (append-number output (field site line))
+            (append-byte output 58)
+            (append-number output (field site column))
+            (append-text output ": "))))
+      (append-view output (field item message)))))
+
+(base:function append-notes ((output (pointer d:data)) (notes (pointer void)) (first bool)) unit
+  (match (base:is-null notes)
+    (true unit)
+    (false
+      (let ((related note (deref (cast (pointer note) notes))))
+        (do
+          (match first (true unit) (false (append-byte output 10)))
+          (append-note-entry output (field related item))
+          (append-notes output (field related next) false))))))
+
+(base:function append-detail ((output (pointer d:data)) (detail d:view) (has-notes bool)) unit
+  (match (== (field detail length) 0)
+    (true unit)
+    (false
+      (do (match has-notes (true (append-byte output 10)) (false unit)) (append-view output detail)))))
+
+(base:function csv-format ((value (pointer diagnostic)) (write writer)) unit
+  (let
+    ((item entry (field (deref value) primary))
+     (site location (field item site))
+     (notes-output d:data (d:empty (system:create)))
+     (row d:data (d:empty (system:create)))
+     (path d:view (cstring-view (field site path))))
+    (do
+      (append-notes (address-of notes-output) (field (deref value) notes) true)
+      (append-detail
+        (address-of notes-output)
+        (field (deref value) detail)
+        (base:not (== (d:length notes-output) 0)))
+      (match header-written
+        (true unit)
+        (false (append-text (address-of row) "severity,code,path,line,column,message,notes\n")))
+      (append-csv-field (address-of row) (cstring-view (field item severity)))
+      (append-field (address-of row) (cstring-view (field item code)))
+      (append-field (address-of row) path)
+      (append-number-field (address-of row) (field site path) (field site line))
+      (append-number-field (address-of row) (field site path) (field site column))
+      (append-field (address-of row) (field item message))
+      (append-field (address-of row) (d:borrow notes-output))
+      (append-byte (address-of row) 10)
+      (match header-written (true unit) (false (store header-written true)))
+      (write (d:bytes row) (d:length row))
+      (d:destroy (address-of row))
+      (d:destroy (address-of notes-output)))))
+
+(base:function provide-formatter () (pointer void)
+  (match (base:is-null descriptor)
+    (false (cast (pointer void) descriptor))
+    (true
+      (let ((slot (pointer api) (cast (pointer api) (memory:malloc 16))))
+        (match (base:is-null slot)
+          (true nil)
+          (false
+            (do
+              (store (deref slot) (api 1 csv-format))
+              (store descriptor slot)
+              (cast (pointer void) slot))))))))
+
+(native-export provide-formatter "verona_diagnostic_formatter")
+
+(export csv-format provide-formatter)
